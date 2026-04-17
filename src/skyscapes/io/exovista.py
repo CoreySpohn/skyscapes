@@ -17,21 +17,14 @@ import numpy as np
 from astropy.io.fits import getdata, getheader
 from hwoutils.constants import (
     AU2m,
-    G,
     G_si,
     Mearth2kg,
     Msun2kg,
     mas2arcsec,
-    two_pi,
     um2nm,
 )
 from hwoutils.conversions import au_per_yr_to_m_per_s, decimal_year_to_jd
-from orbix.equations.orbit import (
-    mean_anomaly_tp,
-    mean_motion,
-    period_n,
-    state_vector_to_keplerian,
-)
+from orbix.equations.orbit import state_vector_to_keplerian
 from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.system.orbit import KeplerianOrbit
 
@@ -76,8 +69,14 @@ def _load_single_planet(
     idx: int,
     star: SpectrumStar,
     wavelengths_nm: jnp.ndarray,
+    trig_solver,
 ) -> tuple[Planet, float]:
     """Load one planet and return ``(Planet, t0_d)``.
+
+    The contrast grid is indexed by phase angle β = arccos(r_z / |r|),
+    not mean anomaly. β is computed at load time with the same
+    ``trig_solver`` the runtime ``System`` uses, so the build-time axis
+    matches the query-time axis.
 
     WARNING — ExoVista frame convention (see Plan-2 "Known Limitations"):
     ExoVista FITS columns 9-11 / 12-14 are **barycentric** position/velocity
@@ -85,13 +84,7 @@ def _load_single_planet(
     are expressed in the system **midplane** frame. This loader preserves the
     legacy behavior by passing those vectors straight through, which is
     bit-exact vs. the legacy skyscapes Planet for systems where the midplane
-    coincides with the sky frame. When it doesn't, downstream orbit
-    propagators (orbix, EXOSIMS) will silently place the planet at the wrong
-    (x, y) on sky. Plan 5 fixes this by applying a midplane→sky rotation
-    (cf. ``exoverses.exovista.system.ExovistaSystem(convert=True)`` and
-    ``exoverses.util.misc.gen_rotate_to_sky_coords``) and recomputing
-    (Ω, i, ω, M) from the rotated state vectors before constructing the
-    Keplerian orbit.
+    coincides with the sky frame. Plan 5 fixes the frame issue.
     """
     with open(fits_file, "rb") as f:
         obj_data, obj_header = getdata(f, ext=5 + idx, header=True, memmap=False)
@@ -125,22 +118,26 @@ def _load_single_planet(
         t0_d=jnp.array([t0]),
     )
 
-    n = mean_motion(orbit.a_AU, G * star.Ms_kg)
-    T_d = period_n(n)
-    tp_d = orbit.t0_d - T_d * orbit.M0_rad / two_pi
-    M_at_t = mean_anomaly_tp(times_jd, n[0], tp_d[0]) % two_pi
-    mean_anom_deg = jnp.rad2deg(M_at_t)
+    # β(t_i) per FITS input time, using the same solver the runtime uses.
+    _r_AU, phase_angle_rad, _dist_AU = orbit.propagate(
+        trig_solver, times_jd, Ms_kg=star.Ms_kg
+    )
+    beta_deg = jnp.rad2deg(phase_angle_rad[0])  # (T,), already in [0, 180]
 
-    sort_idx = jnp.argsort(mean_anom_deg)
-    mean_anom_sorted = mean_anom_deg[sort_idx]
+    # Sort by β. Duplicates are fine for interpolation (axisymmetric
+    # atmosphere ⇒ same β ⇒ same contrast).
+    sort_idx = jnp.argsort(beta_deg)
+    beta_sorted = beta_deg[sort_idx]
     contrast_sorted = contrast_data[:, sort_idx]
-    regular_grid = jnp.linspace(0.0, 360.0, 100)
+
+    # Regular β axis on [0, 180].
+    regular_grid = jnp.linspace(0.0, 180.0, 100)
     xq, yq = jnp.meshgrid(wavelengths_nm, regular_grid, indexing="ij")
     contrast_grid = interpax.interp2d(
         xq.flatten(),
         yq.flatten(),
         wavelengths_nm,
-        mean_anom_sorted,
+        beta_sorted,
         contrast_sorted,
         method="linear",
         extrap=True,
@@ -246,11 +243,11 @@ def from_exovista(
     wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
 
     star = _load_star(fits_file, fits_ext=4)
+    solver = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
     planets = tuple(
-        _load_single_planet(fits_file, i, star, wavelengths_nm)[0]
+        _load_single_planet(fits_file, i, star, wavelengths_nm, solver)[0]
         for i in planet_indices
     )
     disk = _load_disk(fits_file, disk_ext)
 
-    solver = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
     return System(star=star, planets=planets, disk=disk, trig_solver=solver)
