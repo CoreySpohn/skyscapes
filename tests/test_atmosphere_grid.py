@@ -39,8 +39,8 @@ def test_grid_returns_grid_value_on_nodes():
     )
     # Interior phase in radians: 90 deg = pi/2
     result = atm.reflected_spectrum(
-        phase_angle_rad=jnp.array([jnp.pi / 2]),
-        dist_AU=jnp.array([1.0]),  # ignored by GridAtmosphere
+        phase_angle_rad=jnp.array([[jnp.pi / 2]]),
+        dist_AU=jnp.array([[1.0]]),  # ignored by GridAtmosphere
         wavelength_nm=jnp.array([600.0]),
     )
     assert jnp.allclose(result, 0.1, rtol=1e-6)
@@ -65,8 +65,8 @@ def test_grid_multiple_planets_independent():
         contrast_grid=grids,
     )
     result = atm.reflected_spectrum(
-        phase_angle_rad=jnp.array([jnp.pi / 3, jnp.pi / 3]),
-        dist_AU=jnp.array([1.0, 1.0]),
+        phase_angle_rad=jnp.array([[jnp.pi / 3], [jnp.pi / 3]]),
+        dist_AU=jnp.array([[1.0], [1.0]]),
         wavelength_nm=jnp.array([600.0]),
     )
     assert jnp.allclose(result[0], 0.1, rtol=1e-6)

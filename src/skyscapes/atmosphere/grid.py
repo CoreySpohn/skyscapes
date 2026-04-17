@@ -36,19 +36,15 @@ class GridAtmosphere(AbstractAtmosphere):
         """Per-planet contrast at (wavelength, phase).
 
         Args:
-            phase_angle_rad: Phase angle per planet [rad]. Shape ``(K,)``
-                or ``(K, T)``.
-            dist_AU: Ignored (grid already encodes flux ratio).
+            phase_angle_rad: Phase angle per planet [rad], shape ``(K, T)``.
+            dist_AU: Shape ``(K, T)``; ignored (grid encodes flux ratio).
             wavelength_nm: Scalar wavelength.
 
         Returns:
-            Contrast, shape matching ``phase_angle_rad``.
+            Contrast, shape ``(K, T)``.
         """
-        del dist_AU
         wl_scalar = jnp.asarray(wavelength_nm)
         phase_deg = jnp.rad2deg(phase_angle_rad) % 360.0
-        # Promote shape (K,) → (K, 1) for uniform vmap handling.
-        phase_2d = phase_deg if phase_deg.ndim == 2 else phase_deg[:, None]
 
         def per_planet(grid_k, phase_row):
             # grid_k: (n_wl, n_phase); phase_row: (T,)
@@ -63,8 +59,4 @@ class GridAtmosphere(AbstractAtmosphere):
                 extrap=True,
             )
 
-        result = jax.vmap(per_planet)(self.contrast_grid, phase_2d)
-        # Squeeze the synthetic T axis if the caller passed (K,).
-        if phase_deg.ndim == 1:
-            result = result.squeeze(axis=-1)
-        return result
+        return jax.vmap(per_planet)(self.contrast_grid, phase_deg)

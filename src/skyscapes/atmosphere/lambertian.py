@@ -14,17 +14,6 @@ def _lambert_phase(phase_angle_rad: Array) -> Array:
     return (sin_b + (jnp.pi - phase_angle_rad) * cos_b) / jnp.pi
 
 
-def _broadcast_over_leading(x: Array, target: Array) -> Array:
-    """Reshape a (K,)-shaped x by appending singleton axes to match target's rank.
-
-    ``target.ndim`` is static at trace time, so the reshape tuple is also static.
-    """
-    n_extra = target.ndim - x.ndim
-    if n_extra <= 0:
-        return x
-    return x.reshape(x.shape + (1,) * n_extra)
-
-
 class LambertianAtmosphere(AbstractAtmosphere):
     """Lambertian reflector.
 
@@ -44,12 +33,11 @@ class LambertianAtmosphere(AbstractAtmosphere):
     ) -> Array:
         """Contrast = Ag · Φ(β) · (Rp/r)^2.  Wavelength-independent.
 
-        ``phase_angle_rad`` and ``dist_AU`` may be shape ``(K,)`` or
-        ``(K, T)``; the output matches their shape. ``wavelength_nm``
-        is part of the interface but ignored in the grey case.
+        ``phase_angle_rad`` and ``dist_AU`` are shape ``(K, T)``.
+        ``wavelength_nm`` is part of the interface but ignored in the
+        grey case.
         """
-        Rp_AU = self.Rp_Rearth * Rearth2AU
+        Rp_AU = (self.Rp_Rearth * Rearth2AU)[:, None]
+        Ag = self.Ag[:, None]
         phase = _lambert_phase(phase_angle_rad)
-        Ag = _broadcast_over_leading(self.Ag, phase)
-        Rp_b = _broadcast_over_leading(Rp_AU, phase)
-        return Ag * phase * (Rp_b / dist_AU) ** 2
+        return Ag * phase * (Rp_AU / dist_AU) ** 2

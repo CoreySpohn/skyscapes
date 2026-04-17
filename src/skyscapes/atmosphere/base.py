@@ -34,10 +34,10 @@ class AbstractAtmosphere(eqx.Module):
 
         Args:
             phase_angle_rad: Star-planet-observer phase angle ``beta``,
-                shape ``(K,)`` or broadcastable.
-            dist_AU: Star-planet distance, shape ``(K,)`` or broadcastable.
+                shape ``(K, T)`` (matching ``AbstractOrbit.propagate``).
+            dist_AU: Star-planet distance, shape ``(K, T)``.
             wavelength_nm: Wavelength, scalar or shape ``(W,)``.
 
         Returns:
-            Flux-ratio contrast, shape broadcast of the above.
+            Flux-ratio contrast, shape ``(K, T)``.
         """

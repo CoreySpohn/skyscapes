@@ -24,8 +24,8 @@ def test_lambertian_phase_zero_angle():
         Ag=jnp.array([0.3]),
     )
     contrast = lamb.reflected_spectrum(
-        phase_angle_rad=jnp.array([0.0]),
-        dist_AU=jnp.array([1.0]),
+        phase_angle_rad=jnp.array([[0.0]]),
+        dist_AU=jnp.array([[1.0]]),
         wavelength_nm=jnp.array([500.0]),
     )
     # contrast = Ag * phase(0) * (Rp/r)^2 = 0.3 * 1 * (Rearth2AU)^2
@@ -40,8 +40,8 @@ def test_lambertian_phase_pi_is_dark():
         Ag=jnp.array([0.3]),
     )
     contrast = lamb.reflected_spectrum(
-        phase_angle_rad=jnp.array([jnp.pi]),
-        dist_AU=jnp.array([1.0]),
+        phase_angle_rad=jnp.array([[jnp.pi]]),
+        dist_AU=jnp.array([[1.0]]),
         wavelength_nm=jnp.array([500.0]),
     )
     assert jnp.allclose(contrast, 0.0, atol=1e-10)
@@ -54,13 +54,13 @@ def test_lambertian_inverse_square():
         Ag=jnp.array([0.3]),
     )
     c1 = lamb.reflected_spectrum(
-        phase_angle_rad=jnp.array([jnp.pi / 3]),
-        dist_AU=jnp.array([1.0]),
+        phase_angle_rad=jnp.array([[jnp.pi / 3]]),
+        dist_AU=jnp.array([[1.0]]),
         wavelength_nm=jnp.array([500.0]),
     )
     c2 = lamb.reflected_spectrum(
-        phase_angle_rad=jnp.array([jnp.pi / 3]),
-        dist_AU=jnp.array([2.0]),
+        phase_angle_rad=jnp.array([[jnp.pi / 3]]),
+        dist_AU=jnp.array([[2.0]]),
         wavelength_nm=jnp.array([500.0]),
     )
     assert jnp.allclose(c2 / c1, 0.25, rtol=1e-6)
@@ -73,13 +73,13 @@ def test_lambertian_wavelength_independent():
         Ag=jnp.array([0.3]),
     )
     c_blue = lamb.reflected_spectrum(
-        phase_angle_rad=jnp.array([jnp.pi / 4]),
-        dist_AU=jnp.array([1.0]),
+        phase_angle_rad=jnp.array([[jnp.pi / 4]]),
+        dist_AU=jnp.array([[1.0]]),
         wavelength_nm=jnp.array([400.0]),
     )
     c_red = lamb.reflected_spectrum(
-        phase_angle_rad=jnp.array([jnp.pi / 4]),
-        dist_AU=jnp.array([1.0]),
+        phase_angle_rad=jnp.array([[jnp.pi / 4]]),
+        dist_AU=jnp.array([[1.0]]),
         wavelength_nm=jnp.array([800.0]),
     )
     assert jnp.allclose(c_blue, c_red, rtol=1e-6)
@@ -120,9 +120,9 @@ def test_lambertian_matches_orbix_alpha_dmag():
         Ag=jnp.array([0.3]),
     )
     contrast = lamb.reflected_spectrum(
-        phase_angle_rad=phase_angle_rad[:, 0],
-        dist_AU=dist_AU[:, 0],
+        phase_angle_rad=phase_angle_rad,
+        dist_AU=dist_AU,
         wavelength_nm=jnp.array([500.0]),
     )
     dMag_new = -2.5 * jnp.log10(contrast + jnp.finfo(contrast.dtype).tiny)
-    assert jnp.allclose(dMag_new, dMag_orbix[:, 0], rtol=1e-6)
+    assert jnp.allclose(dMag_new, dMag_orbix, rtol=1e-6)
