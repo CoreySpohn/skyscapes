@@ -9,11 +9,13 @@ from skyscapes.atmosphere import AbstractAtmosphere, ParametricAtmosphere
 
 
 def test_parametric_is_abstract_atmosphere():
+    """ParametricAtmosphere satisfies the AbstractAtmosphere interface."""
     atm = ParametricAtmosphere(Rp_Rearth=jnp.array([1.0]))
     assert isinstance(atm, AbstractAtmosphere)
 
 
 def test_parametric_raises_on_call():
+    """Stub raises NotImplementedError until the RT adapter lands."""
     atm = ParametricAtmosphere(Rp_Rearth=jnp.array([1.0]))
     with pytest.raises(NotImplementedError):
         atm.reflected_spectrum(
