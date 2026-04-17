@@ -69,8 +69,6 @@ class SpectrumStar(AbstractStar):
     dist_pc: float
     ra_deg: float
     dec_deg: float
-    midplane_pa_deg: float
-    midplane_i_deg: float
     diameter_arcsec: float
     luminosity_lsun: float
 
@@ -89,8 +87,6 @@ class SpectrumStar(AbstractStar):
         flux_density_jy: Array,
         ra_deg: float = 0.0,
         dec_deg: float = 0.0,
-        midplane_pa_deg: float = 0.0,
-        midplane_i_deg: float = 0.0,
         diameter_arcsec: float = 0.0,
         luminosity_lsun: float = 1.0,
     ):
@@ -99,8 +95,6 @@ class SpectrumStar(AbstractStar):
         self.dist_pc = dist_pc
         self.ra_deg = ra_deg
         self.dec_deg = dec_deg
-        self.midplane_pa_deg = midplane_pa_deg
-        self.midplane_i_deg = midplane_i_deg
         self.diameter_arcsec = diameter_arcsec
         self.luminosity_lsun = luminosity_lsun
         self._wavelengths_nm = wavelengths_nm

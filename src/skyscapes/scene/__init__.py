@@ -1,15 +1,15 @@
-"""Scene hierarchy: AbstractStar + Planet + System wiring.
-
-New-style scene classes. Top-level ``skyscapes.{Star,Planet,System}``
-still point at the legacy shim until Plan 4 flips them.
-"""
+"""Scene hierarchy: AbstractStar + Planet + System wiring."""
 
 from __future__ import annotations
 
+from .planet import Planet
 from .star import AbstractStar, SimpleStar, SpectrumStar
+from .system import System
 
 __all__ = [
     "AbstractStar",
+    "Planet",
     "SimpleStar",
     "SpectrumStar",
+    "System",
 ]
