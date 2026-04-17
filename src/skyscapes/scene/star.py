@@ -18,15 +18,8 @@ import interpax
 import jax
 import jax.numpy as jnp
 from equinox import AbstractVar
+from hwoutils.conversions import jy_to_photons_per_nm_per_m2
 from jaxtyping import Array
-
-_Jy = 1e-26  # W m^-2 Hz^-1
-_h = 6.62607015e-34  # J s
-
-
-def _jy_to_photons_per_nm_per_m2(flux_jy: Array, wavelength_nm: Array) -> Array:
-    """Convert Jy → ph/s/nm/m²."""
-    return flux_jy * _Jy / (wavelength_nm * _h)
 
 
 class AbstractStar(eqx.Module):
@@ -114,7 +107,7 @@ class SpectrumStar(AbstractStar):
         self._times_jd = times_jd
 
         self._flux_density_phot = jax.vmap(
-            _jy_to_photons_per_nm_per_m2, in_axes=(1, None), out_axes=1
+            jy_to_photons_per_nm_per_m2, in_axes=(1, None), out_axes=1
         )(flux_density_jy, wavelengths_nm)
 
         self._flux_interp = interpax.Interpolator2D(

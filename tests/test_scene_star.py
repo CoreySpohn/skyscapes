@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import jax.numpy as jnp
+from hwoutils.conversions import jy_to_photons_per_nm_per_m2
 
 from skyscapes.scene import AbstractStar, SimpleStar, SpectrumStar
 
@@ -39,7 +40,7 @@ def test_spectrum_star_interpolates():
     )
     f = s.spec_flux_density(600.0, 5.0)
     # Jy→phot: 1 Jy * 1e-26 / (600 nm * h) ≈ 2.514e7
-    expected = 1.0 * 1e-26 / (600.0 * 6.62607015e-34)
+    expected = jy_to_photons_per_nm_per_m2(1.0, 600.0)
     assert jnp.allclose(f, expected, rtol=1e-4)
 
 
