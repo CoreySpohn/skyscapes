@@ -1,7 +1,8 @@
 """Data management utilities for skyscapes.
 
-Pooch-managed fetchers for test/example FITS fixtures. Reuses the same
-registry as ``coronagraphoto.datasets`` so the cache is shared.
+Pooch-managed fetchers for test/example FITS fixtures. Mirrors the
+``scenes.zip`` entry from ``coronagraphoto.datasets`` (same file, hash,
+and URL) but caches under its own ``skyscapes`` directory.
 """
 
 from __future__ import annotations
