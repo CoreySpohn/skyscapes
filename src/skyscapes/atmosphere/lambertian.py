@@ -45,9 +45,9 @@ class LambertianAtmosphere(AbstractAtmosphere):
         """Contrast = Ag · Φ(β) · (Rp/r)^2.  Wavelength-independent.
 
         ``phase_angle_rad`` and ``dist_AU`` may be shape ``(K,)`` or
-        ``(K, T)``; the output matches their shape.
+        ``(K, T)``; the output matches their shape. ``wavelength_nm``
+        is part of the interface but ignored in the grey case.
         """
-        del wavelength_nm  # grey: unused
         Rp_AU = self.Rp_Rearth * Rearth2AU
         phase = _lambert_phase(phase_angle_rad)
         Ag = _broadcast_over_leading(self.Ag, phase)
