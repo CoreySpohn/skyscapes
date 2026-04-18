@@ -1,17 +1,17 @@
-"""Smoke test for legacy shim re-exports."""
+"""Smoke test for the top-level skyscapes surface."""
 
 from __future__ import annotations
 
+import skyscapes
 
-def test_top_level_legacy_reexports():
-    import skyscapes
 
-    assert skyscapes.Planet is skyscapes._legacy.planet.Planet
-    assert skyscapes.Star is skyscapes._legacy.star.Star
-    assert skyscapes.System is skyscapes._legacy.system.System
-    assert skyscapes.Disk is skyscapes._legacy.disk.Disk
-    assert skyscapes.from_exovista is skyscapes._legacy.loaders.from_exovista
-    assert (
-        skyscapes.get_earth_like_planet_indices
-        is skyscapes._legacy.loaders.get_earth_like_planet_indices
-    )
+def test_toplevel_identity():
+    """Top-level convenience names point at the canonical scene/io locations."""
+    assert skyscapes.System is skyscapes.scene.System
+    assert skyscapes.from_exovista is skyscapes.io.from_exovista
+
+
+def test_submodules_importable():
+    """All four public submodules round-trip through the top-level package."""
+    for name in ("scene", "disk", "atmosphere", "io"):
+        assert hasattr(skyscapes, name), f"skyscapes.{name} missing"

@@ -1,12 +1,16 @@
 """Astrophysical scene modeling for HWO direct imaging.
 
-Legacy types (``Planet``, ``Star``, ``System``, ``Disk``, ``from_exovista``) are
-preserved under ``skyscapes._legacy`` and re-exported at the top level so
-existing consumers keep working while the new scene hierarchy lands.
+Public API:
 
-New code should import from ``skyscapes.scene``, ``skyscapes.atmosphere``,
-``skyscapes.disk``, and ``skyscapes.io`` (populated by later tasks in this
-plan).
+- :mod:`skyscapes.scene` — star + planet + system hierarchy.
+- :mod:`skyscapes.disk` — extended-source surface brightness maps.
+- :mod:`skyscapes.atmosphere` — phase/wavelength-dependent planet-to-star contrast.
+- :mod:`skyscapes.io` — data loaders (e.g. ExoVista FITS).
+
+For convenience, ``System`` and ``from_exovista`` are hoisted to the top level,
+so common flows can write ``from skyscapes import System, from_exovista``.
+Mix-and-match construction goes through the submodules
+(``skyscapes.disk.ExovistaDisk``, ``skyscapes.atmosphere.GridAtmosphere``, ...).
 """
 
 from __future__ import annotations
@@ -16,22 +20,16 @@ try:
 except ImportError:
     __version__ = "unknown"
 
-from . import _legacy
-from ._legacy import (
-    Disk,
-    Planet,
-    Star,
-    System,
-    from_exovista,
-    get_earth_like_planet_indices,
-)
+from . import atmosphere, disk, io, scene
+from .io import from_exovista
+from .scene import System
 
 __all__ = [
-    "Disk",
-    "Planet",
-    "Star",
     "System",
-    "_legacy",
+    "__version__",
+    "atmosphere",
+    "disk",
     "from_exovista",
-    "get_earth_like_planet_indices",
+    "io",
+    "scene",
 ]
