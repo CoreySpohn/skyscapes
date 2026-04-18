@@ -1,4 +1,4 @@
-"""scene.Planet — composes AbstractOrbit + AbstractAtmosphere."""
+"""scene.Planet -- composes AbstractOrbit + AbstractAtmosphere."""
 
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ def test_planet_alpha_dMag_matches_orbix():
 
 
 def test_planet_contrast_wavelength_agnostic_for_lambertian():
-    """Lambertian → contrast independent of wavelength."""
+    """Lambertian -> contrast independent of wavelength."""
     star = SimpleStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     p = _single_planet()
     t_jd = jnp.array([0.0])

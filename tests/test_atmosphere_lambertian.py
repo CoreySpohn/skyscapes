@@ -1,4 +1,4 @@
-"""LambertianAtmosphere — analytic Lambert phase reproduces orbix dMag."""
+"""LambertianAtmosphere -- analytic Lambert phase reproduces orbix dMag."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def test_lambertian_phase_zero_angle():
 
 
 def test_lambertian_phase_pi_is_dark():
-    """At beta=pi (back-lit), Lambert phase = 0 → contrast = 0."""
+    """At beta=pi (back-lit), Lambert phase = 0 -> contrast = 0."""
     lamb = LambertianAtmosphere(
         Rp_Rearth=jnp.array([1.0]),
         Ag=jnp.array([0.3]),
@@ -48,7 +48,7 @@ def test_lambertian_phase_pi_is_dark():
 
 
 def test_lambertian_inverse_square():
-    """At fixed phase, contrast ∝ 1/r^2."""
+    """At fixed phase, contrast proportional to 1/r**2."""
     lamb = LambertianAtmosphere(
         Rp_Rearth=jnp.array([1.0]),
         Ag=jnp.array([0.3]),
@@ -67,7 +67,7 @@ def test_lambertian_inverse_square():
 
 
 def test_lambertian_wavelength_independent():
-    """Grey Lambertian — contrast should not depend on wavelength."""
+    """Grey Lambertian -- contrast should not depend on wavelength."""
     lamb = LambertianAtmosphere(
         Rp_Rearth=jnp.array([1.0]),
         Ag=jnp.array([0.3]),

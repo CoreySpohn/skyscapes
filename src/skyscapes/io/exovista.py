@@ -1,9 +1,9 @@
-"""ExoVista FITS loader — builds a ``skyscapes.scene.System`` directly.
+"""ExoVista FITS loader -- builds a ``skyscapes.scene.System`` directly.
 
 Mirrors the legacy ``skyscapes._legacy.loaders.from_exovista`` semantics
 for Star and Disk, but rebuilds each planet as a 1-planet
 ``KeplerianOrbit`` + ``GridAtmosphere`` pair stored in the
-``System.planets`` tuple. No ghost padding — variadic tuples make that
+``System.planets`` tuple. No ghost padding -- variadic tuples make that
 unnecessary.
 """
 
@@ -73,12 +73,12 @@ def _load_single_planet(
 ) -> tuple[Planet, float]:
     """Load one planet and return ``(Planet, t0_d)``.
 
-    The contrast grid is indexed by phase angle β = arccos(r_z / |r|),
-    not mean anomaly. β is computed at load time with the same
+    The contrast grid is indexed by phase angle beta = arccos(r_z / |r|),
+    not mean anomaly. beta is computed at load time with the same
     ``trig_solver`` the runtime ``System`` uses, so the build-time axis
     matches the query-time axis.
 
-    WARNING — ExoVista frame convention (see Plan-2 "Known Limitations"):
+    WARNING -- ExoVista frame convention (see Plan-2 "Known Limitations"):
     ExoVista FITS columns 9-11 / 12-14 are **barycentric** position/velocity
     vectors, NOT on-sky vectors. Header orbital elements (A, E, INC, LAN, ARGP)
     are expressed in the system **midplane** frame. This loader preserves the
@@ -118,19 +118,19 @@ def _load_single_planet(
         t0_d=jnp.array([t0]),
     )
 
-    # β(t_i) per FITS input time, using the same solver the runtime uses.
+    # beta(t_i) per FITS input time, using the same solver the runtime uses.
     _r_AU, phase_angle_rad, _dist_AU = orbit.propagate(
         trig_solver, times_jd, Ms_kg=star.Ms_kg
     )
     beta_deg = jnp.rad2deg(phase_angle_rad[0])  # (T,), already in [0, 180]
 
-    # Sort by β. Duplicates are fine for interpolation (axisymmetric
-    # atmosphere ⇒ same β ⇒ same contrast).
+    # Sort by beta. Duplicates are fine for interpolation (axisymmetric
+    # atmosphere => same beta => same contrast).
     sort_idx = jnp.argsort(beta_deg)
     beta_sorted = beta_deg[sort_idx]
     contrast_sorted = contrast_data[:, sort_idx]
 
-    # Regular β axis on [0, 180].
+    # Regular beta axis on [0, 180].
     regular_grid = jnp.linspace(0.0, 180.0, 100)
     xq, yq = jnp.meshgrid(wavelengths_nm, regular_grid, indexing="ij")
     contrast_grid = interpax.interp2d(
@@ -158,7 +158,7 @@ def _load_disk(fits_file: str, fits_ext: int) -> ExovistaDisk:
 
     Records the system midplane (PA + I from the star header) on the disk as
     metadata. The contrast cube itself is already rendered in the on-sky frame
-    by ExoVista, so no projection is applied here — the fields exist so that
+    by ExoVista, so no projection is applied here -- the fields exist so that
     planet loaders (or future Plan-5 frame-conversion code) can align
     midplane-frame orbital elements with the disk's on-sky geometry.
     """

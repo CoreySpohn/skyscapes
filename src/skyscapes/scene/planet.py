@@ -1,8 +1,8 @@
-"""scene.Planet — composes an AbstractOrbit with an AbstractAtmosphere.
+"""scene.Planet -- composes an AbstractOrbit with an AbstractAtmosphere.
 
 The orbit owns orbital elements; the atmosphere owns spectral physics and
 ``Rp_Rearth``. Stellar context (``Ms_kg``, ``dist_pc``) is supplied
-keyword-only at call time through a ``Star`` argument — Planet never
+keyword-only at call time through a ``Star`` argument -- Planet never
 stores a reference to its host star, which keeps the PyTree shallow and
 lets a single ``scene.System`` own the one-and-only star.
 """
@@ -39,7 +39,7 @@ class Planet(eqx.Module):
     def mean_anomaly(self, t_jd: Array, *, star: AbstractStar) -> Array:
         """Mean anomaly mod 360 [deg], shape ``(K, T)``.
 
-        ``t_jd`` must be shape ``(T,)`` — no rank polymorphism. Callers
+        ``t_jd`` must be shape ``(T,)`` -- no rank polymorphism. Callers
         that hold a scalar should wrap it in ``jnp.asarray([t])`` at the
         call site.
         """
@@ -60,7 +60,7 @@ class Planet(eqx.Module):
         *,
         star: AbstractStar,
     ) -> Array:
-        """On-sky position, shape ``(2, K, T)`` — (dRA, dDec) in arcsec."""
+        """On-sky position, shape ``(2, K, T)`` -- (dRA, dDec) in arcsec."""
         r_AU, _, _ = self.propagate(trig_solver, t_jd, star=star)
         dist_AU = star.dist_pc * pc2AU
         scale = rad2arcsec / dist_AU
@@ -122,7 +122,7 @@ class Planet(eqx.Module):
         *,
         star: AbstractStar,
     ) -> Array:
-        """Planet flux density [ph/s/m²/nm], shape ``(K, T)``."""
+        """Planet flux density [ph/s/m^2/nm], shape ``(K, T)``."""
         c = self.contrast(trig_solver, wavelength_nm, t_jd, star=star)
         f_star = star.spec_flux_density(wavelength_nm, t_jd)
         return c * f_star

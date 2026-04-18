@@ -1,4 +1,4 @@
-"""scene.System — the top-level PyTree container.
+"""scene.System -- the top-level PyTree container.
 
 Holds a star, a heterogeneous tuple of planets, an optional disk, and the
 Kepler-solver callable (static so JIT doesn't re-trace). The tuple makes
@@ -27,7 +27,7 @@ class System(eqx.Module):
         planets: Variable-length tuple of ``Planet``.
         disk: Optional extended-source disk (``AbstractDisk | None``).
         trig_solver: Scalar Kepler-trig solver (static; see
-            ``orbix.kepler.shortcuts.grid.get_grid_solver``). Required —
+            ``orbix.kepler.shortcuts.grid.get_grid_solver``). Required --
             callers must provide a built solver, not None.
     """
 
@@ -58,7 +58,7 @@ class System(eqx.Module):
         return jnp.concatenate(per_planet, axis=0)
 
     def planet_flux_densities(self, wavelength_nm: Array, t_jd: Array) -> Array:
-        """Per-planet flux density [ph/s/m²/nm], shape ``(K_total, T)``."""
+        """Per-planet flux density [ph/s/m^2/nm], shape ``(K_total, T)``."""
         per_planet = [
             p.spec_flux_density(self.trig_solver, wavelength_nm, t_jd, star=self.star)
             for p in self.planets

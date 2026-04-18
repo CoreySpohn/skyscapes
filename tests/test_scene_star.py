@@ -1,4 +1,4 @@
-"""scene.Star — AbstractStar, SimpleStar, SpectrumStar."""
+"""scene.Star -- AbstractStar, SimpleStar, SpectrumStar."""
 
 from __future__ import annotations
 
@@ -26,10 +26,10 @@ def test_simple_star_flux_is_flat():
 
 
 def test_spectrum_star_interpolates():
-    """SpectrumStar Jy→photon conversion reproduces analytic value."""
+    """SpectrumStar Jy-to-photon conversion reproduces analytic value."""
     wl = jnp.linspace(400.0, 1000.0, 7)
     t = jnp.linspace(0.0, 10.0, 5)
-    # 1 Jy everywhere → same phot number at each (wl, t) point
+    # 1 Jy everywhere -> same phot number at each (wl, t) point
     flux_jy = jnp.ones((wl.size, t.size))
     s = SpectrumStar(
         Ms_kg=1.989e30,
@@ -39,7 +39,7 @@ def test_spectrum_star_interpolates():
         flux_density_jy=flux_jy,
     )
     f = s.spec_flux_density(600.0, 5.0)
-    # Jy→phot: 1 Jy * 1e-26 / (600 nm * h) ≈ 2.514e7
+    # Jy to phot: 1 Jy * 1e-26 / (600 nm * h) ~= 2.514e7
     expected = jy_to_photons_per_nm_per_m2(1.0, 600.0)
     assert jnp.allclose(f, expected, rtol=1e-4)
 

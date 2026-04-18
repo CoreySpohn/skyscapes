@@ -1,4 +1,4 @@
-"""scene.System — star + tuple of planets + optional disk."""
+"""scene.System -- star + tuple of planets + optional disk."""
 
 from __future__ import annotations
 

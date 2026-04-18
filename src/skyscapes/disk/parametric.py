@@ -21,7 +21,7 @@ class ParametricDisk(AbstractDisk):
         alpha: Power-law exponent (dimensionless).
         pixel_scale_arcsec: Pixel scale [arcsec/pixel].
         shape: ``(ny, nx)`` pixel grid dimensions, static.
-        inclination_deg: Disk midplane inclination [deg]. Metadata only —
+        inclination_deg: Disk midplane inclination [deg]. Metadata only --
             no geometric projection is applied by ``surface_brightness``.
             Plan-5 follow-up will add a system-level frame conversion.
         position_angle_deg: Disk midplane PA [deg]. Metadata only.

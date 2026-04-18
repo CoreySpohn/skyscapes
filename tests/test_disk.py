@@ -1,4 +1,4 @@
-"""skyscapes.disk — AbstractDisk, UniformDisk, ParametricDisk, ExovistaDisk."""
+"""skyscapes.disk -- AbstractDisk, UniformDisk, ParametricDisk, ExovistaDisk."""
 
 from __future__ import annotations
 

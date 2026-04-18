@@ -1,4 +1,4 @@
-"""ExovistaDisk: port of legacy Disk — wavelength-interpolated contrast cube."""
+"""ExovistaDisk: port of legacy Disk -- wavelength-interpolated contrast cube."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ class ExovistaDisk(AbstractDisk):
         pixel_scale_arcsec: Pixel scale [arcsec/pixel].
         wavelengths_nm: 1-D wavelength grid [nm], shape ``(n_wl,)``.
         contrast_cube: Contrast cube, shape ``(n_wl, ny, nx)``.
-        inclination_deg: Disk midplane inclination [deg]. Metadata only —
+        inclination_deg: Disk midplane inclination [deg]. Metadata only --
             no geometric projection is applied by ``surface_brightness``.
             The contrast cube is already rendered in the on-sky frame by
             ExoVista, so these fields exist to record the midplane that

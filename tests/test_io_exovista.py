@@ -1,4 +1,4 @@
-"""skyscapes.io.exovista — ExoVista FITS → scene.System."""
+"""skyscapes.io.exovista -- ExoVista FITS to scene.System."""
 
 from __future__ import annotations
 

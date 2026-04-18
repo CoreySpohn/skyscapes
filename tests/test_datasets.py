@@ -1,4 +1,4 @@
-"""skyscapes.datasets — pooch-backed fixture fetcher."""
+"""skyscapes.datasets -- pooch-backed fixture fetcher."""
 
 from __future__ import annotations
 

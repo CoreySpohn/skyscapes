@@ -13,7 +13,7 @@ class AbstractDisk(eqx.Module):
 
     Subclasses return contrast (flux ratio relative to the host star) per
     pixel. The concrete ``System`` multiplies by ``star.spec_flux_density``
-    to turn that into ph/s/m²/nm per pixel.
+    to turn that into ph/s/m^2/nm per pixel.
     """
 
     @abstractmethod

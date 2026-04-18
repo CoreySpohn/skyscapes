@@ -1,4 +1,4 @@
-"""Parametric atmosphere — stub for PICASO/ExoJAX radiative-transfer adapters.
+"""Parametric atmosphere -- stub for PICASO/ExoJAX radiative-transfer adapters.
 
 A concrete subclass (with its RT engine stored as ``eqx.field(static=True)``)
 will land in a later plan. Until then, ``reflected_spectrum`` raises so the
@@ -27,7 +27,7 @@ class ParametricAtmosphere(AbstractAtmosphere):
         dist_AU: Array,
         wavelength_nm: Array,
     ) -> Array:
-        """Not implemented — waiting on RT adapter (PICASO/ExoJAX)."""
+        """Not implemented -- waiting on RT adapter (PICASO/ExoJAX)."""
         raise NotImplementedError(
             "ParametricAtmosphere is a stub. A concrete RT-backed subclass "
             "will be introduced in a later plan."

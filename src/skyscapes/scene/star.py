@@ -7,7 +7,7 @@ over (wavelength, time) built from Jansky flux data, matching the legacy
 ``skyscapes._legacy.Star`` semantics.
 
 Note: ``from __future__ import annotations`` is deliberately NOT used
-here — it stringifies annotations, which breaks Equinox's metaclass
+here -- it stringifies annotations, which breaks Equinox's metaclass
 handling of ``AbstractVar`` type parameters.
 """
 
@@ -39,11 +39,11 @@ class AbstractStar(eqx.Module):
         wavelength_nm: Array,
         time_jd: Array,
     ) -> Array:
-        """Return spectral flux density in ph/s/m²/nm."""
+        """Return spectral flux density in ph/s/m^2/nm."""
 
 
 class SimpleStar(AbstractStar):
-    """Flat-spectrum star — constant flux independent of wavelength or time."""
+    """Flat-spectrum star -- constant flux independent of wavelength or time."""
 
     Ms_kg: float
     dist_pc: float
@@ -113,5 +113,5 @@ class SpectrumStar(AbstractStar):
         wavelength_nm: Array,
         time_jd: Array,
     ) -> Array:
-        """Scalar or array spectral flux density [ph/s/m²/nm]."""
+        """Scalar or array spectral flux density [ph/s/m^2/nm]."""
         return self._flux_interp(wavelength_nm, time_jd)

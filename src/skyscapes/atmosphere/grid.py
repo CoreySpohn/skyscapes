@@ -13,7 +13,7 @@ from .base import AbstractAtmosphere
 class GridAtmosphere(AbstractAtmosphere):
     """Per-planet 2D interpolated contrast over (wavelength, phase-angle).
 
-    Distance is ignored — the grid already encodes a flux ratio.
+    Distance is ignored -- the grid already encodes a flux ratio.
 
     Attributes:
         Rp_Rearth: Planetary radii, shape ``(K,)``.

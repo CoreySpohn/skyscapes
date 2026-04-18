@@ -1,4 +1,4 @@
-"""ParametricAtmosphere stub — raises NotImplementedError until RT lands."""
+"""ParametricAtmosphere stub -- raises NotImplementedError until RT lands."""
 
 from __future__ import annotations
 

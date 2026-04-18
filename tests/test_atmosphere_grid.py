@@ -1,4 +1,4 @@
-"""GridAtmosphere — 2D interpolation over (wavelength, phase-angle)."""
+"""GridAtmosphere -- 2D interpolation over (wavelength, phase-angle)."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def test_grid_returns_grid_value_on_nodes():
 
 
 def test_grid_multiple_planets_independent():
-    """Two planets with different grids — interp is per-planet."""
+    """Two planets with different grids -- interp is per-planet."""
     wl = jnp.linspace(400.0, 1000.0, 10)
     phase_deg = jnp.linspace(0.0, 180.0, 19)
     # Planet 0: constant 0.1; Planet 1: constant 0.2

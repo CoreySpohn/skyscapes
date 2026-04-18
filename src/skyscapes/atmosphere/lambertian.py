@@ -1,4 +1,4 @@
-"""Grey Lambertian atmosphere — analytic phase, no wavelength dependence."""
+"""Grey Lambertian atmosphere -- analytic phase, no wavelength dependence."""
 
 import jax.numpy as jnp
 from hwoutils.constants import Rearth2AU
@@ -8,7 +8,7 @@ from .base import AbstractAtmosphere
 
 
 def _lambert_phase(phase_angle_rad: Array) -> Array:
-    """Classical Lambert phase function, Φ(β) = (sinβ + (π-β)cosβ) / π."""
+    """Classical Lambert phase function, Phi(beta) = (sin(beta) + (pi - beta) * cos(beta)) / pi."""
     sin_b = jnp.sin(phase_angle_rad)
     cos_b = jnp.cos(phase_angle_rad)
     return (sin_b + (jnp.pi - phase_angle_rad) * cos_b) / jnp.pi
@@ -31,7 +31,7 @@ class LambertianAtmosphere(AbstractAtmosphere):
         dist_AU: Array,
         wavelength_nm: Array,
     ) -> Array:
-        """Contrast = Ag · Φ(β) · (Rp/r)^2.  Wavelength-independent.
+        """Contrast = Ag * Phi(beta) * (Rp/r)**2.  Wavelength-independent.
 
         ``phase_angle_rad`` and ``dist_AU`` are shape ``(K, T)``.
         ``wavelength_nm`` is part of the interface but ignored in the
