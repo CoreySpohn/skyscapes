@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/CoreySpohn/skyscapes/compare/v0.1.0...v0.2.0) (2026-05-14)
+
+
+### Features
+
+* Adding larger scene container and a more explicit approach to background sources support future expansion ([8399b74](https://github.com/CoreySpohn/skyscapes/commit/8399b7409a39d0874c3f8c9970e2232562311c65))
+
 ## [0.1.0](https://github.com/CoreySpohn/skyscapes/compare/v0.0.1...v0.1.0) (2026-04-23)
 
 
