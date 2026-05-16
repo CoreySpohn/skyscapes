@@ -14,7 +14,17 @@ from __future__ import annotations
 
 from .zodi import ZodiSourceAYO, ZodiSourceLeinert, ZodiSourcePhotonFlux
 
+ZodiSource = ZodiSourceAYO | ZodiSourceLeinert | ZodiSourcePhotonFlux
+"""Nominal union of all concrete zodi source types.
+
+Used as the type annotation on ``Scene.zodi`` and on coronagraphoto's
+``gen_zodi_count_rate`` / ``sim_zodi``. Each variant must implement
+``spec_flux_density(wavelength_nm, time_jd, ecliptic_lat_deg, solar_lon_deg)``.
+New variants must be added to this union AND implement that method.
+"""
+
 __all__ = [
+    "ZodiSource",
     "ZodiSourceAYO",
     "ZodiSourceLeinert",
     "ZodiSourcePhotonFlux",

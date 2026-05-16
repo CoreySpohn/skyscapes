@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import equinox as eqx
 
+from ..background import ZodiSource
 from .system import System
 
 
@@ -35,7 +36,7 @@ class Scene(eqx.Module):
     """
 
     system: System
-    zodi: eqx.Module | None = None
+    zodi: ZodiSource | None = None
 
     @property
     def star(self):

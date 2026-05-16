@@ -25,16 +25,28 @@ class System(eqx.Module):
     Attributes:
         star: Host star (``AbstractStar``).
         planets: Variable-length tuple of ``Planet``.
-        disk: Optional extended-source disk (``AbstractDisk | None``).
         trig_solver: Scalar Kepler-trig solver (static; see
             ``orbix.kepler.shortcuts.grid.get_grid_solver``). Required --
             callers must provide a built solver, not None.
+        disk: Optional extended-source disk (``AbstractDisk | None``).
+        midplane_inc_deg: System midplane inclination [deg] in the
+            barycentric -> sky frame. Default 0.0 means "midplane = sky"
+            and is intentionally indistinguishable from a real face-on
+            system at this inclination; this ambiguity is acceptable
+            because the field is diagnostic-only after load (no runtime
+            hot path consults it). Populated by ``io.from_exovista``
+            from the FITS star header. After load, frame rotation has
+            already been baked into each ``Planet``'s orbital elements.
+        midplane_pa_deg: System midplane position angle [deg]. Same
+            semantics as ``midplane_inc_deg``.
     """
 
     star: AbstractStar
     planets: tuple[Planet, ...]
     trig_solver: Callable = eqx.field(static=True)
     disk: AbstractDisk | None = None
+    midplane_inc_deg: float = 0.0
+    midplane_pa_deg: float = 0.0
 
     @property
     def n_planets(self) -> int:

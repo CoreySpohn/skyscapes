@@ -28,7 +28,7 @@ docs = [
     "ipython",
     "matplotlib",
 ]
-test = ["nox", "pytest", "hypothesis", "pytest-cov", "orbix"]
+test = ["nox", "pytest", "hypothesis", "pytest-cov", "orbix", "exoverses"]
 
 [project.urls]
 Homepage = "https://github.com/CoreySpohn/skyscapes"

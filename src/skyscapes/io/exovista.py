@@ -31,6 +31,7 @@ from orbix.system.orbit import KeplerianOrbit
 from ..atmosphere import GridAtmosphere
 from ..disk import ExovistaDisk
 from ..scene import Planet, SpectrumStar, System
+from ._frames import rotate_to_sky_coords
 
 
 def _load_star(fits_file: str, fits_ext: int = 4) -> SpectrumStar:
@@ -70,21 +71,20 @@ def _load_single_planet(
     star: SpectrumStar,
     wavelengths_nm: jnp.ndarray,
     trig_solver,
+    midplane_inc_deg: float,
+    midplane_pa_deg: float,
 ) -> tuple[Planet, float]:
     """Load one planet and return ``(Planet, t0_d)``.
 
-    The contrast grid is indexed by phase angle beta = arccos(r_z / |r|),
-    not mean anomaly. beta is computed at load time with the same
-    ``trig_solver`` the runtime ``System`` uses, so the build-time axis
-    matches the query-time axis.
+    The barycentric ``(r, v)`` state vectors from the FITS file are
+    rotated into the on-sky frame at load time using the system midplane
+    angles before being converted to Keplerian elements. This means
+    ``KeplerianOrbit.propagate`` produces on-sky positions directly --
+    no frame metadata is consulted at runtime.
 
-    WARNING -- ExoVista frame convention (see Plan-2 "Known Limitations"):
-    ExoVista FITS columns 9-11 / 12-14 are **barycentric** position/velocity
-    vectors, NOT on-sky vectors. Header orbital elements (A, E, INC, LAN, ARGP)
-    are expressed in the system **midplane** frame. This loader preserves the
-    legacy behavior by passing those vectors straight through, which is
-    bit-exact vs. the legacy skyscapes Planet for systems where the midplane
-    coincides with the sky frame. Plan 5 fixes the frame issue.
+    The contrast grid is indexed by phase angle beta = arccos(r_z / |r|),
+    computed at load time with the same ``trig_solver`` the runtime
+    ``System`` uses.
     """
     with open(fits_file, "rb") as f:
         obj_data, obj_header = getdata(f, ext=5 + idx, header=True, memmap=False)
@@ -95,9 +95,19 @@ def _load_single_planet(
 
     contrast_data = jnp.asarray(obj_data[:, 16:].T.astype(np.float32))
 
-    r_sky_au = obj_data[0, 9:12]
-    v_sky_au_yr = obj_data[0, 12:15]
-    r_sky_m = jnp.array(r_sky_au * AU2m)
+    # Rotate barycentric state vectors into the sky frame BEFORE
+    # computing Keplerian elements. FITS data is big-endian ('>f8');
+    # convert to native float64 before passing to JAX.
+    r_bary_au = jnp.asarray(obj_data[0:1, 9:12].astype(np.float64))  # (1, 3)
+    v_bary_au_yr = jnp.asarray(obj_data[0:1, 12:15].astype(np.float64))  # (1, 3)
+    r_sky_au = rotate_to_sky_coords(
+        r_bary_au, inc_deg=midplane_inc_deg, pa_deg=midplane_pa_deg
+    )[0]
+    v_sky_au_yr = rotate_to_sky_coords(
+        v_bary_au_yr, inc_deg=midplane_inc_deg, pa_deg=midplane_pa_deg
+    )[0]
+
+    r_sky_m = r_sky_au * AU2m
     v_sky_m_s = jnp.array(au_per_yr_to_m_per_s(v_sky_au_yr))
     planet_mass_kg = float(obj_header.get("M")) * Mearth2kg
     mu_SI = G_si * (star.Ms_kg + planet_mass_kg)
@@ -217,13 +227,20 @@ def from_exovista(
 ) -> System:
     """Load an ExoVista FITS file into a ``scene.System``.
 
+    The system's midplane inclination and position angle (FITS star
+    header keys ``I`` and ``PA``) are applied at load time as a frame
+    rotation of each planet's state vector before its Keplerian
+    elements are computed. The same angles are stored as
+    ``System.midplane_inc_deg`` and ``System.midplane_pa_deg`` for
+    downstream diagnostic use.
+
     Args:
         fits_file: Path to ExoVista FITS file.
         planet_indices: Planet indices to load (0-based). ``None`` = all.
         only_earths: If True and *planet_indices* is None, auto-filter Earths.
 
     Returns:
-        ``scene.System`` with star, planets (tuple), and disk.
+        ``scene.System`` with star, planets (tuple), disk, and midplane metadata.
     """
     disk_ext = 2
 
@@ -240,14 +257,33 @@ def from_exovista(
 
     with open(fits_file, "rb") as f:
         wavelengths_um = getdata(f, ext=0, header=False, memmap=False)
+        star_header = getheader(f, ext=4, memmap=False)
     wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
+
+    midplane_inc_deg = float(star_header.get("I", 0.0))
+    midplane_pa_deg = float(star_header.get("PA", 0.0))
 
     star = _load_star(fits_file, fits_ext=4)
     solver = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
     planets = tuple(
-        _load_single_planet(fits_file, i, star, wavelengths_nm, solver)[0]
+        _load_single_planet(
+            fits_file,
+            i,
+            star,
+            wavelengths_nm,
+            solver,
+            midplane_inc_deg=midplane_inc_deg,
+            midplane_pa_deg=midplane_pa_deg,
+        )[0]
         for i in planet_indices
     )
     disk = _load_disk(fits_file, disk_ext)
 
-    return System(star=star, planets=planets, disk=disk, trig_solver=solver)
+    return System(
+        star=star,
+        planets=planets,
+        disk=disk,
+        trig_solver=solver,
+        midplane_inc_deg=midplane_inc_deg,
+        midplane_pa_deg=midplane_pa_deg,
+    )
