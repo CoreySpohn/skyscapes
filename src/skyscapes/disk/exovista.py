@@ -15,20 +15,11 @@ class ExovistaDisk(AbstractDisk):
         pixel_scale_arcsec: Pixel scale [arcsec/pixel].
         wavelengths_nm: 1-D wavelength grid [nm], shape ``(n_wl,)``.
         contrast_cube: Contrast cube, shape ``(n_wl, ny, nx)``.
-        inclination_deg: Disk midplane inclination [deg]. Metadata only --
-            no geometric projection is applied by ``surface_brightness``.
-            The contrast cube is already rendered in the on-sky frame by
-            ExoVista, so these fields exist to record the midplane that
-            orbit-carrying consumers (e.g. EXOSIMS) need when rotating
-            planets from midplane-frame elements into sky coords.
-        position_angle_deg: Disk midplane PA [deg]. Metadata only.
     """
 
     pixel_scale_arcsec: float
     wavelengths_nm: Array
     contrast_cube: Array
-    inclination_deg: float
-    position_angle_deg: float
     _contrast_interp: interpax.CubicSpline
 
     def __init__(
@@ -36,15 +27,11 @@ class ExovistaDisk(AbstractDisk):
         pixel_scale_arcsec: float,
         wavelengths_nm: Array,
         contrast_cube: Array,
-        inclination_deg: float = 0.0,
-        position_angle_deg: float = 0.0,
     ):
         """Store geometry and pre-build the wavelength cubic spline."""
         self.pixel_scale_arcsec = pixel_scale_arcsec
         self.wavelengths_nm = wavelengths_nm
         self.contrast_cube = contrast_cube
-        self.inclination_deg = inclination_deg
-        self.position_angle_deg = position_angle_deg
         self._contrast_interp = interpax.CubicSpline(
             wavelengths_nm, contrast_cube, axis=0
         )

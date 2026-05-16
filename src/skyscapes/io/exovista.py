@@ -166,29 +166,24 @@ def _load_single_planet(
 def _load_disk(fits_file: str, fits_ext: int) -> ExovistaDisk:
     """Load the ExoVista disk extension into an ExovistaDisk.
 
-    Records the system midplane (PA + I from the star header) on the disk as
-    metadata. The contrast cube itself is already rendered in the on-sky frame
-    by ExoVista, so no projection is applied here -- the fields exist so that
-    planet loaders (or future Plan-5 frame-conversion code) can align
-    midplane-frame orbital elements with the disk's on-sky geometry.
+    The contrast cube is already rendered in the on-sky frame by
+    ExoVista; the system midplane angles (I, PA) live on
+    ``System.midplane_inc_deg`` / ``System.midplane_pa_deg`` (populated
+    by ``from_exovista`` from the same FITS star header), not on the
+    disk itself.
     """
     with open(fits_file, "rb") as f:
         obj_data, header = getdata(f, ext=fits_ext, header=True, memmap=False)
         wavelengths_um = getdata(f, ext=fits_ext - 1, header=False, memmap=False)
-        _, star_header = getdata(f, ext=4, header=True, memmap=False)
 
     wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
     contrast_cube = jnp.asarray(obj_data[:-1].astype(np.float32))
     pixel_scale_arcsec = header["PXSCLMAS"] * mas2arcsec
-    inclination_deg = float(star_header.get("I", 0.0))
-    position_angle_deg = float(star_header.get("PA", 0.0))
 
     return ExovistaDisk(
         pixel_scale_arcsec=pixel_scale_arcsec,
         wavelengths_nm=wavelengths_nm,
         contrast_cube=contrast_cube,
-        inclination_deg=inclination_deg,
-        position_angle_deg=position_angle_deg,
     )
 
 

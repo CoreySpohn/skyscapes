@@ -7,7 +7,7 @@ from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.system.orbit import KeplerianOrbit
 
 from skyscapes.atmosphere import LambertianAtmosphere
-from skyscapes.disk import UniformDisk
+from skyscapes.disk import ExovistaDisk
 from skyscapes.scene import Planet, SimpleStar, System
 
 SOLVER = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
@@ -44,7 +44,9 @@ def test_system_with_disk_field():
     """System stores an AbstractDisk when provided."""
     star = SimpleStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     p = _make_planet(1.0, 0.3, 1.0)
-    disk = UniformDisk(contrast=jnp.array(1e-6), pixel_scale_arcsec=0.01, shape=(4, 4))
+    wl = jnp.linspace(400.0, 1000.0, 5)
+    cube = jnp.full((wl.size, 4, 4), 1e-6)
+    disk = ExovistaDisk(pixel_scale_arcsec=0.01, wavelengths_nm=wl, contrast_cube=cube)
     sys_obj = System(star=star, planets=(p,), disk=disk, trig_solver=SOLVER)
     assert sys_obj.disk is disk
 
