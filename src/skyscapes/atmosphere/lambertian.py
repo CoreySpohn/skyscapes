@@ -8,7 +8,7 @@ from .base import AbstractAtmosphere
 
 
 def _lambert_phase(phase_angle_rad: Array) -> Array:
-    """Classical Lambert phase function, Phi(beta) = (sin(beta) + (pi - beta) * cos(beta)) / pi."""
+    """Classical Lambert phase: Phi(b) = (sin(b) + (pi - b) * cos(b)) / pi."""
     sin_b = jnp.sin(phase_angle_rad)
     cos_b = jnp.cos(phase_angle_rad)
     return (sin_b + (jnp.pi - phase_angle_rad) * cos_b) / jnp.pi

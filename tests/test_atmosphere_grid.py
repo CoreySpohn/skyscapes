@@ -19,6 +19,7 @@ def _flat_grid():
 
 
 def test_grid_is_abstract_atmosphere():
+    """GridAtmosphere subclasses AbstractAtmosphere."""
     wl, phase_deg, contrast = _flat_grid()
     atm = GridAtmosphere(
         Rp_Rearth=jnp.array([1.0]),
@@ -30,6 +31,7 @@ def test_grid_is_abstract_atmosphere():
 
 
 def test_grid_returns_grid_value_on_nodes():
+    """Querying inside a constant-0.1 grid returns 0.1 to interp precision."""
     wl, phase_deg, contrast = _flat_grid()
     atm = GridAtmosphere(
         Rp_Rearth=jnp.array([1.0]),

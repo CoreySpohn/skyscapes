@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import jax.numpy as jnp
-import pytest
 from hwoutils.constants import Rearth2AU
 
 from skyscapes.atmosphere import AbstractAtmosphere, LambertianAtmosphere
 
 
 def test_lambertian_is_abstract_atmosphere():
+    """LambertianAtmosphere subclasses AbstractAtmosphere."""
     lamb = LambertianAtmosphere(
         Rp_Rearth=jnp.array([1.0]),
         Ag=jnp.array([0.3]),

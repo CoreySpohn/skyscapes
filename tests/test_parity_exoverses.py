@@ -82,23 +82,19 @@ from pathlib import Path
 if "ExoVista" not in sys.modules:
     sys.modules["ExoVista"] = mock.MagicMock()
 
-import astropy.units as u
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 from astropy.io.fits import getdata
 from astropy.time import Time
-
 from exoverses.exovista.disk import ExovistaDisk as ExoversesDisk
 from exoverses.exovista.planet import ExovistaPlanet
 from exoverses.exovista.star import ExovistaStar
-from exoverses.exovista.system import ExovistaSystem
-from exoverses.util.misc import gen_rotate_to_sky_coords
 from hwoutils.conversions import decimal_year_to_jd
+
 from skyscapes.io import from_exovista
 from skyscapes.io._frames import rotate_to_sky_coords
-
 
 # ---------------------------------------------------------------------------
 # Star spectral flux density
@@ -129,9 +125,12 @@ def test_star_spec_flux_density_matches_exoverses(fits_fixture):
                 sk_system.star.spec_flux_density(jnp.array(wl), jnp.array(test_t_jd))
             )
             ex_jy = float(ex_star.star_flux_density_interp(wl, test_t_year)[0, 0])
-            ex_flux = float(jy_to_photons_per_nm_per_m2(jnp.array(ex_jy), jnp.array(wl)))
+            ex_flux = float(
+                jy_to_photons_per_nm_per_m2(jnp.array(ex_jy), jnp.array(wl))
+            )
             assert sk_flux == pytest.approx(ex_flux, rel=2e-3), (
-                f"Star flux mismatch at {wl} nm: skyscapes={sk_flux}, exoverses={ex_flux}"
+                f"Star flux mismatch at {wl} nm: "
+                f"skyscapes={sk_flux}, exoverses={ex_flux}"
             )
 
 
@@ -197,7 +196,9 @@ def test_planet_positions_match_at_t0(fits_fixture):
         r_sky_au = rotate_to_sky_coords(r_bary_au, inc_deg=inc_deg, pa_deg=pa_deg)
         dist_AU = dist_pc * AU_per_arcsec
         ex_ra_arcsec = float(np.arctan(float(r_sky_au[0, 0]) / dist_AU) * AU_per_arcsec)
-        ex_dec_arcsec = float(np.arctan(float(r_sky_au[0, 1]) / dist_AU) * AU_per_arcsec)
+        ex_dec_arcsec = float(
+            np.arctan(float(r_sky_au[0, 1]) / dist_AU) * AU_per_arcsec
+        )
 
         # Query skyscapes at t0 only.
         sk_pos_arcsec = sk_system.positions(jnp.array([t0_d]))  # (2, K=1, T=1)
@@ -219,7 +220,8 @@ def test_planet_positions_match_at_t0(fits_fixture):
         rtol=1e-2,
         atol=1e-3,
         err_msg=(
-            f"Dec mismatch at t0: skyscapes={sk_dec:.6f}, ref={ex_dec_arcsec:.6f} arcsec"
+            f"Dec mismatch at t0: skyscapes={sk_dec:.6f}, "
+            f"ref={ex_dec_arcsec:.6f} arcsec"
         ),
     )
 
@@ -271,8 +273,8 @@ def test_planet_contrast_at_fits_times_matches_loader(fits_fixture):
 
     T = obj_data.shape[0]
     W = obj_data.shape[1] - 16
-    test_t_idx = T // 2    # middle FITS time row
-    test_wl_idx = W // 2   # middle wavelength column
+    test_t_idx = T // 2  # middle FITS time row
+    test_wl_idx = W // 2  # middle wavelength column
 
     fits_contrast = float(obj_data[test_t_idx, 16 + test_wl_idx])
     test_wl_nm = float(wavelengths_nm[test_wl_idx])
@@ -363,6 +365,7 @@ def test_disk_surface_brightness_matches_exoverses(fits_fixture):
     ex_cube = np.asarray(ex_disk.contrast, dtype=np.float32)  # cast to float32
 
     assert sk_cube.shape == ex_cube.shape, (
-        f"Disk cube shape mismatch: skyscapes={sk_cube.shape}, exoverses={ex_cube.shape}"
+        f"Disk cube shape mismatch: "
+        f"skyscapes={sk_cube.shape}, exoverses={ex_cube.shape}"
     )
     np.testing.assert_array_equal(sk_cube, ex_cube)

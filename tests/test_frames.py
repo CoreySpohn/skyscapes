@@ -6,8 +6,8 @@ import astropy.units as u
 import jax
 import jax.numpy as jnp
 import numpy as np
-
 from exoverses.util.misc import gen_rotate_to_sky_coords as exoverses_rotate
+
 from skyscapes.io._frames import rotate_to_sky_coords
 
 
@@ -34,7 +34,7 @@ def test_matches_exoverses_general_case():
 
 
 def test_matches_exoverses_negative_pa():
-    """exoverses' star.py applies a negative PA convention; verify our port matches."""
+    """Exoverses' star.py applies a negative PA convention; verify our port matches."""
     rng = np.random.default_rng(1)
     v_np = rng.normal(size=(5, 3))
     inc_deg = -12.3
