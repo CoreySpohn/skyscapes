@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/CoreySpohn/skyscapes/compare/v0.2.0...v0.3.0) (2026-05-21)
+
+
+### Features
+
+* Add initial disk forward models ([d97e29c](https://github.com/CoreySpohn/skyscapes/commit/d97e29c5e511e71f557d00e912230812240a72b2))
+* Exovista loading (coordinate system translation, ZodiSource) matches exoverses ([8b2462a](https://github.com/CoreySpohn/skyscapes/commit/8b2462ae20e921d34811cfc3ffcf0b55cad15219))
+
 ## [0.2.0](https://github.com/CoreySpohn/skyscapes/compare/v0.1.0...v0.2.0) (2026-05-14)
 
 
