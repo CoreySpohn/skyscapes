@@ -7,4 +7,5 @@ Welcome to the documentation for `skyscapes`, a Astrophysical scene modeling for
 ```{toctree}
 :maxdepth: 2
 
+local_zodi_geometry
 ```

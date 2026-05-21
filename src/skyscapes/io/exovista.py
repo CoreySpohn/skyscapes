@@ -14,7 +14,7 @@ from collections.abc import Sequence
 import interpax
 import jax.numpy as jnp
 import numpy as np
-from astropy.io.fits import getdata, getheader
+from astropy.io import fits
 from hwoutils.constants import (
     AU2m,
     G_si,
@@ -34,11 +34,11 @@ from ..scene import Planet, SpectrumStar, System
 from ._frames import rotate_to_sky_coords
 
 
-def _load_star(fits_file: str, fits_ext: int = 4) -> SpectrumStar:
+def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> SpectrumStar:
     """Load the FITS star extension into a SpectrumStar."""
-    with open(fits_file, "rb") as f:
-        obj_data, obj_header = getdata(f, ext=fits_ext, header=True, memmap=False)
-        wavelengths_um = getdata(f, ext=0, header=False, memmap=False)
+    obj_data = hdul[fits_ext].data
+    obj_header = hdul[fits_ext].header
+    wavelengths_um = hdul[0].data
 
     wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
     times_year = jnp.asarray(2000.0 + obj_data[:, 0])
@@ -66,7 +66,7 @@ def _load_star(fits_file: str, fits_ext: int = 4) -> SpectrumStar:
 
 
 def _load_single_planet(
-    fits_file: str,
+    hdul: fits.HDUList,
     idx: int,
     star: SpectrumStar,
     wavelengths_nm: jnp.ndarray,
@@ -86,8 +86,8 @@ def _load_single_planet(
     computed at load time with the same ``trig_solver`` the runtime
     ``System`` uses.
     """
-    with open(fits_file, "rb") as f:
-        obj_data, obj_header = getdata(f, ext=5 + idx, header=True, memmap=False)
+    obj_data = hdul[5 + idx].data
+    obj_header = hdul[5 + idx].header
 
     times_year = jnp.asarray(2000.0 + obj_data[:, 0])
     times_jd = decimal_year_to_jd(times_year)
@@ -163,7 +163,7 @@ def _load_single_planet(
     return Planet(orbit=orbit, atmosphere=atmosphere), t0
 
 
-def _load_disk(fits_file: str, fits_ext: int) -> ExovistaDisk:
+def _load_disk(hdul: fits.HDUList, fits_ext: int) -> ExovistaDisk:
     """Load the ExoVista disk extension into an ExovistaDisk.
 
     The contrast cube is already rendered in the on-sky frame by
@@ -172,9 +172,9 @@ def _load_disk(fits_file: str, fits_ext: int) -> ExovistaDisk:
     by ``from_exovista`` from the same FITS star header), not on the
     disk itself.
     """
-    with open(fits_file, "rb") as f:
-        obj_data, header = getdata(f, ext=fits_ext, header=True, memmap=False)
-        wavelengths_um = getdata(f, ext=fits_ext - 1, header=False, memmap=False)
+    obj_data = hdul[fits_ext].data
+    header = hdul[fits_ext].header
+    wavelengths_um = hdul[fits_ext - 1].data
 
     wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
     contrast_cube = jnp.asarray(obj_data[:-1].astype(np.float32))
@@ -187,25 +187,15 @@ def _load_disk(fits_file: str, fits_ext: int) -> ExovistaDisk:
     )
 
 
-def get_earth_like_planet_indices(fits_file: str) -> list[int]:
-    """Identify Earth-like planets in an ExoVista FITS file.
-
-    Classification criteria:
-      - Scaled semi-major axis: 0.95 <= a / sqrt(L_star) < 1.67 AU
-      - Planet radius: 0.8 / sqrt(a_scaled) <= R < 1.4 R_earth
-    """
-    with open(fits_file, "rb") as f:
-        h = getheader(f, ext=0, memmap=False)
-        _, star_header = getdata(f, ext=4, header=True, memmap=False)
-
-    n_ext = h["N_EXT"]
+def _earth_like_planet_indices_from_hdul(hdul: fits.HDUList) -> list[int]:
+    """Earth-filter logic operating on an already-open HDUList."""
+    n_ext = hdul[0].header["N_EXT"]
     n_planets_total = n_ext - 4
-    star_luminosity_lsun = star_header.get("LSTAR", 1.0)
+    star_luminosity_lsun = hdul[4].header.get("LSTAR", 1.0)
 
     earth_indices: list[int] = []
     for i in range(n_planets_total):
-        with open(fits_file, "rb") as f:
-            _, planet_header = getdata(f, ext=5 + i, header=True, memmap=False)
+        planet_header = hdul[5 + i].header
         a_au = planet_header.get("A", 1.0)
         radius_rearth = planet_header.get("R", 1.0)
         a_scaled = a_au / np.sqrt(star_luminosity_lsun)
@@ -213,6 +203,17 @@ def get_earth_like_planet_indices(fits_file: str) -> list[int]:
         if (0.95 <= a_scaled < 1.67) and (lower_r <= radius_rearth < 1.4):
             earth_indices.append(i)
     return earth_indices
+
+
+def get_earth_like_planet_indices(fits_file: str) -> list[int]:
+    """Identify Earth-like planets in an ExoVista FITS file.
+
+    Classification criteria:
+      - Scaled semi-major axis: 0.95 <= a / sqrt(L_star) < 1.67 AU
+      - Planet radius: 0.8 / sqrt(a_scaled) <= R < 1.4 R_earth
+    """
+    with fits.open(fits_file, memmap=False) as hdul:
+        return _earth_like_planet_indices_from_hdul(hdul)
 
 
 def from_exovista(
@@ -239,40 +240,37 @@ def from_exovista(
     """
     disk_ext = 2
 
-    with open(fits_file, "rb") as f:
-        h = getheader(f, ext=0, memmap=False)
-    n_ext = h["N_EXT"]
-    n_planets_total = n_ext - 4
+    with fits.open(fits_file, memmap=False) as hdul:
+        n_ext = hdul[0].header["N_EXT"]
+        n_planets_total = n_ext - 4
 
-    if planet_indices is None:
-        if only_earths:
-            planet_indices = get_earth_like_planet_indices(fits_file)
-        else:
-            planet_indices = list(range(n_planets_total))
+        if planet_indices is None:
+            if only_earths:
+                planet_indices = _earth_like_planet_indices_from_hdul(hdul)
+            else:
+                planet_indices = list(range(n_planets_total))
 
-    with open(fits_file, "rb") as f:
-        wavelengths_um = getdata(f, ext=0, header=False, memmap=False)
-        star_header = getheader(f, ext=4, memmap=False)
-    wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
+        wavelengths_um = hdul[0].data
+        wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
+        star_header = hdul[4].header
+        midplane_inc_deg = float(star_header.get("I", 0.0))
+        midplane_pa_deg = float(star_header.get("PA", 0.0))
 
-    midplane_inc_deg = float(star_header.get("I", 0.0))
-    midplane_pa_deg = float(star_header.get("PA", 0.0))
-
-    star = _load_star(fits_file, fits_ext=4)
-    solver = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
-    planets = tuple(
-        _load_single_planet(
-            fits_file,
-            i,
-            star,
-            wavelengths_nm,
-            solver,
-            midplane_inc_deg=midplane_inc_deg,
-            midplane_pa_deg=midplane_pa_deg,
-        )[0]
-        for i in planet_indices
-    )
-    disk = _load_disk(fits_file, disk_ext)
+        star = _load_star(hdul, fits_ext=4)
+        solver = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
+        planets = tuple(
+            _load_single_planet(
+                hdul,
+                i,
+                star,
+                wavelengths_nm,
+                solver,
+                midplane_inc_deg=midplane_inc_deg,
+                midplane_pa_deg=midplane_pa_deg,
+            )[0]
+            for i in planet_indices
+        )
+        disk = _load_disk(hdul, disk_ext)
 
     return System(
         star=star,

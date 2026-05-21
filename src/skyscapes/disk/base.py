@@ -14,6 +14,13 @@ class AbstractDisk(eqx.Module):
     Subclasses return contrast (flux ratio relative to the host star) per
     pixel. The concrete ``System`` multiplies by ``star.spec_flux_density``
     to turn that into ph/s/m^2/nm per pixel.
+
+    ``incl_deg`` / ``pa_deg`` are supplied at render time rather than stored
+    on the disk so the System's midplane orientation drives every disk
+    component consistently. Disks whose geometry is pre-baked into their
+    representation (e.g. ``ExovistaDisk``'s contrast cube) may ignore the
+    arguments; parametric disks (``GraterDisk``, ``ExovistaParametricDisk``)
+    consume them.
     """
 
     @abstractmethod
@@ -21,6 +28,8 @@ class AbstractDisk(eqx.Module):
         self,
         wavelength_nm: Array,
         time_jd: Array,
+        incl_deg: Array,
+        pa_deg: Array,
     ) -> Array:
         """Return contrast per pixel, shape ``(ny, nx)``."""
 

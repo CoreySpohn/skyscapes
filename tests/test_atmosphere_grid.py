@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import jax
 import jax.numpy as jnp
 
 from skyscapes.atmosphere import (
@@ -73,3 +74,34 @@ def test_grid_multiple_planets_independent():
     )
     assert jnp.allclose(result[0], 0.1, rtol=1e-6)
     assert jnp.allclose(result[1], 0.2, rtol=1e-6)
+
+
+def test_grid_handles_x64_query_against_float32_cube():
+    """Regression: GridAtmosphere tolerates float64 query under x64.
+
+    The loaded ExoVista contrast cube is float32. Under
+    ``with jax.enable_x64():`` the orbit propagator returns float64
+    phase angles, and ``interpax.interp2d`` previously raised
+    ``TypeError: switch branches must have equal output types`` on the
+    mismatch. ``reflected_spectrum`` now promotes all interp inputs to
+    a common dtype before calling interpax.
+    """
+    wl, phase_deg, contrast = _flat_grid()
+    # Force the cube and grids to float32 (matches what the ExoVista
+    # loader produces on disk).
+    atm = GridAtmosphere(
+        Rp_Rearth=jnp.asarray([1.0], dtype=jnp.float32),
+        wavelengths_nm=wl.astype(jnp.float32),
+        phase_angle_deg=phase_deg.astype(jnp.float32),
+        contrast_grid=contrast[None, ...].astype(jnp.float32),
+    )
+
+    with jax.enable_x64():
+        result = atm.reflected_spectrum(
+            phase_angle_rad=jnp.array([[jnp.pi / 2]], dtype=jnp.float64),
+            dist_AU=jnp.array([[1.0]], dtype=jnp.float64),
+            wavelength_nm=jnp.array(600.0, dtype=jnp.float64),
+        )
+        # Result follows the promoted dtype (float64).
+        assert result.dtype == jnp.float64
+        assert jnp.allclose(result, 0.1, rtol=1e-5)

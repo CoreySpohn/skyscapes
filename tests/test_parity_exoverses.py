@@ -252,15 +252,11 @@ def test_planet_contrast_at_fits_times_matches_loader(fits_fixture):
     percent.  5% is the agreed ceiling; anything larger indicates a loader
     regression.
 
-    Note: run in default float32 mode (no ``with jax.enable_x64():``) to
-    avoid a latent skyscapes bug -- ``Planet.atmosphere.contrast_grid`` is
-    loaded as float32 from FITS, but if ``jax_enable_x64`` is active the
-    phase-angle arrays computed by ``KeplerianOrbit.propagate`` come out as
-    float64. interpax then raises ``TypeError: switch branches must have
-    equal output types`` when the float32 grid meets the float64 query.
-    Fixing this requires either casting ``contrast_grid`` to float64 at
-    load time or coercing the propagator output to match the grid dtype;
-    both are out of scope here. Tracked as a follow-up.
+    Runs in default float32 mode (no ``with jax.enable_x64():``); the
+    knot comparison is loose enough that float32 precision is fine. The
+    previous float32/float64 dtype mismatch in ``GridAtmosphere`` was
+    fixed by promoting interp inputs to a common dtype at query time
+    (see ``GridAtmosphere.reflected_spectrum``).
     """
     sk_system = from_exovista(fits_fixture, planet_indices=[0])
 

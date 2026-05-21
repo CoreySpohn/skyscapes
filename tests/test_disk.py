@@ -16,7 +16,12 @@ def test_exovista_disk_flux_shape():
         wavelengths_nm=wl,
         contrast_cube=cube,
     )
-    sb = d.surface_brightness(wavelength_nm=jnp.array(500.0), time_jd=jnp.array(0.0))
+    sb = d.surface_brightness(
+        wavelength_nm=jnp.array(500.0),
+        time_jd=jnp.array(0.0),
+        incl_deg=jnp.array(60.0),
+        pa_deg=jnp.array(0.0),
+    )
     assert sb.shape == (4, 6)
     assert jnp.allclose(sb, 1e-7, rtol=1e-5)
 

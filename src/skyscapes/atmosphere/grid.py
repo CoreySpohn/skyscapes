@@ -46,17 +46,37 @@ class GridAtmosphere(AbstractAtmosphere):
         wl_scalar = jnp.asarray(wavelength_nm)
         phase_deg = jnp.rad2deg(phase_angle_rad) % 360.0
 
+        # Promote all interp inputs to a common dtype. Loaded ExoVista
+        # contrast cubes are float32; under ``with jax.enable_x64():``
+        # the orbit propagator returns float64 phase angles, and
+        # interpax raises ``TypeError: switch branches must have equal
+        # output types`` on the mismatch. Casting here keeps the load
+        # representation cheap (float32) and pays the promotion only at
+        # query time when needed.
+        dtype = jnp.result_type(
+            wl_scalar,
+            phase_deg,
+            self.wavelengths_nm,
+            self.phase_angle_deg,
+            self.contrast_grid,
+        )
+        wl_arr_scalar = wl_scalar.astype(dtype)
+        phase_deg_x = phase_deg.astype(dtype)
+        wavelengths_nm = self.wavelengths_nm.astype(dtype)
+        phase_angle_deg = self.phase_angle_deg.astype(dtype)
+        contrast_grid = self.contrast_grid.astype(dtype)
+
         def per_planet(grid_k, phase_row):
             # grid_k: (n_wl, n_phase); phase_row: (T,)
-            wl_arr = jnp.broadcast_to(wl_scalar, phase_row.shape)
+            wl_arr = jnp.broadcast_to(wl_arr_scalar, phase_row.shape)
             return interpax.interp2d(
                 wl_arr,
                 phase_row,
-                self.wavelengths_nm,
-                self.phase_angle_deg,
+                wavelengths_nm,
+                phase_angle_deg,
                 grid_k,
                 method="linear",
                 extrap=True,
             )
 
-        return jax.vmap(per_planet)(self.contrast_grid, phase_deg)
+        return jax.vmap(per_planet)(contrast_grid, phase_deg_x)

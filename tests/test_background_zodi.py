@@ -128,6 +128,118 @@ class TestZodiSourceLeinert:
         assert jnp.isfinite(flux)
         assert flux > 0
 
+    def test_brightness_monotonic_in_elongation(self, zodi_leinert):
+        """Ecliptic-plane brightness decreases as the target moves from Sun.
+
+        At fixed wavelength + zero ecliptic latitude, ``Delta_lambda_sun``
+        going 30 -> 90 -> 180 (target moves from near-Sun to anti-Sun)
+        should produce monotonically decreasing flux. This pins the
+        intended shape of Leinert Table 17 along the ecliptic ridge.
+        """
+        wl = 550.0
+        f30 = float(
+            zodi_leinert.spec_flux_density(
+                wl, 0.0, ecliptic_lat_deg=0.0, solar_lon_deg=30.0
+            )
+        )
+        f90 = float(
+            zodi_leinert.spec_flux_density(
+                wl, 0.0, ecliptic_lat_deg=0.0, solar_lon_deg=90.0
+            )
+        )
+        f180 = float(
+            zodi_leinert.spec_flux_density(
+                wl, 0.0, ecliptic_lat_deg=0.0, solar_lon_deg=180.0
+            )
+        )
+        assert f30 > f90 > f180, (
+            f"Expected monotonic decrease with elongation, got 30deg={f30:.3e}, "
+            f"90deg={f90:.3e}, 180deg={f180:.3e}"
+        )
+
+    def test_brightness_symmetric_in_ecliptic_latitude(self, zodi_leinert):
+        """The Leinert table is indexed by ``|beta|``; +-lat must match."""
+        wl = 550.0
+        flux_pos = float(
+            zodi_leinert.spec_flux_density(
+                wl, 0.0, ecliptic_lat_deg=+30.0, solar_lon_deg=90.0
+            )
+        )
+        flux_neg = float(
+            zodi_leinert.spec_flux_density(
+                wl, 0.0, ecliptic_lat_deg=-30.0, solar_lon_deg=90.0
+            )
+        )
+        assert jnp.isclose(flux_pos, flux_neg, rtol=1e-6)
+
+    def test_brightness_monotonic_in_latitude(self, zodi_leinert):
+        """At fixed elongation, brightness decreases toward the ecliptic pole."""
+        wl = 550.0
+        sl = 90.0
+        f0 = float(
+            zodi_leinert.spec_flux_density(
+                wl, 0.0, ecliptic_lat_deg=0.0, solar_lon_deg=sl
+            )
+        )
+        f30 = float(
+            zodi_leinert.spec_flux_density(
+                wl, 0.0, ecliptic_lat_deg=30.0, solar_lon_deg=sl
+            )
+        )
+        f60 = float(
+            zodi_leinert.spec_flux_density(
+                wl, 0.0, ecliptic_lat_deg=60.0, solar_lon_deg=sl
+            )
+        )
+        assert f0 > f30 > f60
+
+    def test_reference_position_normalisation(self):
+        """AYO and Leinert give the same flux at Leinert's tabulation reference.
+
+        AYO at 22.0 mag/arcsec^2 is position-independent and matches the
+        Leinert Table 17 value at its reference point (ecl_lat=0,
+        solar_lon=90) at V-band -- both correspond to ~22 mag. At other
+        positions Leinert deviates from AYO per the table.
+        """
+        wl = jnp.asarray(550.0)
+        ayo = ZodiSourceAYO(
+            jnp.linspace(400.0, 1000.0, 50), surface_brightness_mag=22.0
+        )
+        leinert = ZodiSourceLeinert(reference_mag_arcsec2=22.0)
+        f_ayo = float(ayo.spec_flux_density(wl, 0.0))
+        # At the Leinert table reference position (lat=0, sl=90).
+        f_lein_ref = float(
+            leinert.spec_flux_density(wl, 0.0, ecliptic_lat_deg=0.0, solar_lon_deg=90.0)
+        )
+        assert 0.97 < f_lein_ref / f_ayo < 1.03, (
+            "AYO 22 mag should match Leinert at (0, 90) within ~1%; "
+            f"got ratio={f_lein_ref / f_ayo:.4f}"
+        )
+
+        # At an off-reference position the two diverge -- pin the
+        # direction so a future refactor that breaks the table lookup
+        # gets flagged (135 deg is dimmer than 90 deg along the ecliptic).
+        f_lein_135 = float(
+            leinert.spec_flux_density(
+                wl, 0.0, ecliptic_lat_deg=0.0, solar_lon_deg=135.0
+            )
+        )
+        assert f_lein_135 < f_ayo
+
+    def test_out_of_range_returns_nan(self, zodi_leinert):
+        """Looking too close to the Sun is out-of-table -> NaN.
+
+        Leinert+1998 Table 17 starts at ``Delta_lambda_sun = 0`` only for
+        moderately high latitudes; for an ecliptic-plane look vector at
+        ~few-degree elongation the table is empty and the lookup must
+        return NaN so that observability gates downstream can detect
+        the unobservable epoch.
+        """
+        flux = zodi_leinert.spec_flux_density(
+            550.0, 0.0, ecliptic_lat_deg=0.0, solar_lon_deg=2.0
+        )
+        assert bool(jnp.isnan(flux))
+
 
 class TestZodiSourcePhotonFlux:
     """Tests for the passthrough zodiacal light model."""
