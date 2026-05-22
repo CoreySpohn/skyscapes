@@ -23,6 +23,12 @@ dependencies = [
     "jaxlib>=0.8.1",
     "optixstuff",
     "pooch",
+    # exojax -> radis 0.17 -> vaex-core. vaex-core 4.19 has Linux py3.12
+    # wheels but requires pandas<3; without this pin uv falls back to
+    # vaex-core 4.17.1, which ships no py3.12 wheel and fails to build
+    # from source (its setup.py imports the stdlib `imp` module, removed
+    # in 3.12).
+    'vaex-core>=4.19.0; python_version < "3.13"',
 ]
 [project.optional-dependencies]
 dev = ["pre-commit"]
