@@ -16,6 +16,7 @@ from jaxtyping import Array
 from orbix.equations.orbit import mean_anomaly_tp, mean_motion, period_n
 from orbix.system.orbit import AbstractOrbit
 
+from .._repr import indent
 from ..atmosphere import AbstractAtmosphere
 from .star import AbstractStar
 
@@ -126,3 +127,11 @@ class Planet(eqx.Module):
         c = self.contrast(trig_solver, wavelength_nm, t_jd, star=star)
         f_star = star.spec_flux_density(wavelength_nm, t_jd)
         return c * f_star
+
+    def __repr__(self) -> str:
+        """Nested summary: planet count + orbit + atmosphere."""
+        return (
+            f"Planet(K={self.n_planets})\n"
+            f"{indent('orbit: ' + repr(self.orbit))}\n"
+            f"{indent('atmosphere: ' + repr(self.atmosphere))}"
+        )

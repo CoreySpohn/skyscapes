@@ -61,6 +61,14 @@ class SimpleStar(AbstractStar):
         wl = jnp.asarray(wavelength_nm)
         return jnp.full_like(wl, self.flux_phot_per_nm_m2, dtype=wl.dtype)
 
+    def __repr__(self) -> str:
+        """Compact one-line summary of mass, distance, and flux."""
+        m_solar = self.Ms_kg / 1.988409870698051e30
+        return (
+            f"SimpleStar(M={m_solar:.3f} Msun, dist={self.dist_pc:.3g} pc, "
+            f"flux={self.flux_phot_per_nm_m2:.3g} ph/s/m^2/nm)"
+        )
+
 
 class SpectrumStar(AbstractStar):
     """Time- and wavelength-dependent star backed by an interpax 2D spline."""
@@ -115,3 +123,18 @@ class SpectrumStar(AbstractStar):
     ) -> Array:
         """Scalar or array spectral flux density [ph/s/m^2/nm]."""
         return self._flux_interp(wavelength_nm, time_jd)
+
+    def __repr__(self) -> str:
+        """One-line summary of metadata + wavelength/time grid extent."""
+        m_solar = self.Ms_kg / 1.988409870698051e30
+        wl_min = float(jnp.min(self._wavelengths_nm))
+        wl_max = float(jnp.max(self._wavelengths_nm))
+        n_t = int(self._times_jd.shape[0])
+        return (
+            f"SpectrumStar(M={m_solar:.3f} Msun, "
+            f"dist={self.dist_pc:.3g} pc, "
+            f"L={self.luminosity_lsun:.3g} Lsun, "
+            f"diam={self.diameter_arcsec:.3g} arcsec, "
+            f"RA/Dec=({self.ra_deg:.4f}, {self.dec_deg:.4f}) deg, "
+            f"wl={wl_min:.0f}-{wl_max:.0f} nm, n_times={n_t})"
+        )

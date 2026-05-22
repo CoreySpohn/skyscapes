@@ -14,6 +14,7 @@ import equinox as eqx
 import jax.numpy as jnp
 from jaxtyping import Array
 
+from .._repr import indent
 from ..disk import AbstractDisk
 from .planet import Planet
 from .star import AbstractStar
@@ -85,3 +86,25 @@ class System(eqx.Module):
         alpha = jnp.concatenate([a for a, _ in per_planet], axis=0)
         dMag = jnp.concatenate([m for _, m in per_planet], axis=0)
         return alpha, dMag
+
+    def __repr__(self) -> str:
+        """Tree-shaped summary: star + planets + disk + midplane geometry."""
+        n_modules = len(self.planets)
+        n_total = self.n_planets
+        lines = [
+            (
+                f"System(n_planet_modules={n_modules}, "
+                f"K_total={n_total}, "
+                f"midplane: i={self.midplane_inc_deg:.2f} deg, "
+                f"PA={self.midplane_pa_deg:.2f} deg)"
+            ),
+            indent("star: " + repr(self.star)),
+        ]
+        for i, p in enumerate(self.planets):
+            lines.append(indent(f"planet[{i}]:"))
+            lines.append(indent(repr(p), prefix="    "))
+        if self.disk is not None:
+            lines.append(indent("disk: " + repr(self.disk)))
+        else:
+            lines.append("  disk: None")
+        return "\n".join(lines)

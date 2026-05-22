@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import equinox as eqx
 
+from .._repr import indent
 from ..background import ZodiSource
 from .system import System
 
@@ -52,3 +53,13 @@ class Scene(eqx.Module):
     def disk(self):
         """Convenience accessor for the system's disk (may be ``None``)."""
         return self.system.disk
+
+    def __repr__(self) -> str:
+        """Tree-shaped summary of the contained system + zodi."""
+        lines = ["Scene"]
+        lines.append(indent(repr(self.system)))
+        if self.zodi is not None:
+            lines.append(indent("zodi: " + repr(self.zodi)))
+        else:
+            lines.append("  zodi: None")
+        return "\n".join(lines)

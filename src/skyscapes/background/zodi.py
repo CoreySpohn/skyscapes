@@ -110,6 +110,17 @@ class ZodiSourceAYO(eqx.Module):
         """
         return self._flux_interp(wavelength_nm)
 
+    def __repr__(self) -> str:
+        """One-line summary of the AYO zodi reference + wavelength grid."""
+        wl_min = float(self._wavelengths_nm.min())
+        wl_max = float(self._wavelengths_nm.max())
+        return (
+            f"ZodiSourceAYO(mag={self._reference_mag_arcsec2:.2f}/arcsec^2 "
+            f"@ {self._reference_wavelength_nm:.0f} nm, "
+            f"wl={wl_min:.0f}-{wl_max:.0f} nm, "
+            f"n_wl={int(self._wavelengths_nm.size)})"
+        )
+
 
 @final
 class ZodiSourceLeinert(eqx.Module):
@@ -185,6 +196,14 @@ class ZodiSourceLeinert(eqx.Module):
         flux_phot = flux_jy * Jy / (wavelength_nm * h)
         return flux_phot
 
+    def __repr__(self) -> str:
+        """One-line summary of the Leinert zodi reference."""
+        return (
+            f"ZodiSourceLeinert(ref_mag={self._reference_mag_arcsec2:.2f}/arcsec^2 "
+            f"@ {self._reference_wavelength_nm:.0f} nm; "
+            f"position-dependent)"
+        )
+
 
 @final
 class ZodiSourcePhotonFlux(eqx.Module):
@@ -253,3 +272,13 @@ class ZodiSourcePhotonFlux(eqx.Module):
         interface compatibility but ignored.
         """
         return self._flux_interp(wavelength_nm)
+
+    def __repr__(self) -> str:
+        """One-line summary of pre-tabulated zodi photon-flux source."""
+        wl_min = float(self._wavelengths_nm.min())
+        wl_max = float(self._wavelengths_nm.max())
+        return (
+            f"ZodiSourcePhotonFlux(ref_mag={self._reference_mag_arcsec2:.2f}/arcsec^2, "
+            f"wl={wl_min:.0f}-{wl_max:.0f} nm, "
+            f"n_wl={int(self._wavelengths_nm.size)}; pre-tabulated)"
+        )
