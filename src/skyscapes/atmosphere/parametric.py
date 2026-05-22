@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from jaxtyping import Array
 
+from .._repr import fmt_scalar_or_array
 from .base import AbstractAtmosphere
 
 
@@ -32,3 +33,8 @@ class ParametricAtmosphere(AbstractAtmosphere):
             "ParametricAtmosphere is a stub. A concrete RT-backed subclass "
             "will be introduced in a later plan."
         )
+
+    def __repr__(self) -> str:
+        """One-line summary marking this as a placeholder atmosphere."""
+        rp = fmt_scalar_or_array(self.Rp_Rearth)
+        return f"ParametricAtmosphere(Rp={rp} R_earth, stub)"

@@ -4,6 +4,7 @@ import jax.numpy as jnp
 from hwoutils.constants import Rearth2AU
 from jaxtyping import Array
 
+from .._repr import fmt_scalar_or_array
 from .base import AbstractAtmosphere
 
 
@@ -41,3 +42,9 @@ class LambertianAtmosphere(AbstractAtmosphere):
         Ag = self.Ag[:, None]
         phase = _lambert_phase(phase_angle_rad)
         return Ag * phase * (Rp_AU / dist_AU) ** 2
+
+    def __repr__(self) -> str:
+        """One-line summary of radius and geometric albedo."""
+        rp = fmt_scalar_or_array(self.Rp_Rearth)
+        ag = fmt_scalar_or_array(self.Ag)
+        return f"LambertianAtmosphere(Rp={rp} R_earth, Ag={ag})"

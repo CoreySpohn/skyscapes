@@ -7,6 +7,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
+from .._repr import fmt_scalar_or_array
 from .base import AbstractAtmosphere
 
 
@@ -80,3 +81,17 @@ class GridAtmosphere(AbstractAtmosphere):
             )
 
         return jax.vmap(per_planet)(contrast_grid, phase_deg_x)
+
+    def __repr__(self) -> str:
+        """One-line summary of grid shape (K, n_wl, n_phase) and wl range."""
+        K = int(self.Rp_Rearth.shape[0])
+        n_wl = int(self.wavelengths_nm.shape[0])
+        n_phase = int(self.phase_angle_deg.shape[0])
+        wl_min = float(self.wavelengths_nm.min())
+        wl_max = float(self.wavelengths_nm.max())
+        return (
+            f"GridAtmosphere(K={K}, "
+            f"Rp={fmt_scalar_or_array(self.Rp_Rearth)} R_earth, "
+            f"wl={wl_min:.0f}-{wl_max:.0f} nm ({n_wl} pts), "
+            f"phase={n_phase} pts)"
+        )

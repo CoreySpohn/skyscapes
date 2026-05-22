@@ -16,7 +16,14 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Astronomy",
 ]
-dependencies = ["hwoutils", "jax>=0.8.1", "jaxlib>=0.8.1", "optixstuff", "pooch"]
+dependencies = [
+    "exojax>=2.2",
+    "hwoutils",
+    "jax>=0.8.1",
+    "jaxlib>=0.8.1",
+    "optixstuff",
+    "pooch",
+]
 [project.optional-dependencies]
 dev = ["pre-commit"]
 docs = [
@@ -45,6 +52,11 @@ content-type = "text/markdown"
 
 [[tool.hatch.metadata.hooks.fancy-pypi-readme.fragments]]
 path = "README.md"
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: requires network or heavy database downloads (e.g. ExoJAX line lists)",
+]
 
 [tool.ruff.lint]
 select = ["B", "D", "E", "F", "I", "UP", "RUF"]
