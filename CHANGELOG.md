@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.0](https://github.com/CoreySpohn/skyscapes/compare/v0.3.0...v0.4.0) (2026-05-22)
+
+
+### Features
+
+* Add _repr helpers and Scene/System/Planet/Star/Zodi reprs ([4a2f819](https://github.com/CoreySpohn/skyscapes/commit/4a2f81947c024bdfe89d2fb21bdf1eb2292cbc9b))
+* **atmosphere:** Add ExoJax atmosphere and PrecomputedReflectivity cache ([426b520](https://github.com/CoreySpohn/skyscapes/commit/426b5203271a5abde67fc39b33040ee9812feb9c))
+* **disk:** Add reprs to disk models ([0a91fe8](https://github.com/CoreySpohn/skyscapes/commit/0a91fe827e5d0511c68763e6f74fb1169f0b4713))
+
+
+### Bug Fixes
+
+* Enable x64 when running tests ([f970de2](https://github.com/CoreySpohn/skyscapes/commit/f970de2716c9271f7e470f714631c8df13354452))
+* Pin vaex-core&gt;=4.19 for py3.12 wheels (radis transitive) ([9b7f830](https://github.com/CoreySpohn/skyscapes/commit/9b7f830574bc44fcfd5cdae9ea2b94140be0e67c))
+
 ## [0.3.0](https://github.com/CoreySpohn/skyscapes/compare/v0.2.0...v0.3.0) (2026-05-21)
 
 
