@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from jaxtyping import Array
 
+from .._repr import indent
 from .base import AbstractDisk
 
 
@@ -62,3 +63,10 @@ class CompositeDisk(AbstractDisk):
     def spatial_extent(self) -> tuple[float, float]:
         """Return the shared ``(width_arcsec, height_arcsec)``."""
         return self.components[0].spatial_extent()
+
+    def __repr__(self) -> str:
+        """Nested summary listing each component disk."""
+        lines = [f"CompositeDisk(n_components={len(self.components)})"]
+        for i, c in enumerate(self.components):
+            lines.append(indent(f"[{i}] {c!r}"))
+        return "\n".join(lines)

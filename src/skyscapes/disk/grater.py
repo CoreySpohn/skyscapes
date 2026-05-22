@@ -41,6 +41,7 @@ import interpax
 import jax.numpy as jnp
 from jaxtyping import Array
 
+from .._repr import fmt_scalar_or_array
 from ._los import los_integrate_scattered
 from .base import AbstractDisk
 
@@ -246,4 +247,23 @@ class GraterDisk(AbstractDisk):
         return (
             self.nx * self.pixel_scale_arcsec,
             self.ny * self.pixel_scale_arcsec,
+        )
+
+    def __repr__(self) -> str:
+        """Compact summary of radial/vertical/HG parameters + image/Ag grid."""
+        n_wl = int(self.wavelengths_nm.shape[0])
+        wl_min = float(self.wavelengths_nm.min())
+        wl_max = float(self.wavelengths_nm.max())
+        return (
+            f"GraterDisk(sma={fmt_scalar_or_array(self.sma_AU)} AU, "
+            f"radial: alpha_in={fmt_scalar_or_array(self.alpha_in)}, "
+            f"alpha_out={fmt_scalar_or_array(self.alpha_out)}, "
+            f"r=[{fmt_scalar_or_array(self.rmin_AU)}, "
+            f"{fmt_scalar_or_array(self.rmax_AU)}] AU; "
+            f"vertical: ksi0={fmt_scalar_or_array(self.ksi0_AU)} AU, "
+            f"beta={fmt_scalar_or_array(self.beta)}, "
+            f"gamma={fmt_scalar_or_array(self.gamma)}; "
+            f"HG/Ag grid: {n_wl} pts in {wl_min:.0f}-{wl_max:.0f} nm; "
+            f"image: {self.ny}x{self.nx} @ {self.pixel_scale_arcsec} arcsec/px, "
+            f"dist={self.dist_pc} pc, n_slices_los={self.n_slices_los})"
         )

@@ -55,3 +55,15 @@ class ExovistaDisk(AbstractDisk):
         """Return ``(width_arcsec, height_arcsec)``."""
         ny, nx = self.contrast_cube.shape[-2:]
         return (nx * self.pixel_scale_arcsec, ny * self.pixel_scale_arcsec)
+
+    def __repr__(self) -> str:
+        """One-line summary of cube shape, pixel scale, and wavelength grid."""
+        n_wl = int(self.wavelengths_nm.shape[0])
+        ny, nx = self.contrast_cube.shape[-2:]
+        wl_min = float(self.wavelengths_nm.min())
+        wl_max = float(self.wavelengths_nm.max())
+        return (
+            f"ExovistaDisk(loaded cube, "
+            f"image: {ny}x{nx} @ {self.pixel_scale_arcsec} arcsec/px, "
+            f"wl={wl_min:.0f}-{wl_max:.0f} nm ({n_wl} pts))"
+        )

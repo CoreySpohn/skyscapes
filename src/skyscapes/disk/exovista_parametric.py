@@ -50,6 +50,7 @@ import interpax
 import jax.numpy as jnp
 from jaxtyping import Array
 
+from .._repr import fmt_scalar_or_array
 from ._los import los_integrate_scattered
 from .base import AbstractDisk
 from .grater import henyey_greenstein
@@ -300,4 +301,30 @@ class ExovistaParametricDisk(AbstractDisk):
         return (
             self.nx * self.pixel_scale_arcsec,
             self.ny * self.pixel_scale_arcsec,
+        )
+
+    def __repr__(self) -> str:
+        """Compact summary of ring/density/HG parameters + image/Ag grid."""
+        n_wl = int(self.wavelengths_nm.shape[0])
+        wl_min = float(self.wavelengths_nm.min())
+        wl_max = float(self.wavelengths_nm.max())
+        return (
+            f"ExovistaParametricDisk("
+            f"ring: r0={fmt_scalar_or_array(self.r0_AU)} AU, "
+            f"dror={fmt_scalar_or_array(self.dror)}; "
+            f"PR-drag inner: rinner={fmt_scalar_or_array(self.rinner_AU)} AU; "
+            f"density: nzodis={fmt_scalar_or_array(self.nzodis)}, "
+            f"eta={fmt_scalar_or_array(self.eta)}, "
+            f"hor={fmt_scalar_or_array(self.hor)}; "
+            f"3-comp HG: g=[{fmt_scalar_or_array(self.g0)}, "
+            f"{fmt_scalar_or_array(self.g1)}, "
+            f"{fmt_scalar_or_array(self.g2)}], "
+            f"w=[{fmt_scalar_or_array(self.w0)}, "
+            f"{fmt_scalar_or_array(self.w1)}, "
+            f"{fmt_scalar_or_array(self.w2)}]; "
+            f"r=[{fmt_scalar_or_array(self.rmin_AU)}, "
+            f"{fmt_scalar_or_array(self.rmax_AU)}] AU; "
+            f"Ag grid: {n_wl} pts in {wl_min:.0f}-{wl_max:.0f} nm; "
+            f"image: {self.ny}x{self.nx} @ {self.pixel_scale_arcsec} arcsec/px, "
+            f"dist={self.dist_pc} pc, n_slices_los={self.n_slices_los})"
         )
