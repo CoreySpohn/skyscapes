@@ -12,7 +12,6 @@ from __future__ import annotations
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import pytest
 
 from skyscapes.atmosphere import (
     AbstractAtmosphere,
@@ -271,10 +270,10 @@ def test_rayleigh_xs_is_wired_through_to_output():
     flux contribution), increasing Rayleigh opacity decreases the
     output. Real-physics behavior -- Rayleigh actually *brightening*
     the blue end via scattered flux, with the canonical ``1/lambda^4``
-    wavelength dependence -- is exercised by
-    :func:`test_from_default_setup_real_exojax` against
-    ``ArtReflectPure``. Here we only verify that the Rayleigh fields
-    are plumbed through to ``opacity_profile_xs``.
+    wavelength dependence -- is exercised against ``ArtReflectPure``
+    in the dev scripts that drive a full ExoJAX setup. Here we only
+    verify that the Rayleigh fields are plumbed through to
+    ``opacity_profile_xs``.
     """
     K = 1
     atm_low = make_atmosphere(K=K)
@@ -545,44 +544,3 @@ def test_atmosphere_init_signature_uses_default_setup():
     }
     for name in required_kwargs:
         assert name in sig.parameters, f"missing {name} in from_default_setup"
-
-
-# An end-to-end smoke test against the real ExoJAX setup is intentionally
-# *not* a default pytest target -- it would download O(100 MB) per molecule
-# on first run. Mark it ``slow`` so callers can opt in:
-#
-#     uv run --package skyscapes pytest -m slow \
-#         skyscapes/tests/test_exojax_atmosphere.py
-@pytest.mark.slow
-def test_from_default_setup_real_exojax():
-    """Slow integration test: actually build ExoJAX engines via from_default_setup.
-
-    Triggers database downloads on first run. Verify the resulting
-    ExoJaxAtmosphere produces a finite spectrum at one wavelength for
-    one planet with default-ish Earth-like parameters.
-    """
-    K = 1
-    atm = ExoJaxAtmosphere.from_default_setup(
-        Rp_Rearth=jnp.ones(K),
-        log_mmrs={
-            "H2O": jnp.full((K,), -3.0),
-            "CO2": jnp.full((K,), -4.0),
-            "CH4": jnp.full((K,), -6.0),
-            "O2": jnp.full((K,), -1.0),
-            "O3": jnp.full((K,), -7.0),
-        },
-        T_eq_K=jnp.full((K,), 288.0),
-        T_alpha=jnp.full((K,), 0.07),
-        log_surface_albedo=jnp.full((K,), jnp.log10(0.3)),
-        log_gravity_cgs=jnp.full((K,), jnp.log10(981.0)),
-        n_wavenumbers=500,  # small for test speed
-        n_layers=20,
-    )
-    out = atm.reflected_spectrum(
-        jnp.full((K, 1), 0.5),
-        jnp.full((K, 1), 1.0),
-        jnp.array(550.0),
-    )
-    assert out.shape == (K, 1)
-    assert bool(jnp.all(jnp.isfinite(out)))
-    assert bool(jnp.all(out > 0.0))

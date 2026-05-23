@@ -59,11 +59,6 @@ content-type = "text/markdown"
 [[tool.hatch.metadata.hooks.fancy-pypi-readme.fragments]]
 path = "README.md"
 
-[tool.pytest.ini_options]
-markers = [
-    "slow: requires network or heavy database downloads (e.g. ExoJAX line lists)",
-]
-
 [tool.ruff.lint]
 select = ["B", "D", "E", "F", "I", "UP", "RUF"]
 
