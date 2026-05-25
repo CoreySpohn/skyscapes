@@ -3,16 +3,22 @@
 JAX-native astrophysical scene modeling for HWO direct imaging.
 
 `skyscapes` provides the **scene representation** that downstream
-HWO simulation tools consume:
+HWO simulation tools consume -- a forward model that runs at variable
+fidelity, from analytic sandbox models for fast iteration up to
+research-grade physics for retrievals. High-fidelity scene generators
+like [ExoVista](https://github.com/nasa/ExoVista) feed *into* skyscapes
+through loaders ({func}`~skyscapes.from_exovista`); skyscapes does not
+try to replace them.
 
 - A `Scene` is "everything on the sky that the telescope sees" --
   one `System` (a star with planets and optionally a disk) plus
   optional background sources (zodiacal light, background galaxies, etc.).
 - Source models (`Star`, `Planet`, `Disk`, physical models,
   backgrounds) are composable `eqx.Module`s -- swap any one without
-  touching the rest.
+  touching the rest, or swap the whole class for a higher-fidelity
+  variant.
 - Loaders bridge external simulation outputs (ExoVista FITS) into
-  the workspace via `from_exovista(...)`.
+  the workspace via {func}`~skyscapes.from_exovista`.
 
 The same {class}`~skyscapes.Scene` flows through both the
 {mod}`coronagraphoto` image simulator and the
