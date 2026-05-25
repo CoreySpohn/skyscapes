@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/CoreySpohn/skyscapes/compare/v1.0.1...v1.0.2) (2026-05-25)
+
+
+### Bug Fixes
+
+* Update docs and readme to compile properly ([73a19d2](https://github.com/CoreySpohn/skyscapes/commit/73a19d2f4d72f2a6e4d9945f428ef8473ad93286))
+
 ## [1.0.1](https://github.com/CoreySpohn/skyscapes/compare/v1.0.0...v1.0.1) (2026-05-25)
 
 
