@@ -28,8 +28,8 @@ from orbix.equations.orbit import state_vector_to_keplerian
 from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.system.orbit import KeplerianOrbit
 
-from ..atmosphere import GridAtmosphere
 from ..disk import ExovistaDisk
+from ..physical_model import GridPhysicalModel
 from ..scene import Planet, Star, System
 from ._frames import rotate_to_sky_coords
 
@@ -153,14 +153,21 @@ def _load_single_planet(
         extrap=True,
     ).reshape(xq.shape)
 
-    atmosphere = GridAtmosphere(
-        Rp_Rearth=jnp.array([float(obj_header.get("R"))]),
+    physical_model = GridPhysicalModel(
         wavelengths_nm=wavelengths_nm,
         phase_angle_deg=regular_grid,
         contrast_grid=contrast_grid[None, ...],
     )
 
-    return Planet(orbit=orbit, atmosphere=atmosphere), t0
+    return (
+        Planet(
+            Rp_Rearth=jnp.array([float(obj_header.get("R"))]),
+            Mp_Mearth=jnp.array([float(obj_header.get("M"))]),
+            orbit=orbit,
+            physical_model=physical_model,
+        ),
+        t0,
+    )
 
 
 def _load_disk(hdul: fits.HDUList, fits_ext: int) -> ExovistaDisk:

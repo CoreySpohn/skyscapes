@@ -1,4 +1,4 @@
-"""Tests for :mod:`skyscapes.atmosphere.exojax.o3_chappuis`.
+"""Tests for :mod:`skyscapes.physical_model.exojax.o3_chappuis`.
 
 Avoids network access by writing a small synthetic PSG-format file to
 a tmp path and pointing the adapter at it. The real Serdyuchenko table
@@ -11,7 +11,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from skyscapes.atmosphere.exojax.o3_chappuis import (
+from skyscapes.physical_model.exojax.o3_chappuis import (
     O3_MOLMASS,
     O3ChappuisOpacity,
     _load_psg_xs_table,

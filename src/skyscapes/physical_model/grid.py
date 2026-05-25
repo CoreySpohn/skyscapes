@@ -7,32 +7,31 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
-from .._repr import fmt_scalar_or_array
-from .base import AbstractAtmosphere
+from .base import AbstractPhysicalModel
 
 
-class GridAtmosphere(AbstractAtmosphere):
+class GridPhysicalModel(AbstractPhysicalModel):
     """Per-planet 2D interpolated contrast over (wavelength, phase-angle).
 
-    Distance is ignored -- the grid already encodes a flux ratio.
+    Distance and planet radius are ignored -- the grid already encodes
+    a flux ratio.
 
     Attributes:
-        Rp_Rearth: Planetary radii, shape ``(K,)``.
         wavelengths_nm: 1-D wavelength grid [nm], shape ``(n_wl,)``.
         phase_angle_deg: 1-D phase-angle grid [deg], shape ``(n_phase,)``.
         contrast_grid: Contrast cube, shape ``(K, n_wl, n_phase)``.
     """
 
-    Rp_Rearth: Array
     wavelengths_nm: Array
     phase_angle_deg: Array
     contrast_grid: Array
 
-    def reflected_spectrum(
+    def contrast(
         self,
         phase_angle_rad: Array,
         dist_AU: Array,
         wavelength_nm: Array,
+        Rp_Rearth: Array,
     ) -> Array:
         """Per-planet contrast at (wavelength, phase).
 
@@ -40,6 +39,7 @@ class GridAtmosphere(AbstractAtmosphere):
             phase_angle_rad: Phase angle per planet [rad], shape ``(K, T)``.
             dist_AU: Shape ``(K, T)``; ignored (grid encodes flux ratio).
             wavelength_nm: Scalar wavelength.
+            Rp_Rearth: Shape ``(K,)``; ignored (grid encodes flux ratio).
 
         Returns:
             Contrast, shape ``(K, T)``.
@@ -84,14 +84,13 @@ class GridAtmosphere(AbstractAtmosphere):
 
     def __repr__(self) -> str:
         """One-line summary of grid shape (K, n_wl, n_phase) and wl range."""
-        K = int(self.Rp_Rearth.shape[0])
+        K = int(self.contrast_grid.shape[0])
         n_wl = int(self.wavelengths_nm.shape[0])
         n_phase = int(self.phase_angle_deg.shape[0])
         wl_min = float(self.wavelengths_nm.min())
         wl_max = float(self.wavelengths_nm.max())
         return (
-            f"GridAtmosphere(K={K}, "
-            f"Rp={fmt_scalar_or_array(self.Rp_Rearth)} R_earth, "
+            f"GridPhysicalModel(K={K}, "
             f"wl={wl_min:.0f}-{wl_max:.0f} nm ({n_wl} pts), "
             f"phase={n_phase} pts)"
         )

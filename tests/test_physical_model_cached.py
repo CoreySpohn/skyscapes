@@ -1,7 +1,7 @@
-"""Tests for PrecomputedReflectivity and from_default_setup_cached.
+"""Tests for PrecomputedPhysicalModel and from_default_setup_cached.
 
-Uses the fake engines from test_exojax_atmosphere so the spectrum is
-deterministic without triggering real ExoJAX downloads.
+Uses the fake engines from test_physical_model_exojax so the spectrum
+is deterministic without triggering real ExoJAX downloads.
 """
 
 from __future__ import annotations
@@ -10,19 +10,19 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from skyscapes.atmosphere import (
-    AbstractAtmosphere,
-    PrecomputedReflectivity,
+from skyscapes.physical_model import (
+    AbstractPhysicalModel,
+    PrecomputedPhysicalModel,
 )
 
-from .test_exojax_atmosphere import make_atmosphere
+from .test_physical_model_exojax import make_physical_model
 
 
-def test_precomputed_subclasses_abstract_atmosphere():
-    """``PrecomputedReflectivity`` satisfies the ``AbstractAtmosphere`` contract."""
-    atm = make_atmosphere(K=1)
-    cached = PrecomputedReflectivity.from_atmosphere(atm)
-    assert isinstance(cached, AbstractAtmosphere)
+def test_precomputed_subclasses_abstract_physical_model():
+    """``PrecomputedPhysicalModel`` satisfies the ``AbstractPhysicalModel`` contract."""
+    model = make_physical_model(K=1)
+    cached = PrecomputedPhysicalModel.from_physical_model(model)
+    assert isinstance(cached, AbstractPhysicalModel)
 
 
 def test_precomputed_spectrum_matches_source_at_grid_wavelengths():
@@ -33,29 +33,31 @@ def test_precomputed_spectrum_matches_source_at_grid_wavelengths():
     interpolation lossless.
     """
     K = 1
-    atm = make_atmosphere(K=K)
-    cached = PrecomputedReflectivity.from_atmosphere(atm)
+    model = make_physical_model(K=K)
+    cached = PrecomputedPhysicalModel.from_physical_model(model)
 
     # Sample a wavelength on the grid (no interp error).
-    nu_mid = atm.nu_grid[atm.n_nu // 2]
+    nu_mid = model.nu_grid[model.n_nu // 2]
     wl_nm = jnp.array(1.0e7 / float(nu_mid))
 
     phase = jnp.full((K, 1), 0.5)
     dist = jnp.full((K, 1), 1.0)
-    out_atm = atm.reflected_spectrum(phase, dist, wl_nm)
-    out_cached = cached.reflected_spectrum(phase, dist, wl_nm)
-    assert jnp.allclose(out_atm, out_cached, rtol=1.0e-5)
+    Rp = jnp.ones(K)
+    out_model = model.contrast(phase, dist, wl_nm, Rp)
+    out_cached = cached.contrast(phase, dist, wl_nm, Rp)
+    assert jnp.allclose(out_model, out_cached, rtol=1.0e-5)
 
 
 def test_precomputed_spectrum_cube_shape():
-    """``reflected_spectrum_cube`` returns ``(W, K, T)`` and is finite."""
+    """``contrast_cube`` returns ``(W, K, T)`` and is finite."""
     K, T, W = 2, 3, 5
-    atm = make_atmosphere(K=K)
-    cached = PrecomputedReflectivity.from_atmosphere(atm)
+    model = make_physical_model(K=K)
+    cached = PrecomputedPhysicalModel.from_physical_model(model)
     phase = jnp.full((K, T), 0.5)
     dist = jnp.full((K, T), 1.0)
     wls = jnp.linspace(450.0, 900.0, W)
-    out = cached.reflected_spectrum_cube(phase, dist, wls)
+    Rp = jnp.ones(K)
+    out = cached.contrast_cube(phase, dist, wls, Rp)
     assert out.shape == (W, K, T)
     assert bool(jnp.all(jnp.isfinite(out)))
 
@@ -63,17 +65,18 @@ def test_precomputed_spectrum_cube_shape():
 def test_save_load_roundtrip_preserves_values(tmp_path):
     """``save`` then ``load`` yields the same spectrum."""
     K = 2
-    atm = make_atmosphere(K=K)
-    cached = PrecomputedReflectivity.from_atmosphere(atm)
+    model = make_physical_model(K=K)
+    cached = PrecomputedPhysicalModel.from_physical_model(model)
     path = tmp_path / "cached.npz"
     cached.save(path)
-    loaded = PrecomputedReflectivity.load(path)
+    loaded = PrecomputedPhysicalModel.load(path)
 
     phase = jnp.full((K, 1), 0.5)
     dist = jnp.full((K, 1), 1.0)
     wl = jnp.array(550.0)
-    out_orig = cached.reflected_spectrum(phase, dist, wl)
-    out_loaded = loaded.reflected_spectrum(phase, dist, wl)
+    Rp = jnp.ones(K)
+    out_orig = cached.contrast(phase, dist, wl, Rp)
+    out_loaded = loaded.contrast(phase, dist, wl, Rp)
     assert jnp.allclose(out_orig, out_loaded, rtol=1.0e-7)
 
 
@@ -85,45 +88,44 @@ def test_load_rejects_mismatched_cache_format_version(tmp_path):
     np.savez(
         path,
         cache_format_version=np.asarray(9999),  # bogus future version
-        Rp_Rearth=np.ones(1),
         reflectivity=np.ones((1, 50)),
         nu_grid=np.linspace(1.0e4, 2.5e4, 50),
     )
     with pytest.raises(ValueError, match="format version"):
-        PrecomputedReflectivity.load(path)
+        PrecomputedPhysicalModel.load(path)
 
 
 def test_precomputed_jit_stable():
-    """JIT-compiling ``reflected_spectrum`` matches eager output."""
+    """JIT-compiling ``contrast`` matches eager output."""
     K = 1
-    atm = make_atmosphere(K=K)
-    cached = PrecomputedReflectivity.from_atmosphere(atm)
+    model = make_physical_model(K=K)
+    cached = PrecomputedPhysicalModel.from_physical_model(model)
     phase = jnp.full((K, 1), 0.5)
     dist = jnp.full((K, 1), 1.0)
     wl = jnp.array(550.0)
+    Rp = jnp.ones(K)
 
-    f = jax.jit(lambda a: a.reflected_spectrum(phase, dist, wl))
-    eager = cached.reflected_spectrum(phase, dist, wl)
+    f = jax.jit(lambda a: a.contrast(phase, dist, wl, Rp))
+    eager = cached.contrast(phase, dist, wl, Rp)
     jitted = f(cached)
     assert jnp.allclose(eager, jitted, rtol=1.0e-6)
 
 
 def test_repr_mentions_precomputed_nature():
-    """The repr identifies it as a precomputed (no-RT) atmosphere."""
-    atm = make_atmosphere(K=2)
-    cached = PrecomputedReflectivity.from_atmosphere(atm)
+    """The repr identifies it as a precomputed (no-RT) physical model."""
+    model = make_physical_model(K=2)
+    cached = PrecomputedPhysicalModel.from_physical_model(model)
     s = repr(cached)
-    assert "PrecomputedReflectivity" in s
+    assert "PrecomputedPhysicalModel" in s
     assert "K=2" in s
     assert "Wavelength:" in s
 
 
 def test_cache_key_is_stable_and_input_sensitive():
     """The same kwargs hash to the same key; changing any kwarg flips it."""
-    from skyscapes.atmosphere.exojax.atmosphere import _cache_key
+    from skyscapes.physical_model.exojax.physical_model import _cache_key
 
     base_kwargs = {
-        "Rp_Rearth": jnp.ones(1),
         "log_mmrs": {"H2O": jnp.full((1,), -2.5)},
         "T_eq_K": jnp.full((1,), 288.0),
         "wavelength_min_nm": 400.0,
@@ -132,11 +134,6 @@ def test_cache_key_is_stable_and_input_sensitive():
     key1 = _cache_key(**base_kwargs)
     key2 = _cache_key(**base_kwargs)
     assert key1 == key2, "same kwargs should hash identically"
-
-    # Flip a per-planet array value -- key must change.
-    modified = {**base_kwargs, "Rp_Rearth": jnp.full((1,), 1.5)}
-    key3 = _cache_key(**modified)
-    assert key3 != key1
 
     # Flip a scalar config -- key must change.
     modified2 = {**base_kwargs, "n_layers": 50}
@@ -154,11 +151,11 @@ def test_cache_key_is_stable_and_input_sensitive():
 
 def test_cache_key_handles_eqx_modules():
     """Passing an AbstractMmrProfile (eqx.Module) is hashable."""
-    from skyscapes.atmosphere.exojax.atmosphere import _cache_key
-    from skyscapes.atmosphere.exojax.components import (
+    from skyscapes.physical_model.exojax.components import (
         ConstantMmr,
         StratosphericPeakMmr,
     )
+    from skyscapes.physical_model.exojax.physical_model import _cache_key
 
     profile_const = ConstantMmr(log_mmr=jnp.full((1,), -2.5))
     profile_peak = StratosphericPeakMmr(
@@ -174,47 +171,43 @@ def test_cache_key_handles_eqx_modules():
 def test_cached_setup_roundtrip_using_fake_engines(tmp_path, monkeypatch):
     """``from_default_setup_cached`` round-trips: build -> save -> load.
 
-    Uses the fake engines from test_exojax_atmosphere by monkey-patching
+    Uses the fake engines from test_physical_model_exojax by monkey-patching
     ``build_exojax_engines`` to return them, so we don't actually
     invoke ExoJAX. Verifies that the second call (cache hit) returns
-    the same PrecomputedReflectivity as the first (cache miss).
+    the same PrecomputedPhysicalModel as the first (cache miss).
     """
-    import skyscapes.atmosphere.exojax.atmosphere as exojax_atmosphere_mod
-    from skyscapes.atmosphere import ExoJaxAtmosphere
+    import skyscapes.physical_model.exojax.physical_model as exojax_pm_mod
+    from skyscapes.physical_model import ExoJaxPhysicalModel
 
     K = 1
-    atm = make_atmosphere(K=K)
+    model = make_physical_model(K=K)
 
     # Monkey-patch build_exojax_engines to skip ExoJAX entirely.
     def fake_build(*, molecules, **_):
-        # The function signature isn't load-bearing for the test --
-        # what matters is that downstream callers get something
-        # consumable by _assemble_species + _assemble_bulk.
         species_prebuilt = {
             s.name: {
                 "molmass": s.molmass,
                 "opa": s.opa,
                 "rayleigh_xs": s.rayleigh_xs,
             }
-            for s in atm.species
+            for s in model.species
         }
         bulk_prebuilt = {
-            "name": atm.bulk.name,
-            "molmass": atm.bulk.molmass,
-            "rayleigh_xs": atm.bulk.rayleigh_xs,
+            "name": model.bulk.name,
+            "molmass": model.bulk.molmass,
+            "rayleigh_xs": model.bulk.rayleigh_xs,
         }
         return {
-            "rt_engine": atm.rt_engine,
-            "nu_grid": atm.nu_grid,
-            "n_nu": atm.n_nu,
+            "rt_engine": model.rt_engine,
+            "nu_grid": model.nu_grid,
+            "n_nu": model.n_nu,
             "species_prebuilt": species_prebuilt,
             "bulk_prebuilt": bulk_prebuilt,
         }
 
-    monkeypatch.setattr(exojax_atmosphere_mod, "build_exojax_engines", fake_build)
+    monkeypatch.setattr(exojax_pm_mod, "build_exojax_engines", fake_build)
 
     kwargs = dict(
-        Rp_Rearth=jnp.ones(K),
         log_mmrs={"H2O": jnp.full((K,), -3.0)},
         T_eq_K=jnp.full((K,), 288.0),
         T_alpha=jnp.full((K,), 0.07),
@@ -228,14 +221,14 @@ def test_cached_setup_roundtrip_using_fake_engines(tmp_path, monkeypatch):
     )
 
     # First call: cache miss, builds + saves.
-    cached_a = ExoJaxAtmosphere.from_default_setup_cached(**kwargs)
-    assert isinstance(cached_a, PrecomputedReflectivity)
+    cached_a = ExoJaxPhysicalModel.from_default_setup_cached(**kwargs)
+    assert isinstance(cached_a, PrecomputedPhysicalModel)
     files = list(tmp_path.glob("*.npz"))
     assert len(files) == 1, "cache file should be written on miss"
 
     # Second call: cache hit, loads same file.
-    cached_b = ExoJaxAtmosphere.from_default_setup_cached(**kwargs)
-    assert isinstance(cached_b, PrecomputedReflectivity)
+    cached_b = ExoJaxPhysicalModel.from_default_setup_cached(**kwargs)
+    assert isinstance(cached_b, PrecomputedPhysicalModel)
     files_after = list(tmp_path.glob("*.npz"))
     assert len(files_after) == 1, "cache hit should not write a new file"
 
@@ -243,7 +236,8 @@ def test_cached_setup_roundtrip_using_fake_engines(tmp_path, monkeypatch):
     phase = jnp.full((K, 1), 0.5)
     dist = jnp.full((K, 1), 1.0)
     wl = jnp.array(550.0)
+    Rp = jnp.ones(K)
     assert jnp.allclose(
-        cached_a.reflected_spectrum(phase, dist, wl),
-        cached_b.reflected_spectrum(phase, dist, wl),
+        cached_a.contrast(phase, dist, wl, Rp),
+        cached_b.contrast(phase, dist, wl, Rp),
     )

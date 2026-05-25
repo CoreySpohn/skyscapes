@@ -1,8 +1,8 @@
-"""skyscapes.atmosphere.ExoJaxAtmosphere -- adapter for ExoJAX's 2-stream RT.
+"""skyscapes.physical_model.ExoJaxPhysicalModel -- adapter for ExoJAX's 2-stream RT.
 
 The real ExoJAX engines require database downloads (POKAZATEL, UCL-4000,
 etc.) on first use, which is too heavy for CI. These tests instead
-construct ExoJaxAtmosphere with fake RT/opa engines that mimic the
+construct ExoJaxPhysicalModel with fake RT/opa engines that mimic the
 ExoJAX API shapes, so we exercise the adapter's vmap/interp/Lambert
 math without touching ExoJAX's internals.
 """
@@ -13,12 +13,12 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-from skyscapes.atmosphere import (
-    AbstractAtmosphere,
-    ExoJaxAtmosphere,
-    LambertianAtmosphere,
+from skyscapes.physical_model import (
+    AbstractPhysicalModel,
+    ExoJaxPhysicalModel,
+    LambertianPhysicalModel,
 )
-from skyscapes.atmosphere.exojax.components import (
+from skyscapes.physical_model.exojax.components import (
     Absorption,
     BulkGasResidual,
     ConstantMmr,
@@ -36,7 +36,7 @@ from skyscapes.atmosphere.exojax.components import (
 
 
 class _FakeRT:
-    """Mimics exojax.rt.ArtReflectPure's interface used by ExoJaxAtmosphere.
+    """Mimics exojax.rt.ArtReflectPure's interface used by ExoJaxPhysicalModel.
 
     All quantities are JAX-compatible and return arrays of the expected
     shape so the adapter math can run end-to-end inside JIT.
@@ -88,8 +88,8 @@ _FAKE_MOL_MASSES = (18.0, 44.0, 16.0, 32.0, 48.0)
 _FAKE_LOG_MMRS = (-3.0, -4.0, -6.0, -1.0, -7.0)
 
 
-def make_atmosphere(K: int = 2, n_nu: int = 100, n_layers: int = 20):
-    """Build an ExoJaxAtmosphere with fake engines + default components.
+def make_physical_model(K: int = 2, n_nu: int = 100, n_layers: int = 20):
+    """Build an ExoJaxPhysicalModel with fake engines + default components.
 
     Constructs a five-molecule species tuple (H2O, CO2, CH4, O2, O3)
     + an N2 bulk residual to exercise the new composition-based
@@ -121,8 +121,7 @@ def make_atmosphere(K: int = 2, n_nu: int = 100, n_layers: int = 20):
         rayleigh_xs=jnp.full((n_nu,), 1.0e-27),
     )
 
-    return ExoJaxAtmosphere(
-        Rp_Rearth=jnp.ones(K),
+    return ExoJaxPhysicalModel(
         log_gravity_cgs=jnp.full((K,), jnp.log10(981.0)),
         species=species,
         bulk=bulk,
@@ -151,37 +150,39 @@ def make_atmosphere(K: int = 2, n_nu: int = 100, n_layers: int = 20):
 # ---------------------------------------------------------------------------
 
 
-def test_is_abstract_atmosphere():
-    """ExoJaxAtmosphere satisfies the AbstractAtmosphere interface."""
-    atm = make_atmosphere()
-    assert isinstance(atm, AbstractAtmosphere)
+def test_is_abstract_physical_model():
+    """ExoJaxPhysicalModel satisfies the AbstractPhysicalModel interface."""
+    model = make_physical_model()
+    assert isinstance(model, AbstractPhysicalModel)
 
 
-def test_reflected_spectrum_shape():
-    """Output has shape (K, T) matching the AbstractAtmosphere contract."""
+def test_contrast_shape():
+    """Output has shape (K, T) matching the AbstractPhysicalModel contract."""
     K = 3
     T = 5
-    atm = make_atmosphere(K=K)
+    model = make_physical_model(K=K)
     phase = jnp.full((K, T), 0.5)
     dist = jnp.full((K, T), 1.0)
     wl = jnp.array(550.0)
-    out = atm.reflected_spectrum(phase, dist, wl)
+    Rp = jnp.ones(K)
+    out = model.contrast(phase, dist, wl, Rp)
     assert out.shape == (K, T)
     assert bool(jnp.all(jnp.isfinite(out)))
     assert bool(jnp.all(out >= 0.0))
 
 
-def test_reflected_spectrum_jit():
+def test_contrast_jit():
     """Output is JIT-stable; subsequent calls reuse the cached trace."""
     K, T = 2, 3
-    atm = make_atmosphere(K=K)
+    model = make_physical_model(K=K)
     phase = jnp.full((K, T), 0.7)
     dist = jnp.full((K, T), 1.2)
     wl = jnp.array(600.0)
+    Rp = jnp.ones(K)
 
-    f = jax.jit(lambda a: a.reflected_spectrum(phase, dist, wl))
-    out_jit = f(atm)
-    out_eager = atm.reflected_spectrum(phase, dist, wl)
+    f = jax.jit(lambda m: m.contrast(phase, dist, wl, Rp))
+    out_jit = f(model)
+    out_eager = model.contrast(phase, dist, wl, Rp)
     assert jnp.allclose(out_jit, out_eager, rtol=1e-5)
 
 
@@ -191,38 +192,37 @@ def test_lambert_geometry_dominates_when_surface_albedo_drives_signal():
     Verifies that the per-planet contrast collapses to the closed-form
     Lambertian result in the limit where the atmosphere is transparent.
     The fake RT returns plane-parallel (spherical) reflectivity equal
-    to surface_albedo=0.3; reflected_spectrum then applies the 2/3
-    Lambertian-sphere conversion (Seager 2010 eq 3.36), so the
-    equivalent geometric-albedo Lambertian comparator has
-    Ag = (2/3) * 0.3 = 0.2.
+    to surface_albedo=0.3; contrast then applies the 2/3 Lambertian-
+    sphere conversion (Seager 2010 eq 3.36), so the equivalent
+    geometric-albedo Lambertian comparator has Ag = (2/3) * 0.3 = 0.2.
     """
     K = 2
     T = 4
     surface_albedo = 0.3
     # Use very low MMRs so the fake exp(-tau) attenuation is ~1.
-    atm = make_atmosphere(K=K)
+    model = make_physical_model(K=K)
     # Override every species' profile log_mmr to be tiny so tau ~ 0
     # and reflectivity ~ albedo. Assumes ConstantMmr profiles (the
-    # default in make_atmosphere).
-    atm = eqx.tree_at(
+    # default in make_physical_model).
+    model = eqx.tree_at(
         lambda m: tuple(s.profile.log_mmr for s in m.species),
-        atm,
-        replace=tuple(jnp.full((K,), -30.0) for _ in atm.species),
+        model,
+        replace=tuple(jnp.full((K,), -30.0) for _ in model.species),
     )
 
     phase = jnp.full((K, T), 0.5)
     dist = jnp.full((K, T), 1.0)
     wl = jnp.array(550.0)
-    out = atm.reflected_spectrum(phase, dist, wl)
+    Rp = jnp.ones(K)
+    out = model.contrast(phase, dist, wl, Rp)
 
-    # Compare to the LambertianAtmosphere closed-form contrast, with
+    # Compare to the LambertianPhysicalModel closed-form contrast, with
     # Ag set to the geometric-albedo equivalent of the plane-parallel
     # spherical albedo coming out of the fake RT.
-    lam = LambertianAtmosphere(
-        Rp_Rearth=jnp.ones(K),
+    lam = LambertianPhysicalModel(
         Ag=jnp.full((K,), (2.0 / 3.0) * surface_albedo),
     )
-    out_lam = lam.reflected_spectrum(phase, dist, wl)
+    out_lam = lam.contrast(phase, dist, wl, Rp)
     # Use a tight relative tolerance with a small atol that does not
     # swamp the ~1e-10 contrasts (default jnp.allclose atol=1e-8 would).
     assert jnp.allclose(out, out_lam, rtol=0.01, atol=1.0e-15)
@@ -231,32 +231,34 @@ def test_lambert_geometry_dominates_when_surface_albedo_drives_signal():
 def test_vmap_over_wavelength_returns_cube():
     """Vmapping over wavelength expands the output to (n_wave, K, T)."""
     K, T = 2, 3
-    atm = make_atmosphere(K=K)
+    model = make_physical_model(K=K)
     phase = jnp.full((K, T), 0.5)
     dist = jnp.full((K, T), 1.0)
     wls = jnp.array([450.0, 550.0, 700.0, 900.0])
+    Rp = jnp.ones(K)
 
-    cube = jax.vmap(atm.reflected_spectrum, in_axes=(None, None, 0))(phase, dist, wls)
+    cube = jax.vmap(model.contrast, in_axes=(None, None, 0, None))(phase, dist, wls, Rp)
     assert cube.shape == (4, K, T)
     assert bool(jnp.all(jnp.isfinite(cube)))
 
 
-def test_reflected_spectrum_cube_matches_vmap():
-    """``reflected_spectrum_cube`` agrees with vmapped scalar calls.
+def test_contrast_cube_matches_vmap():
+    """``contrast_cube`` agrees with vmapped scalar calls.
 
     The cube method exists to avoid re-running the 2-stream RT solver
     once per wavelength; result-wise it should equal the slow
     vmap-based path to numerical precision.
     """
     K, T = 2, 3
-    atm = make_atmosphere(K=K)
+    model = make_physical_model(K=K)
     phase = jnp.full((K, T), 0.5)
     dist = jnp.full((K, T), 1.0)
     wls = jnp.array([450.0, 550.0, 700.0, 900.0])
+    Rp = jnp.ones(K)
 
-    cube_via_method = atm.reflected_spectrum_cube(phase, dist, wls)
-    cube_via_vmap = jax.vmap(atm.reflected_spectrum, in_axes=(None, None, 0))(
-        phase, dist, wls
+    cube_via_method = model.contrast_cube(phase, dist, wls, Rp)
+    cube_via_vmap = jax.vmap(model.contrast, in_axes=(None, None, 0, None))(
+        phase, dist, wls, Rp
     )
 
     assert cube_via_method.shape == cube_via_vmap.shape == (4, K, T)
@@ -276,24 +278,25 @@ def test_rayleigh_xs_is_wired_through_to_output():
     ``opacity_profile_xs``.
     """
     K = 1
-    atm_low = make_atmosphere(K=K)
+    model_low = make_physical_model(K=K)
     # Note: this xs value (1e-2) is wildly unphysical -- real Rayleigh
     # is ~1e-26. We need a value this large to push the fake RT's
     # ``exp(-total_tau)`` out of the float32 noise floor, since the
     # fake doesn't use ``opacity_profile_xs`` in a physically
     # meaningful way (it just multiplies the inputs).
-    atm_high = eqx.tree_at(
+    model_high = eqx.tree_at(
         lambda m: m.bulk.rayleigh_xs,
-        atm_low,
-        replace=jnp.full(atm_low.bulk.rayleigh_xs.shape, 1.0e-2),
+        model_low,
+        replace=jnp.full(model_low.bulk.rayleigh_xs.shape, 1.0e-2),
     )
 
     phase = jnp.full((K, 1), 0.5)
     dist = jnp.full((K, 1), 1.0)
     wl = jnp.array(550.0)
+    Rp = jnp.ones(K)
 
-    out_low = float(atm_low.reflected_spectrum(phase, dist, wl)[0, 0])
-    out_high = float(atm_high.reflected_spectrum(phase, dist, wl)[0, 0])
+    out_low = float(model_low.contrast(phase, dist, wl, Rp)[0, 0])
+    out_high = float(model_high.contrast(phase, dist, wl, Rp)[0, 0])
     assert out_low != out_high
     assert jnp.isfinite(jnp.asarray(out_high))
 
@@ -308,19 +311,20 @@ def test_clouds_change_the_spectrum():
     cloud opacity is non-negligible.
     """
     K = 1
-    atm_no_cloud = make_atmosphere(K=K)  # cloud tau effectively zero
-    atm_with_cloud = eqx.tree_at(
+    model_no_cloud = make_physical_model(K=K)  # cloud tau effectively zero
+    model_with_cloud = eqx.tree_at(
         lambda m: (m.clouds.log_pressure_bar, m.clouds.log_opt_depth),
-        atm_no_cloud,
+        model_no_cloud,
         replace=(jnp.full((K,), -0.3), jnp.full((K,), 1.0)),  # tau=10 at 0.5 bar
     )
 
     phase = jnp.full((K, 1), 0.5)
     dist = jnp.full((K, 1), 1.0)
     wl = jnp.array(550.0)
+    Rp = jnp.ones(K)
 
-    out_no_cloud = float(atm_no_cloud.reflected_spectrum(phase, dist, wl)[0, 0])
-    out_with_cloud = float(atm_with_cloud.reflected_spectrum(phase, dist, wl)[0, 0])
+    out_no_cloud = float(model_no_cloud.contrast(phase, dist, wl, Rp)[0, 0])
+    out_with_cloud = float(model_with_cloud.contrast(phase, dist, wl, Rp)[0, 0])
     assert out_no_cloud != out_with_cloud
     assert jnp.isfinite(jnp.asarray(out_with_cloud))
 
@@ -330,11 +334,12 @@ def test_mie_cloud_swaps_in_for_gray_cloud():
 
     Constructs a MieCloud with synthetic ssa(lambda) and g(lambda)
     (skipping the slow real Mie-grid build) and verifies it produces
-    a finite, sensible spectrum when swapped into a base atmosphere.
+    a finite, sensible spectrum when swapped into a base physical
+    model.
     """
     K = 1
-    atm = make_atmosphere(K=K)
-    n_nu = atm.n_nu
+    model = make_physical_model(K=K)
+    n_nu = model.n_nu
     # Synthetic wavelength-dependent ssa/g (real Mie water clouds peak
     # near ssa~1, g~0.85; we use slightly varied values here just to
     # exercise the (n_nu,) broadcast path).
@@ -346,12 +351,13 @@ def test_mie_cloud_swaps_in_for_gray_cloud():
         ssa_grid=ssa_grid,
         g_grid=g_grid,
     )
-    atm_mie = eqx.tree_at(lambda m: m.clouds, atm, replace=mie_cloud)
+    model_mie = eqx.tree_at(lambda m: m.clouds, model, replace=mie_cloud)
 
     phase = jnp.full((K, 1), 0.5)
     dist = jnp.full((K, 1), 1.0)
     wl = jnp.array(550.0)
-    out = atm_mie.reflected_spectrum(phase, dist, wl)
+    Rp = jnp.ones(K)
+    out = model_mie.contrast(phase, dist, wl, Rp)
     assert out.shape == (K, 1)
     assert bool(jnp.all(jnp.isfinite(out)))
 
@@ -365,26 +371,29 @@ def test_surface_albedo_spectrum_modulates_signal():
     """
     K = 1
     n_nu = 100
-    atm_flat = make_atmosphere(K=K, n_nu=n_nu)
+    model_flat = make_physical_model(K=K, n_nu=n_nu)
     # Build a "red surface" spectrum that's bright in the low-wavenumber
     # (long-wavelength) end and dim in the high-wavenumber (short-wl) end.
     red_spectrum = jnp.linspace(2.0, 0.1, n_nu)  # bright at low nu (red)
     blue_spectrum = jnp.linspace(0.1, 2.0, n_nu)  # bright at high nu (blue)
 
-    atm_red = eqx.tree_at(lambda m: m.surface.spectrum, atm_flat, replace=red_spectrum)
-    atm_blue = eqx.tree_at(
-        lambda m: m.surface.spectrum, atm_flat, replace=blue_spectrum
+    model_red = eqx.tree_at(
+        lambda m: m.surface.spectrum, model_flat, replace=red_spectrum
+    )
+    model_blue = eqx.tree_at(
+        lambda m: m.surface.spectrum, model_flat, replace=blue_spectrum
     )
 
     phase = jnp.full((K, 1), 0.5)
     dist = jnp.full((K, 1), 1.0)
     wl_red = jnp.array(950.0)  # low wavenumber = long wavelength
     wl_blue = jnp.array(420.0)  # high wavenumber = short wavelength
+    Rp = jnp.ones(K)
 
-    red_at_red = float(atm_red.reflected_spectrum(phase, dist, wl_red)[0, 0])
-    blue_at_red = float(atm_blue.reflected_spectrum(phase, dist, wl_red)[0, 0])
-    red_at_blue = float(atm_red.reflected_spectrum(phase, dist, wl_blue)[0, 0])
-    blue_at_blue = float(atm_blue.reflected_spectrum(phase, dist, wl_blue)[0, 0])
+    red_at_red = float(model_red.contrast(phase, dist, wl_red, Rp)[0, 0])
+    blue_at_red = float(model_blue.contrast(phase, dist, wl_red, Rp)[0, 0])
+    red_at_blue = float(model_red.contrast(phase, dist, wl_blue, Rp)[0, 0])
+    blue_at_blue = float(model_blue.contrast(phase, dist, wl_blue, Rp)[0, 0])
 
     # "Red surface" should be brighter than "blue surface" at red wavelengths,
     # and vice versa.
@@ -395,26 +404,27 @@ def test_surface_albedo_spectrum_modulates_signal():
 def test_n2_mmr_is_clamped_when_others_oversaturate():
     """When tracked mmrs sum to > 1, N2 fraction clamps to zero (no NaN)."""
     K = 1
-    atm = make_atmosphere(K=K)
+    model = make_physical_model(K=K)
     # Set every tracked species log_mmr to log10(0.5) -- their sum is
     # 2.5, well over 1, so the bulk-gas residual would be negative
     # without clamping. Assumes ConstantMmr profiles.
-    atm_saturated = eqx.tree_at(
+    model_saturated = eqx.tree_at(
         lambda m: tuple(s.profile.log_mmr for s in m.species),
-        atm,
-        replace=tuple(jnp.full((K,), jnp.log10(0.5)) for _ in atm.species),
+        model,
+        replace=tuple(jnp.full((K,), jnp.log10(0.5)) for _ in model.species),
     )
     phase = jnp.full((K, 1), 0.5)
     dist = jnp.full((K, 1), 1.0)
     wl = jnp.array(550.0)
-    out = atm_saturated.reflected_spectrum(phase, dist, wl)
+    Rp = jnp.ones(K)
+    out = model_saturated.contrast(phase, dist, wl, Rp)
     assert bool(jnp.all(jnp.isfinite(out)))
 
 
 def test_custom_molecule_set_works_end_to_end():
-    """Construct an atmosphere with a non-default molecule mix.
+    """Construct a physical model with a non-default molecule mix.
 
-    Builds an ExoJaxAtmosphere with three molecules (H2O, CO, SO2)
+    Builds an ExoJaxPhysicalModel with three molecules (H2O, CO, SO2)
     plus an H2 bulk gas instead of the default 5-molecule + N2 setup.
     Verifies that the species tuple is honored throughout (absorption
     iterates the right opa engines; Rayleigh iterates the right
@@ -450,8 +460,7 @@ def test_custom_molecule_set_works_end_to_end():
     )
     bulk = BulkGasResidual(name="H2", molmass=2.016, rayleigh_xs=ray_xs)
 
-    atm = ExoJaxAtmosphere(
-        Rp_Rearth=jnp.ones(K),
+    model = ExoJaxPhysicalModel(
         log_gravity_cgs=jnp.full((K,), jnp.log10(981.0)),
         species=species,
         bulk=bulk,
@@ -475,31 +484,33 @@ def test_custom_molecule_set_works_end_to_end():
     )
 
     # Shape + finiteness end-to-end.
-    out = atm.reflected_spectrum(
+    Rp = jnp.ones(K)
+    out = model.contrast(
         jnp.full((K, 1), 0.5),
         jnp.full((K, 1), 1.0),
         jnp.array(550.0),
+        Rp,
     )
     assert out.shape == (K, 1)
     assert bool(jnp.all(jnp.isfinite(out)))
 
     # Repr reflects the composition.
-    s = repr(atm)
+    s = repr(model)
     assert "[H2O, CO, SO2]" in s
     assert "bulk=H2" in s
 
 
-def test_repr_summarizes_atmosphere_state():
+def test_repr_summarizes_physical_model_state():
     """``__repr__`` is human-readable and includes MMR + VMR side-by-side.
 
     Avoids the default Equinox PyTree dump (which would print every
     array element) and gives a concise per-planet summary including
     the implicit N2 residual.
     """
-    atm = make_atmosphere(K=2)
-    s = repr(atm)
+    model = make_physical_model(K=2)
+    s = repr(model)
     # Header lines.
-    assert "ExoJaxAtmosphere(K=2)" in s
+    assert "ExoJaxPhysicalModel(K=2)" in s
     assert "Wavelength:" in s
     assert "Planet 0:" in s
     assert "Planet 1:" in s
@@ -515,27 +526,26 @@ def test_repr_summarizes_atmosphere_state():
 
 def test_repr_truncates_for_many_planets():
     """For K > 3, only the first 3 planets are shown in full."""
-    atm = make_atmosphere(K=10)
-    s = repr(atm)
+    model = make_physical_model(K=10)
+    s = repr(model)
     assert "Planet 0:" in s
     assert "Planet 2:" in s
     assert "Planet 3:" not in s
     assert "... and 7 more planets" in s
 
 
-def test_atmosphere_init_signature_uses_default_setup():
+def test_physical_model_init_signature_uses_default_setup():
     """``from_default_setup`` is the documented entry point.
 
     Verifies it exists and accepts the documented kwargs (without
     actually running it -- the real ExoJAX setup would trigger
     database downloads).
     """
-    assert hasattr(ExoJaxAtmosphere, "from_default_setup")
+    assert hasattr(ExoJaxPhysicalModel, "from_default_setup")
     import inspect
 
-    sig = inspect.signature(ExoJaxAtmosphere.from_default_setup)
+    sig = inspect.signature(ExoJaxPhysicalModel.from_default_setup)
     required_kwargs = {
-        "Rp_Rearth",
         "log_mmrs",
         "T_eq_K",
         "T_alpha",
@@ -544,3 +554,5 @@ def test_atmosphere_init_signature_uses_default_setup():
     }
     for name in required_kwargs:
         assert name in sig.parameters, f"missing {name} in from_default_setup"
+    # Rp_Rearth should NOT be on the signature -- it lives on Planet now.
+    assert "Rp_Rearth" not in sig.parameters

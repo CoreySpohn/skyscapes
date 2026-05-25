@@ -1,22 +1,17 @@
-"""ExoJAX-backed atmosphere components.
+"""ExoJAX-backed physical-model components.
 
 Self-contained subpackage holding everything specific to the ExoJAX
-radiative-transfer backend: the :class:`ExoJaxAtmosphere` orchestrator,
+radiative-transfer backend: the :class:`ExoJaxPhysicalModel` orchestrator,
 swappable physics components (T-P, absorption, scattering, clouds,
 surface), PSG cross-section helpers, and Earth-epoch archetypes.
 
-The backend-agnostic :class:`AbstractAtmosphere` interface and the
-simple non-RT atmospheres (Lambertian, parametric stub, grid) live one
-level up in :mod:`skyscapes.atmosphere`.
+The backend-agnostic :class:`AbstractPhysicalModel` interface and the
+simple non-RT physical models (Lambertian, grid) live one level up in
+:mod:`skyscapes.physical_model`.
 """
 
 from __future__ import annotations
 
-from .atmosphere import (
-    DEFAULT_MOLECULES,
-    ExoJaxAtmosphere,
-    build_exojax_engines,
-)
 from .components import (
     MOLECULE_RECIPES,
     Absorption,
@@ -47,6 +42,11 @@ from .components import (
     build_species_prebuilt,
 )
 from .o3_chappuis import O3_MOLMASS, O3ChappuisOpacity
+from .physical_model import (
+    DEFAULT_MOLECULES,
+    ExoJaxPhysicalModel,
+    build_exojax_engines,
+)
 from .presets import (
     EARTH_ARCHEAN_VMRS,
     EARTH_EARLY_PROTEROZOIC_VMRS,
@@ -77,7 +77,7 @@ __all__ = [
     "BulkGasResidual",
     "ConstantMmr",
     "Contribution",
-    "ExoJaxAtmosphere",
+    "ExoJaxPhysicalModel",
     "FlatSurface",
     "GrayCloud",
     "MieCloud",

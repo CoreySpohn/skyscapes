@@ -146,7 +146,7 @@ def build_mie_cloud(
 
     Returns:
         A :class:`MieCloud` instance ready to drop into
-        :class:`ExoJaxAtmosphere`.
+        :class:`ExoJaxPhysicalModel`.
     """
     pdb = PdbCloud(condensate=condensate)
     if not pdb.miegrid_path.exists():

@@ -1,4 +1,4 @@
-"""Composable physics components for :class:`ExoJaxAtmosphere`.
+"""Composable physics components for :class:`ExoJaxPhysicalModel`.
 
 Each component encapsulates one piece of atmospheric physics
 (temperature-pressure profile, line absorption, Rayleigh scattering,

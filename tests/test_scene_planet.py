@@ -1,4 +1,4 @@
-"""scene.Planet -- composes AbstractOrbit + AbstractAtmosphere."""
+"""scene.Planet -- composes AbstractOrbit + AbstractPhysicalModel."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import jax.numpy as jnp
 from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.system.orbit import KeplerianOrbit
 
-from skyscapes.atmosphere import LambertianAtmosphere
+from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.scene import FlatStar, Planet
 
 SOLVER = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
@@ -22,15 +22,17 @@ def _single_planet():
         M0_rad=jnp.array([jnp.pi / 4]),
         t0_d=jnp.array([0.0]),
     )
-    atm = LambertianAtmosphere(
+    physical_model = LambertianPhysicalModel(Ag=jnp.array([0.3]))
+    return Planet(
         Rp_Rearth=jnp.array([1.0]),
-        Ag=jnp.array([0.3]),
+        Mp_Mearth=jnp.array([1.0]),
+        orbit=orbit,
+        physical_model=physical_model,
     )
-    return Planet(orbit=orbit, atmosphere=atm)
 
 
 def test_planet_n_planets_property():
-    """Planet.n_planets reflects the atmosphere's K dimension."""
+    """Planet.n_planets reflects the K dimension of intrinsic params."""
     p = _single_planet()
     assert p.n_planets == 1
 

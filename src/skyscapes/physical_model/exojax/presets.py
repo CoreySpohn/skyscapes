@@ -4,8 +4,8 @@ Each preset is a dict mapping molecule name to volume mixing ratio
 (``VMR`` = mole fraction, the convention used in atmospheric science
 literature). :func:`vmr_dict_to_log_mmr_dict` converts to log10
 mass-mixing ratios at construction time using a bulk gas (default
-N2) to fill the residual, returning the dict shape ``ExoJaxAtmosphere
-.from_default_setup`` consumes for ``log_mmrs``.
+N2) to fill the residual, returning the dict shape
+``ExoJaxPhysicalModel.from_default_setup`` consumes for ``log_mmrs``.
 
 The four Earth-epoch presets bracket the modern oxygenated atmosphere
 plus three earlier states (Archean, Early Proterozoic, Late
@@ -19,12 +19,13 @@ I got these from Natasha Latouf and she has citations... somewhere.
 Example::
 
     import jax.numpy as jnp
-    from skyscapes.atmosphere import ExoJaxAtmosphere
-    from skyscapes.atmosphere.presets import EARTH_MODERN_VMRS, vmr_dict_to_log_mmr_dict
+    from skyscapes.physical_model import ExoJaxPhysicalModel
+    from skyscapes.physical_model.exojax.presets import (
+        EARTH_MODERN_VMRS, vmr_dict_to_log_mmr_dict,
+    )
 
     log_mmrs = vmr_dict_to_log_mmr_dict(EARTH_MODERN_VMRS, K=1)
-    atm = ExoJaxAtmosphere.from_default_setup(
-        Rp_Rearth=jnp.ones(1),
+    model = ExoJaxPhysicalModel.from_default_setup(
         log_mmrs=log_mmrs,
         T_eq_K=jnp.full((1,), 288.0),
         T_alpha=jnp.full((1,), 0.07),
@@ -123,7 +124,7 @@ def _mol_mass(name: str) -> float:
         return _MOLMASS_TABLE[name]
     raise KeyError(
         f"No molmass for {name!r}. Add it to "
-        f"skyscapes.atmosphere.presets._MOLMASS_TABLE."
+        f"skyscapes.physical_model.exojax.presets._MOLMASS_TABLE."
     )
 
 
@@ -147,7 +148,7 @@ def vmr_dict_to_mmr_dict(
 
     Returns:
         ``{name: MMR}`` for the tracked molecules. The bulk gas's
-        MMR is *not* returned -- ``ExoJaxAtmosphere`` computes it
+        MMR is *not* returned -- ``ExoJaxPhysicalModel`` computes it
         dynamically as the residual.
     """
     if bulk_gas not in BULK_GAS_RECIPES:
@@ -178,7 +179,7 @@ def vmr_dict_to_log_mmr_dict(
 
     Each value in the returned dict is shape ``(K,)`` so it can be
     passed directly as ``log_mmrs=`` to
-    :meth:`ExoJaxAtmosphere.from_default_setup`. The same VMR is used
+    :meth:`ExoJaxPhysicalModel.from_default_setup`. The same VMR is used
     for every planet -- to give per-planet variation, modify the
     returned arrays before constructing the atmosphere.
 
@@ -237,7 +238,7 @@ def vmr_dict_to_earth_profile_dict(
 
     Returns:
         ``{name: AbstractMmrProfile}`` ready to pass as
-        ``log_mmrs=`` to :meth:`ExoJaxAtmosphere.from_default_setup`.
+        ``log_mmrs=`` to :meth:`ExoJaxPhysicalModel.from_default_setup`.
     """
     mmrs = vmr_dict_to_mmr_dict(vmrs, bulk_gas=bulk_gas)
     profiles: dict[str, AbstractMmrProfile] = {}

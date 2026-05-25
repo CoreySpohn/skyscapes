@@ -41,7 +41,7 @@ class MolecularSpecies(eqx.Module):
     """One atmospheric molecule with an altitude-resolved mixing ratio.
 
     The mixing ratio is encoded as a profile component (e.g.
-    :class:`~skyscapes.atmosphere.exojax.components.mmr_profile.ConstantMmr`
+    :class:`~skyscapes.physical_model.exojax.components.mmr_profile.ConstantMmr`
     for well-mixed gases, ``StratosphericPeakMmr`` for O3, ``TroposphericMmr``
     for H2O) rather than a single scalar, so altitude variation is
     represented explicitly.
@@ -53,7 +53,7 @@ class MolecularSpecies(eqx.Module):
         molmass: Molar mass [g/mol].
         opa: Opacity engine. Either an ExoJAX ``OpaPremodit`` (for
             HITRAN-backed line-list molecules) or
-            :class:`~skyscapes.atmosphere.exojax.o3_chappuis.O3ChappuisOpacity`
+            :class:`~skyscapes.physical_model.exojax.o3_chappuis.O3ChappuisOpacity`
             (for visible cross-section absorbers like O3). May be
             ``None`` if the species contributes only Rayleigh scattering.
         rayleigh_xs: Pre-computed Rayleigh cross-section
@@ -109,7 +109,7 @@ class MoleculeRecipe:
         name: Molecule name (must match ExoJAX's HITRAN / polarizability
             keys when those tables apply).
         psg_xs_url: If set, use a PSG cross-section file at this URL
-            (via :class:`~skyscapes.atmosphere.psg_xs.PsgCrossSectionOpacity`)
+            (:class:`~skyscapes.physical_model.exojax.psg_xs.PsgCrossSectionOpacity`)
             instead of an ExoJAX line-list opa. Required for species
             whose absorption is dominated by electronic transitions in
             the visible/NIR (e.g. O3 Chappuis, SO2 UV).

@@ -1,4 +1,4 @@
-"""ExoJaxAtmosphere: composition-based reflected-light atmosphere.
+"""ExoJaxPhysicalModel: composition-based reflected-light planet model.
 
 Each piece of physics is a swappable component; each molecule is a
 self-contained :class:`MolecularSpecies` record. To explore different
@@ -27,7 +27,7 @@ What's currently included:
 
 Construction patterns:
 
-- **One-shot**: ``ExoJaxAtmosphere.from_default_setup(...)`` accepts
+- **One-shot**: ``ExoJaxPhysicalModel.from_default_setup(...)`` accepts
   ``log_mmrs`` as a dict mapping molecule name to ``(K,)`` array and
   builds engines + default components in one call.
 - **Build-once, fit-many** (retrieval-friendly): call
@@ -60,8 +60,8 @@ from hwoutils.conversions import (
 from jaxtyping import Array
 
 from ..._repr import indent
-from ..base import AbstractAtmosphere
-from ..cached import PrecomputedReflectivity
+from ..base import AbstractPhysicalModel
+from ..cached import PrecomputedPhysicalModel
 from ..lambertian import _lambert_phase
 from .components import (
     Absorption,
@@ -112,7 +112,7 @@ def build_exojax_engines(
         engines = build_exojax_engines(molecules=("H2O", "CO", "O2"))
 
         def make_atmosphere(per_planet_log_mmrs):
-            return ExoJaxAtmosphere.from_default_setup(
+            return ExoJaxPhysicalModel.from_default_setup(
                 log_mmrs=per_planet_log_mmrs, ..., **engines
             )
 
@@ -136,7 +136,7 @@ def build_exojax_engines(
 
     Returns:
         Dict ready to be ``**``-unpacked into
-        :class:`ExoJaxAtmosphere`. Keys: ``rt_engine``, ``nu_grid``,
+        :class:`ExoJaxPhysicalModel`. Keys: ``rt_engine``, ``nu_grid``,
         ``n_nu``, ``species_prebuilt`` (dict mapping name to
         ``{molmass, opa, rayleigh_xs}``), ``bulk_prebuilt``
         (dict with ``{name, molmass, rayleigh_xs}`` or ``None``).
@@ -290,11 +290,10 @@ def _cache_key(**kwargs: Any) -> str:
     return h.hexdigest()[:16]
 
 
-class ExoJaxAtmosphere(AbstractAtmosphere):
-    """Composition-based reflected-light atmosphere over ExoJAX's 2-stream RT.
+class ExoJaxPhysicalModel(AbstractPhysicalModel):
+    """Composition-based reflected-light planet model over ExoJAX's 2-stream RT.
 
     Per-planet state (PyTree leaves, fittable):
-        Rp_Rearth: Planetary radius [Earth radii], shape ``(K,)``.
         log_gravity_cgs: Log10 surface gravity [cm/s^2], shape ``(K,)``.
         species: Tuple of :class:`MolecularSpecies`. Each species owns
             its own ``log_mmr`` (per-planet, shape ``(K,)``). The
@@ -318,7 +317,6 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
     """
 
     # Top-level per-planet state
-    Rp_Rearth: Array
     log_gravity_cgs: Array
 
     # Atmospheric composition
@@ -341,7 +339,6 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
     def from_default_setup(
         cls,
         *,
-        Rp_Rearth: Array,
         log_mmrs: dict[str, Array],
         T_eq_K: Array,
         T_alpha: Array,
@@ -360,7 +357,7 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
         pressure_btm_bar: float = 1.0e0,
         databases_dir: str | None = None,
         crit: float = 0.0,
-    ) -> ExoJaxAtmosphere:
+    ) -> ExoJaxPhysicalModel:
         """One-shot convenience: build engines + default components in one call.
 
         Defaults to Earth-like physics: ``PowerLawTPProfile``,
@@ -369,7 +366,6 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
         ``WavelengthDependentSurface``.
 
         Args:
-            Rp_Rearth: Planet radii [R_earth], shape ``(K,)``.
             log_mmrs: Dict mapping molecule name to per-planet log10
                 mass-mixing ratio, shape ``(K,)`` each. The dict's
                 molecules determine which species are built.
@@ -407,7 +403,7 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
             databases_dir=databases_dir,
             crit=crit,
         )
-        K = Rp_Rearth.shape[0]
+        K = log_gravity_cgs.shape[0]
         if log_cloud_pressure_bar is None:
             log_cloud_pressure_bar = jnp.full((K,), jnp.log10(0.5))
         if log_cloud_opt_depth is None:
@@ -419,7 +415,6 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
         bulk = _assemble_bulk(engines["bulk_prebuilt"])
 
         return cls(
-            Rp_Rearth=Rp_Rearth,
             log_gravity_cgs=log_gravity_cgs,
             species=species,
             bulk=bulk,
@@ -443,7 +438,6 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
     def from_default_setup_cached(
         cls,
         *,
-        Rp_Rearth: Array,
         log_mmrs: dict[str, Array | AbstractMmrProfile],
         T_eq_K: Array,
         T_alpha: Array,
@@ -463,25 +457,24 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
         databases_dir: str | None = None,
         crit: float = 0.0,
         cache_dir: str | Path | None = None,
-    ) -> PrecomputedReflectivity:
-        """Cached one-shot factory: returns a fast :class:`PrecomputedReflectivity`.
+    ) -> PrecomputedPhysicalModel:
+        """Cached one-shot factory: returns a fast :class:`PrecomputedPhysicalModel`.
 
         Hashes every input and looks up a cached spectrum on disk. On
         cache hit, returns the cached spectrum in ~10 ms. On cache
-        miss, builds the full :class:`ExoJaxAtmosphere` via
+        miss, builds the full :class:`ExoJaxPhysicalModel` via
         :meth:`from_default_setup`, runs the 2-stream RT once,
         precomputes the reflectivity, saves to disk, and returns the
-        :class:`PrecomputedReflectivity`.
+        :class:`PrecomputedPhysicalModel`.
 
-        Use this when the atmosphere parameters are fixed across many
-        evaluations (coronagraphoto sims, ETC studies). For HMC
+        Use this when the physical-model parameters are fixed across
+        many evaluations (coronagraphoto sims, ETC studies). For HMC
         retrievals where parameters vary, use :meth:`from_default_setup`
         directly.
 
         Args:
             cache_dir: Override the cache directory. Defaults to
-                ``~/.cache/skyscapes/atmospheres/``.
-            Rp_Rearth: See :meth:`from_default_setup`.
+                ``~/.cache/skyscapes/physical_models/``.
             log_mmrs: See :meth:`from_default_setup`.
             T_eq_K: See :meth:`from_default_setup`.
             T_alpha: See :meth:`from_default_setup`.
@@ -502,11 +495,10 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
             crit: See :meth:`from_default_setup`.
 
         Returns:
-            A :class:`PrecomputedReflectivity` with no RT cost at
+            A :class:`PrecomputedPhysicalModel` with no RT cost at
             evaluation time.
         """
         kwargs = {
-            "Rp_Rearth": Rp_Rearth,
             "log_mmrs": log_mmrs,
             "T_eq_K": T_eq_K,
             "T_alpha": T_alpha,
@@ -526,16 +518,16 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
             "crit": crit,
         }
         if cache_dir is None:
-            cache_dir = Path.home() / ".cache" / "skyscapes" / "atmospheres"
+            cache_dir = Path.home() / ".cache" / "skyscapes" / "physical_models"
         cache_dir = Path(cache_dir)
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_path = cache_dir / f"{_cache_key(**kwargs)}.npz"
 
         if cache_path.exists():
-            return PrecomputedReflectivity.load(cache_path)
+            return PrecomputedPhysicalModel.load(cache_path)
 
-        atm = cls.from_default_setup(databases_dir=databases_dir, **kwargs)
-        cached = PrecomputedReflectivity.from_atmosphere(atm)
+        model = cls.from_default_setup(databases_dir=databases_dir, **kwargs)
+        cached = PrecomputedPhysicalModel.from_physical_model(model)
         cached.save(cache_path)
         return cached
 
@@ -606,14 +598,15 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
         For HMC retrievals (K=1 per sample), the JIT cache is reused
         across MCMC steps.
         """
-        K = int(self.Rp_Rearth.shape[0])
+        K = int(self.log_gravity_cgs.shape[0])
         return jnp.stack([self._reflectivity_one_planet(k) for k in range(K)], axis=0)
 
-    def reflected_spectrum(
+    def contrast(
         self,
         phase_angle_rad: Array,
         dist_AU: Array,
         wavelength_nm: Array,
+        Rp_Rearth: Array,
     ) -> Array:
         """Per-planet, per-time geometric-albedo contrast at one wavelength.
 
@@ -621,6 +614,7 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
             phase_angle_rad: Star-planet-observer phase angle, ``(K, T)``.
             dist_AU: Star-planet distance [AU], ``(K, T)``.
             wavelength_nm: Scalar wavelength [nm].
+            Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
 
         Returns:
             Contrast = ``A_g(lambda) * Lambert_phase(beta) * (Rp/d)^2``,
@@ -628,7 +622,7 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
             parallel (spherical) reflectivity; we convert to geometric
             albedo via the Lambertian-sphere factor 2/3 (Seager 2010,
             eq 3.36) so the output is a geometric-albedo contrast --
-            the same convention as :class:`LambertianAtmosphere`.
+            the same convention as :class:`LambertianPhysicalModel`.
         """
         R_per_planet = self._reflectivity_all_planets()
         target_nu_cm_inv = nm_to_wavenumber_cm(wavelength_nm)
@@ -644,16 +638,17 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
 
         R_at_wl = jax.vmap(interp_one)(R_per_planet)
 
-        Rp_AU = (self.Rp_Rearth * Rearth2AU)[:, None]
+        Rp_AU = (Rp_Rearth * Rearth2AU)[:, None]
         Ag = spherical_to_geometric_albedo(R_at_wl)[:, None]
         phase = _lambert_phase(phase_angle_rad)
         return Ag * phase * (Rp_AU / dist_AU) ** 2
 
-    def reflected_spectrum_cube(
+    def contrast_cube(
         self,
         phase_angle_rad: Array,
         dist_AU: Array,
         wavelengths_nm: Array,
+        Rp_Rearth: Array,
     ) -> Array:
         """Per-planet, per-time contrast across many wavelengths.
 
@@ -661,7 +656,7 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
         the underlying 2-stream RT exactly once per planet rather
         than once per wavelength; applies the spherical-to-geometric
         Lambertian-sphere conversion (Seager 2010, eq 3.36) the same
-        way as :meth:`reflected_spectrum`.
+        way as :meth:`contrast`.
         """
         R_per_planet = self._reflectivity_all_planets()
         target_nu_cm_inv = nm_to_wavenumber_cm(wavelengths_nm)
@@ -679,7 +674,7 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
             jax.vmap(interp_one_planet)(R_per_planet)
         )  # (K, W)
 
-        Rp_AU = (self.Rp_Rearth * Rearth2AU)[:, None]
+        Rp_AU = (Rp_Rearth * Rearth2AU)[:, None]
         phase = _lambert_phase(phase_angle_rad)
         geom = phase * (Rp_AU / dist_AU) ** 2
 
@@ -687,7 +682,7 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
 
     def __repr__(self) -> str:
         """Human-readable summary of components + species + per-planet state."""
-        K = int(self.Rp_Rearth.shape[0])
+        K = int(self.log_gravity_cgs.shape[0])
         n_layers = int(self.rt_engine.pressure.shape[0])
         wl_min_nm = float(1.0e7 / self.nu_grid.max())
         wl_max_nm = float(1.0e7 / self.nu_grid.min())
@@ -695,7 +690,7 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
         species_label = ", ".join(s.name for s in self.species)
 
         lines = [
-            f"ExoJaxAtmosphere(K={K})",
+            f"ExoJaxPhysicalModel(K={K})",
             (
                 f"  Wavelength: {wl_min_nm:.0f}-{wl_max_nm:.0f} nm "
                 f"(n_nu={self.n_nu}, n_layers={n_layers})"
@@ -743,7 +738,6 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
                 inv_m_mean += mmr_bulk_k / self.bulk.molmass
             m_mean = 1.0 / inv_m_mean if inv_m_mean > 0 else 28.0
 
-            rp = float(self.Rp_Rearth[k])
             g = 10.0 ** float(self.log_gravity_cgs[k])
             t_eq = float(self.tp_profile.T_eq_K[k])
             alpha = float(self.tp_profile.T_alpha[k])
@@ -753,7 +747,7 @@ class ExoJaxAtmosphere(AbstractAtmosphere):
 
             lines += [
                 f"  Planet {k}:",
-                f"    Rp = {rp:.3f} R_earth, g = {g:.0f} cm/s^2",
+                f"    g = {g:.0f} cm/s^2",
                 f"    T(P=1bar) = {t_eq:.1f} K, alpha = {alpha:.3f}",
                 f"    Cloud: P = {p_cl:.2g} bar, tau = {tau_cl:.2g}",
                 f"    Surface albedo (scalar) = {ag:.3f}",

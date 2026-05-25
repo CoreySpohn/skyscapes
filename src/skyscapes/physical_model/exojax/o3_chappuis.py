@@ -1,7 +1,7 @@
 """Back-compat shim re-exporting the PSG cross-section O3 setup.
 
 The original implementation lived here; it has since been generalized
-to :mod:`skyscapes.atmosphere.psg_xs`. This module keeps the
+to :mod:`skyscapes.physical_model.exojax.psg_xs`. This module keeps the
 ``O3ChappuisOpacity`` name so existing imports continue to work.
 """
 

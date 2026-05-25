@@ -6,8 +6,8 @@ import jax.numpy as jnp
 from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.system.orbit import KeplerianOrbit
 
-from skyscapes.atmosphere import LambertianAtmosphere
 from skyscapes.disk import ExovistaDisk
+from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.scene import FlatStar, Planet, System
 
 SOLVER = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
@@ -23,11 +23,13 @@ def _make_planet(a_AU: float, Ag: float, Rp_Rearth: float) -> Planet:
         M0_rad=jnp.array([0.0]),
         t0_d=jnp.array([0.0]),
     )
-    atm = LambertianAtmosphere(
+    physical_model = LambertianPhysicalModel(Ag=jnp.array([Ag]))
+    return Planet(
         Rp_Rearth=jnp.array([Rp_Rearth]),
-        Ag=jnp.array([Ag]),
+        Mp_Mearth=jnp.array([1.0]),
+        orbit=orbit,
+        physical_model=physical_model,
     )
-    return Planet(orbit=orbit, atmosphere=atm)
 
 
 def test_system_basic_fields():
