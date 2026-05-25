@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.0](https://github.com/CoreySpohn/skyscapes/compare/v0.4.0...v1.0.0) (2026-05-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* Atmosphere models, docs, refactor language, and loaders
+* SpectrumStar -> Star (canonical type gets the bare noun; previous Star/Spectrum compound was awkward); SimpleStar -> FlatStar (adjective-first variant naming, accurately describes the flat-spectrum behaviour); ZodiSourceAYO -> AYOZodi, ZodiSourceLeinert -> LeinertZodi, ZodiSourcePhotonFlux -> PrecomputedZodi (adjective-first prefix; Source suffix was redundant since the classes live in skyscapes.background and PrecomputedZodi now parallels PrecomputedReflectivity for tabulated-data variants); ZodiSource union -> Zodi.
+
+### Features
+
+* Atmosphere models, docs, refactor language, and loaders ([09e68ca](https://github.com/CoreySpohn/skyscapes/commit/09e68ca4b97b6378eee22528e45767b5702bc6e7))
+* rename Star/Zodi classes for naming consistency ([eeba5e3](https://github.com/CoreySpohn/skyscapes/commit/eeba5e313536b0ab5873810d2dca36e63f37016a))
+
 ## [0.4.0](https://github.com/CoreySpohn/skyscapes/compare/v0.3.0...v0.4.0) (2026-05-22)
 
 
