@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/CoreySpohn/skyscapes/compare/v1.0.0...v1.0.1) (2026-05-25)
+
+
+### Bug Fixes
+
+* Add mermaid chart rendering to the docs ([3f4a8f7](https://github.com/CoreySpohn/skyscapes/commit/3f4a8f731c56a113318dd447625469daac1cb2f8))
+
 ## [1.0.0](https://github.com/CoreySpohn/skyscapes/compare/v0.4.0...v1.0.0) (2026-05-25)
 
 
