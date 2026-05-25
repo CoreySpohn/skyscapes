@@ -6,7 +6,7 @@ import jax.numpy as jnp
 
 from skyscapes.disk import ExovistaDisk
 from skyscapes.io import from_exovista, get_earth_like_planet_indices
-from skyscapes.scene import Planet, SpectrumStar, System
+from skyscapes.scene import Planet, Star, System
 
 
 def test_from_exovista_returns_scene_system(fits_fixture):
@@ -16,9 +16,9 @@ def test_from_exovista_returns_scene_system(fits_fixture):
 
 
 def test_from_exovista_star_is_spectrum_star(fits_fixture):
-    """Loaded star is a SpectrumStar with Ms_kg populated from FITS."""
+    """Loaded star is a Star with Ms_kg populated from FITS."""
     sys_obj = from_exovista(fits_fixture)
-    assert isinstance(sys_obj.star, SpectrumStar)
+    assert isinstance(sys_obj.star, Star)
     assert sys_obj.star.Ms_kg > 0.0
 
 

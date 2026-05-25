@@ -1,24 +1,24 @@
-"""scene.Star -- AbstractStar, SimpleStar, SpectrumStar."""
+"""scene.Star -- AbstractStar, FlatStar, Star."""
 
 from __future__ import annotations
 
 import jax.numpy as jnp
 from hwoutils.conversions import jy_to_photons_per_nm_per_m2
 
-from skyscapes.scene import AbstractStar, SimpleStar, SpectrumStar
+from skyscapes.scene import AbstractStar, FlatStar, Star
 
 
 def test_simple_star_fields():
-    """SimpleStar stores Ms_kg / dist_pc and is an AbstractStar."""
-    s = SimpleStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
+    """FlatStar stores Ms_kg / dist_pc and is an AbstractStar."""
+    s = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     assert s.Ms_kg == 1.989e30
     assert s.dist_pc == 10.0
     assert isinstance(s, AbstractStar)
 
 
 def test_simple_star_flux_is_flat():
-    """SimpleStar returns constant flux regardless of wavelength or time."""
-    s = SimpleStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
+    """FlatStar returns constant flux regardless of wavelength or time."""
+    s = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     f1 = s.spec_flux_density(500.0, 0.0)
     f2 = s.spec_flux_density(800.0, 100.0)
     assert jnp.allclose(f1, 1e9)
@@ -26,12 +26,12 @@ def test_simple_star_flux_is_flat():
 
 
 def test_spectrum_star_interpolates():
-    """SpectrumStar Jy-to-photon conversion reproduces analytic value."""
+    """Star Jy-to-photon conversion reproduces analytic value."""
     wl = jnp.linspace(400.0, 1000.0, 7)
     t = jnp.linspace(0.0, 10.0, 5)
     # 1 Jy everywhere -> same phot number at each (wl, t) point
     flux_jy = jnp.ones((wl.size, t.size))
-    s = SpectrumStar(
+    s = Star(
         Ms_kg=1.989e30,
         dist_pc=10.0,
         wavelengths_nm=wl,
@@ -45,10 +45,10 @@ def test_spectrum_star_interpolates():
 
 
 def test_spectrum_star_isinstance():
-    """SpectrumStar is an AbstractStar."""
+    """Star is an AbstractStar."""
     wl = jnp.linspace(400.0, 1000.0, 3)
     t = jnp.linspace(0.0, 1.0, 3)
-    s = SpectrumStar(
+    s = Star(
         Ms_kg=1.989e30,
         dist_pc=10.0,
         wavelengths_nm=wl,

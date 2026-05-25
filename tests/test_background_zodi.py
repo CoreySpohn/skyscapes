@@ -4,9 +4,9 @@ import jax.numpy as jnp
 import pytest
 
 from skyscapes.background import (
-    ZodiSourceAYO,
-    ZodiSourceLeinert,
-    ZodiSourcePhotonFlux,
+    AYOZodi,
+    LeinertZodi,
+    PrecomputedZodi,
 )
 
 
@@ -15,9 +15,9 @@ class TestZodiSourceAYO:
 
     @pytest.fixture
     def zodi_ayo(self):
-        """Create a ZodiSourceAYO instance."""
+        """Create a AYOZodi instance."""
         wavelengths = jnp.array([400.0, 500.0, 550.0, 600.0, 700.0, 800.0])
-        return ZodiSourceAYO(wavelengths)
+        return AYOZodi(wavelengths)
 
     def test_vband_surface_brightness(self, zodi_ayo):
         """Surface brightness at V-band should be ~22 mag/arcsec^2."""
@@ -65,8 +65,8 @@ class TestZodiSourceLeinert:
 
     @pytest.fixture
     def zodi_leinert(self):
-        """Create a ZodiSourceLeinert instance."""
-        return ZodiSourceLeinert()
+        """Create a LeinertZodi instance."""
+        return LeinertZodi()
 
     def test_reference_values(self, zodi_leinert):
         """Check default reference values."""
@@ -202,10 +202,8 @@ class TestZodiSourceLeinert:
         positions Leinert deviates from AYO per the table.
         """
         wl = jnp.asarray(550.0)
-        ayo = ZodiSourceAYO(
-            jnp.linspace(400.0, 1000.0, 50), surface_brightness_mag=22.0
-        )
-        leinert = ZodiSourceLeinert(reference_mag_arcsec2=22.0)
+        ayo = AYOZodi(jnp.linspace(400.0, 1000.0, 50), surface_brightness_mag=22.0)
+        leinert = LeinertZodi(reference_mag_arcsec2=22.0)
         f_ayo = float(ayo.spec_flux_density(wl, 0.0))
         # At the Leinert table reference position (lat=0, sl=90).
         f_lein_ref = float(
@@ -248,7 +246,7 @@ class TestZodiSourcePhotonFlux:
         """Photon flux model should return the specified value."""
         wavelengths = jnp.array([500.0, 550.0, 600.0])
         photon_flux = jnp.array([1000.0, 1000.0, 1000.0])
-        zodi = ZodiSourcePhotonFlux(wavelengths, photon_flux)
+        zodi = PrecomputedZodi(wavelengths, photon_flux)
 
         time_jd = 2460000.0
         wavelength = 550.0
@@ -260,7 +258,7 @@ class TestZodiSourcePhotonFlux:
         """Passthrough should ignore position parameters."""
         wavelengths = jnp.array([400.0, 600.0, 800.0])
         photon_flux = jnp.array([500.0, 500.0, 500.0])
-        zodi = ZodiSourcePhotonFlux(wavelengths, photon_flux)
+        zodi = PrecomputedZodi(wavelengths, photon_flux)
 
         # Interpolate at same wavelength with different positions
         flux1 = zodi.spec_flux_density(600.0, 2460000.0)
@@ -278,8 +276,8 @@ class TestZodiSourceComparison:
     def test_ayo_leinert_similar_at_default_position(self):
         """AYO and Leinert should give similar results at ~135 deg solar lon."""
         wavelengths = jnp.array([500.0, 550.0, 600.0])
-        zodi_ayo = ZodiSourceAYO(wavelengths)
-        zodi_leinert = ZodiSourceLeinert()
+        zodi_ayo = AYOZodi(wavelengths)
+        zodi_leinert = LeinertZodi()
 
         time_jd = 2460000.0
         wavelength = 550.0

@@ -8,7 +8,7 @@ is constant in any straightforward way, and the two are easy to confuse
 because they coincide along the ecliptic plane but diverge elsewhere on
 the sky. This page walks through the computation of those two angles
 using `orbix.observatory.ObservatoryL2Halo`, the common ways the geometry
-goes wrong, and the conventions `skyscapes.background.ZodiSourceLeinert`
+goes wrong, and the conventions `skyscapes.background.LeinertZodi`
 expects.
 
 ## The two Leinert inputs
@@ -16,7 +16,7 @@ expects.
 The position-dependent factor in Leinert+1998 Table 17 depends on the
 ecliptic latitude of the look vector, written `β_⊙` in Leinert and
 exposed as the `ecliptic_lat_deg` argument to
-`ZodiSourceLeinert.spec_flux_density`, and on the helio-ecliptic
+`LeinertZodi.spec_flux_density`, and on the helio-ecliptic
 longitude difference between the look vector and the Sun, written
 `Δλ_⊙` in Leinert and exposed as `solar_lon_deg`. The ecliptic latitude
 is essentially time-invariant for a fixed sky target because stellar
@@ -32,10 +32,10 @@ methods with consistent `(mjd, ra_rad, dec_rad)` argument order:
 
 ```python
 from orbix.observatory import ObservatoryL2Halo
-from skyscapes.background import ZodiSourceLeinert
+from skyscapes.background import LeinertZodi
 
 obs = ObservatoryL2Halo.from_default()
-zodi = ZodiSourceLeinert(reference_mag_arcsec2=22.0)
+zodi = LeinertZodi(reference_mag_arcsec2=22.0)
 
 ecl_lat = obs.ecliptic_latitude_deg(mjd, ra_rad, dec_rad)         # ~constant in time
 helio_lon = obs.helio_ecliptic_longitude_deg(mjd, ra_rad, dec_rad)  # sweeps 0 -> 180 per year
@@ -109,7 +109,7 @@ sampling cadence.
 When the look vector points within a few degrees of the Sun, the
 Leinert+1998 Table 17 lookup is out of range because the tabulation does
 not extend to such tight elongations, and
-`ZodiSourceLeinert.spec_flux_density` returns `NaN`. Downstream code
+`LeinertZodi.spec_flux_density` returns `NaN`. Downstream code
 uses the `NaN` as a "target unobservable this epoch" gate, which is the
 intended behaviour. Real telescope field-of-regard constraints typically
 forbid pointing within 45° of the Sun, so the out-of-range region is

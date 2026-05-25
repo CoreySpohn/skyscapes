@@ -7,7 +7,7 @@ from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.system.orbit import KeplerianOrbit
 
 from skyscapes.atmosphere import LambertianAtmosphere
-from skyscapes.scene import Planet, SimpleStar
+from skyscapes.scene import FlatStar, Planet
 
 SOLVER = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
 
@@ -37,7 +37,7 @@ def test_planet_n_planets_property():
 
 def test_planet_position_shape():
     """Planet.position_arcsec returns shape (2, K, T)."""
-    star = SimpleStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
+    star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     p = _single_planet()
     ra_dec = p.position_arcsec(SOLVER, jnp.array([0.0]), star=star)
     # (2, K, T) per contract
@@ -48,7 +48,7 @@ def test_planet_alpha_dMag_matches_orbix():
     """Planet.alpha_dMag reproduces orbix.Planets.alpha_dMag exactly."""
     from orbix.system.planets import Planets as OrbixPlanets
 
-    star = SimpleStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
+    star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     p = _single_planet()
     t_jd = jnp.array([0.0, 100.0, 200.0])
 
@@ -76,7 +76,7 @@ def test_planet_alpha_dMag_matches_orbix():
 
 def test_planet_contrast_wavelength_agnostic_for_lambertian():
     """Lambertian -> contrast independent of wavelength."""
-    star = SimpleStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
+    star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     p = _single_planet()
     t_jd = jnp.array([0.0])
     c_blue = p.contrast(SOLVER, jnp.array([400.0]), t_jd, star=star)
@@ -86,7 +86,7 @@ def test_planet_contrast_wavelength_agnostic_for_lambertian():
 
 def test_planet_spec_flux_density_equals_contrast_times_star():
     """spec_flux_density equals contrast times star.spec_flux_density."""
-    star = SimpleStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
+    star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     p = _single_planet()
     t_jd = jnp.array([0.0])
     wl = jnp.array([600.0])
@@ -97,7 +97,7 @@ def test_planet_spec_flux_density_equals_contrast_times_star():
 
 def test_planet_mean_anomaly_range():
     """mean_anomaly returns (K, T) in [0, 360)."""
-    star = SimpleStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
+    star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     p = _single_planet()
     M = p.mean_anomaly(jnp.array([0.0, 100.0, 365.0]), star=star)
     # Shape (K=1, T=3), and the values should be in [0, 360)

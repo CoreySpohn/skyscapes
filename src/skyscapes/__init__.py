@@ -14,7 +14,7 @@ the top level, so common flows can write
 ``from skyscapes import Scene, System, from_exovista``.
 Mix-and-match construction goes through the submodules
 (``skyscapes.disk.ExovistaDisk``, ``skyscapes.atmosphere.GridAtmosphere``,
-``skyscapes.background.ZodiSourceAYO``, ...).
+``skyscapes.background.AYOZodi``, ...).
 """
 
 from __future__ import annotations

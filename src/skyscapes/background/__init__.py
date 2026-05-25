@@ -12,9 +12,9 @@ Currently this module exposes three zodi flavours, all returning
 
 from __future__ import annotations
 
-from .zodi import ZodiSourceAYO, ZodiSourceLeinert, ZodiSourcePhotonFlux
+from .zodi import AYOZodi, LeinertZodi, PrecomputedZodi
 
-ZodiSource = ZodiSourceAYO | ZodiSourceLeinert | ZodiSourcePhotonFlux
+Zodi = AYOZodi | LeinertZodi | PrecomputedZodi
 """Nominal union of all concrete zodi source types.
 
 Used as the type annotation on ``Scene.zodi`` and on coronagraphoto's
@@ -24,8 +24,8 @@ New variants must be added to this union AND implement that method.
 """
 
 __all__ = [
-    "ZodiSource",
-    "ZodiSourceAYO",
-    "ZodiSourceLeinert",
-    "ZodiSourcePhotonFlux",
+    "AYOZodi",
+    "LeinertZodi",
+    "PrecomputedZodi",
+    "Zodi",
 ]

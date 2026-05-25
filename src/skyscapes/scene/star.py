@@ -1,8 +1,8 @@
 """Star models for the scene hierarchy.
 
 ``AbstractStar`` declares a ``Ms_kg`` / ``dist_pc`` pair and the
-``spec_flux_density`` hook. ``SimpleStar`` is a flat-spectrum stand-in
-useful for ETC runs. ``SpectrumStar`` wraps an ``interpax.Interpolator2D``
+``spec_flux_density`` hook. ``FlatStar`` is a flat-spectrum stand-in
+useful for ETC runs. ``Star`` wraps an ``interpax.Interpolator2D``
 over (wavelength, time) built from Jansky flux data, matching the legacy
 ``skyscapes._legacy.Star`` semantics.
 
@@ -42,7 +42,7 @@ class AbstractStar(eqx.Module):
         """Return spectral flux density in ph/s/m^2/nm."""
 
 
-class SimpleStar(AbstractStar):
+class FlatStar(AbstractStar):
     """Flat-spectrum star -- constant flux independent of wavelength or time."""
 
     Ms_kg: float
@@ -65,12 +65,12 @@ class SimpleStar(AbstractStar):
         """Compact one-line summary of mass, distance, and flux."""
         m_solar = self.Ms_kg / 1.988409870698051e30
         return (
-            f"SimpleStar(M={m_solar:.3f} Msun, dist={self.dist_pc:.3g} pc, "
+            f"FlatStar(M={m_solar:.3f} Msun, dist={self.dist_pc:.3g} pc, "
             f"flux={self.flux_phot_per_nm_m2:.3g} ph/s/m^2/nm)"
         )
 
 
-class SpectrumStar(AbstractStar):
+class Star(AbstractStar):
     """Time- and wavelength-dependent star backed by an interpax 2D spline."""
 
     Ms_kg: float
@@ -131,7 +131,7 @@ class SpectrumStar(AbstractStar):
         wl_max = float(jnp.max(self._wavelengths_nm))
         n_t = int(self._times_jd.shape[0])
         return (
-            f"SpectrumStar(M={m_solar:.3f} Msun, "
+            f"Star(M={m_solar:.3f} Msun, "
             f"dist={self.dist_pc:.3g} pc, "
             f"L={self.luminosity_lsun:.3g} Lsun, "
             f"diam={self.diameter_arcsec:.3g} arcsec, "

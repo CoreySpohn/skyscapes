@@ -2,12 +2,12 @@
 
 Three concrete variants:
 
-- :class:`ZodiSourceAYO` -- fixed V-band surface brightness with the
+- :class:`AYOZodi` -- fixed V-band surface brightness with the
   Leinert wavelength-dependent color correction. Matches the AYO/EXOSIMS
   ETC Calibration Task Group convention (135 deg solar longitude).
-- :class:`ZodiSourceLeinert` -- full Leinert et al. (1998) tables for
+- :class:`LeinertZodi` -- full Leinert et al. (1998) tables for
   position- and wavelength-dependence.
-- :class:`ZodiSourcePhotonFlux` -- pre-computed photon flux supplied
+- :class:`PrecomputedZodi` -- pre-computed photon flux supplied
   externally (e.g. extracted from an EXOSIMS/pyEDITH run).
 
 All three return ph/s/m^2/nm per arcsec^2. Each is its own ``eqx.Module``;
@@ -33,7 +33,7 @@ from orbix.observatory.zodiacal import (
 
 
 @final
-class ZodiSourceAYO(eqx.Module):
+class AYOZodi(eqx.Module):
     """Zodiacal light using AYO-compatible default settings.
 
     Uses a fixed surface brightness at V-band with a Leinert
@@ -43,7 +43,7 @@ class ZodiSourceAYO(eqx.Module):
     Example:
         >>> import jax.numpy as jnp
         >>> wavelengths = jnp.linspace(400, 1000, 50)
-        >>> zodi = ZodiSourceAYO(wavelengths, surface_brightness_mag=22.0)
+        >>> zodi = AYOZodi(wavelengths, surface_brightness_mag=22.0)
     """
 
     _wavelengths_nm: jnp.ndarray
@@ -58,7 +58,7 @@ class ZodiSourceAYO(eqx.Module):
         surface_brightness_mag: float = 22.0,
         reference_wavelength_nm: float = 550.0,
     ):
-        """Initialise ZodiSourceAYO.
+        """Initialise AYOZodi.
 
         Args:
             wavelengths_nm: Array of wavelengths in nm spanning the
@@ -115,7 +115,7 @@ class ZodiSourceAYO(eqx.Module):
         wl_min = float(self._wavelengths_nm.min())
         wl_max = float(self._wavelengths_nm.max())
         return (
-            f"ZodiSourceAYO(mag={self._reference_mag_arcsec2:.2f}/arcsec^2 "
+            f"AYOZodi(mag={self._reference_mag_arcsec2:.2f}/arcsec^2 "
             f"@ {self._reference_wavelength_nm:.0f} nm, "
             f"wl={wl_min:.0f}-{wl_max:.0f} nm, "
             f"n_wl={int(self._wavelengths_nm.size)})"
@@ -123,7 +123,7 @@ class ZodiSourceAYO(eqx.Module):
 
 
 @final
-class ZodiSourceLeinert(eqx.Module):
+class LeinertZodi(eqx.Module):
     """Zodiacal light using the full Leinert (1998) position-dependent model.
 
     Computes the surface brightness dynamically from the Leinert et al.
@@ -131,7 +131,7 @@ class ZodiSourceLeinert(eqx.Module):
     and wavelength dependence.
 
     Example:
-        >>> zodi = ZodiSourceLeinert(reference_mag_arcsec2=22.0)
+        >>> zodi = LeinertZodi(reference_mag_arcsec2=22.0)
         >>> flux1 = zodi.spec_flux_density(550.0, 0.0, ecliptic_lat_deg=30.0)
         >>> flux2 = zodi.spec_flux_density(550.0, 0.0, ecliptic_lat_deg=45.0)
     """
@@ -144,7 +144,7 @@ class ZodiSourceLeinert(eqx.Module):
         reference_mag_arcsec2: float = 22.0,
         reference_wavelength_nm: float = 550.0,
     ):
-        """Initialise ZodiSourceLeinert.
+        """Initialise LeinertZodi.
 
         Args:
             reference_mag_arcsec2: Reference surface brightness in
@@ -199,14 +199,14 @@ class ZodiSourceLeinert(eqx.Module):
     def __repr__(self) -> str:
         """One-line summary of the Leinert zodi reference."""
         return (
-            f"ZodiSourceLeinert(ref_mag={self._reference_mag_arcsec2:.2f}/arcsec^2 "
+            f"LeinertZodi(ref_mag={self._reference_mag_arcsec2:.2f}/arcsec^2 "
             f"@ {self._reference_wavelength_nm:.0f} nm; "
             f"position-dependent)"
         )
 
 
 @final
-class ZodiSourcePhotonFlux(eqx.Module):
+class PrecomputedZodi(eqx.Module):
     """Zodiacal light from pre-computed photon flux values.
 
     Wraps an externally computed array of photon fluxes (e.g. extracted
@@ -216,7 +216,7 @@ class ZodiSourcePhotonFlux(eqx.Module):
 
     Example:
         >>> exosims_flux = ...  # ph/s/m^2/nm/arcsec^2 from EXOSIMS
-        >>> zodi = ZodiSourcePhotonFlux(wavelengths, exosims_flux)
+        >>> zodi = PrecomputedZodi(wavelengths, exosims_flux)
     """
 
     _wavelengths_nm: jnp.ndarray
@@ -231,7 +231,7 @@ class ZodiSourcePhotonFlux(eqx.Module):
         flux_phot_per_arcsec2: jnp.ndarray,
         reference_mag_arcsec2: float = 22.0,
     ):
-        """Initialise ZodiSourcePhotonFlux.
+        """Initialise PrecomputedZodi.
 
         Args:
             wavelengths_nm: Array of wavelengths in nm.
@@ -278,7 +278,7 @@ class ZodiSourcePhotonFlux(eqx.Module):
         wl_min = float(self._wavelengths_nm.min())
         wl_max = float(self._wavelengths_nm.max())
         return (
-            f"ZodiSourcePhotonFlux(ref_mag={self._reference_mag_arcsec2:.2f}/arcsec^2, "
+            f"PrecomputedZodi(ref_mag={self._reference_mag_arcsec2:.2f}/arcsec^2, "
             f"wl={wl_min:.0f}-{wl_max:.0f} nm, "
             f"n_wl={int(self._wavelengths_nm.size)}; pre-tabulated)"
         )

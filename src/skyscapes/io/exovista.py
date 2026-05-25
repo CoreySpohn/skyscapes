@@ -30,12 +30,12 @@ from orbix.system.orbit import KeplerianOrbit
 
 from ..atmosphere import GridAtmosphere
 from ..disk import ExovistaDisk
-from ..scene import Planet, SpectrumStar, System
+from ..scene import Planet, Star, System
 from ._frames import rotate_to_sky_coords
 
 
-def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> SpectrumStar:
-    """Load the FITS star extension into a SpectrumStar."""
+def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
+    """Load the FITS star extension into a Star."""
     obj_data = hdul[fits_ext].data
     obj_header = hdul[fits_ext].header
     wavelengths_um = hdul[0].data
@@ -52,7 +52,7 @@ def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> SpectrumStar:
     dec_deg = obj_header.get("DEC", 0.0)
     luminosity_lsun = obj_header.get("LSTAR", 1.0)
 
-    return SpectrumStar(
+    return Star(
         Ms_kg=Ms_kg,
         dist_pc=dist_pc,
         ra_deg=ra_deg,
@@ -68,7 +68,7 @@ def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> SpectrumStar:
 def _load_single_planet(
     hdul: fits.HDUList,
     idx: int,
-    star: SpectrumStar,
+    star: Star,
     wavelengths_nm: jnp.ndarray,
     trig_solver,
     midplane_inc_deg: float,
