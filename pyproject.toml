@@ -38,6 +38,7 @@ docs = [
     "sphinx-book-theme",
     "sphinx-autoapi",
     "sphinx_autodoc_typehints",
+    "sphinxcontrib-mermaid",
     "ipython",
     "matplotlib",
 ]
