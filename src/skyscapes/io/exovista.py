@@ -153,6 +153,12 @@ def _load_single_planet(
         extrap=True,
     ).reshape(xq.shape)
 
+    # Contrast is a flux ratio and cannot be negative. Linear extrapolation past
+    # the orbit's sampled beta coverage (extrap=True above) can dip a few 1e-11
+    # below zero near beta = 0/180; clip so the stored grid stays physical for
+    # every consumer (contrast, alpha_dMag, image rendering).
+    contrast_grid = jnp.clip(contrast_grid, 0.0, None)
+
     physical_model = GridPhysicalModel(
         wavelengths_nm=wavelengths_nm,
         phase_angle_deg=regular_grid,
