@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.3](https://github.com/CoreySpohn/skyscapes/compare/v1.0.2...v1.0.3) (2026-06-19)
+
+
+### Bug Fixes
+
+* clamp ExoVista contrast grid to non-negative on load ([bd549c2](https://github.com/CoreySpohn/skyscapes/commit/bd549c293e05a8f0957789db98718cdbb120fe53))
+* **disk:** log-spaced LOS quadrature, relax GraterDisk edge-on guard to true singularity ([b613c75](https://github.com/CoreySpohn/skyscapes/commit/b613c75d96c5113ba02a3050350b56a4d40f5800))
+
 ## [1.0.2](https://github.com/CoreySpohn/skyscapes/compare/v1.0.1...v1.0.2) (2026-05-25)
 
 
