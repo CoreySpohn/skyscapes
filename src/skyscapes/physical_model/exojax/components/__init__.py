@@ -19,7 +19,7 @@ live on the components themselves, so HMC over their parameters
 "just works" with ``eqx.filter_vmap`` or ``jax.vmap``.
 """
 
-from .absorption import Absorption
+from .absorption import Absorption, PrecomputedAbsorption
 from .base import (
     AbstractAbsorption,
     AbstractClouds,
@@ -72,6 +72,7 @@ __all__ = [
     "NoCloud",
     "NullScattering",
     "PowerLawTPProfile",
+    "PrecomputedAbsorption",
     "RayleighScattering",
     "StratosphericPeakMmr",
     "TroposphericMmr",

@@ -26,6 +26,7 @@ from skyscapes.physical_model.exojax.components import (
     MieCloud,
     MolecularSpecies,
     PowerLawTPProfile,
+    PrecomputedAbsorption,
     RayleighScattering,
     WavelengthDependentSurface,
 )
@@ -226,6 +227,40 @@ def test_lambert_geometry_dominates_when_surface_albedo_drives_signal():
     # Use a tight relative tolerance with a small atol that does not
     # swamp the ~1e-10 contrasts (default jnp.allclose atol=1e-8 would).
     assert jnp.allclose(out, out_lam, rtol=0.01, atol=1.0e-15)
+
+
+# ---------------------------------------------------------------------------
+# Retrieval factory: PrecomputedAbsorption + for_retrieval (fixed-TP opacity)
+# ---------------------------------------------------------------------------
+
+
+def _index_species_at_k(species, k):
+    def at_k(tree):
+        return jax.tree.map(
+            lambda x: x[k] if isinstance(x, jnp.ndarray) and x.ndim > 0 else x, tree
+        )
+
+    return tuple(
+        eqx.tree_at(lambda s: s.profile, s, replace=at_k(s.profile)) for s in species
+    )
+
+
+def test_precomputed_absorption_matches_stock():
+    """PrecomputedAbsorption with stored xsmatrix == Absorption recompute."""
+    m = make_physical_model(K=1)
+    pressure = m.rt_engine.pressure
+    gravity = 10.0 ** m.log_gravity_cgs[0]
+    Tarr = m.tp_profile.compute_Tarr(
+        m.rt_engine, m.tp_profile.T_eq_K[0], m.tp_profile.T_alpha[0]
+    )
+    species_one = _index_species_at_k(m.species, 0)
+    xsm = tuple(
+        s.opa.xsmatrix(Tarr, pressure) for s in species_one if s.opa is not None
+    )
+    pre = PrecomputedAbsorption(xsmatrix_per_species=xsm)
+    a = Absorption().compute(species_one, Tarr, pressure, gravity, m.rt_engine)
+    b = pre.compute(species_one, Tarr, pressure, gravity, m.rt_engine)
+    assert jnp.allclose(a.dtau_total, b.dtau_total)
 
 
 def test_vmap_over_wavelength_returns_cube():
