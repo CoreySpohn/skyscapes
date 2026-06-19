@@ -26,12 +26,11 @@ Notes on convention:
     contract; ``vmap`` over wavelength gives a cube without changing
     the interface.
 
-    The LOS-around-midplane sampling diverges at edge-on geometry
-    (``cos(incl) -> 0``); ``surface_brightness`` raises via
-    ``eqx.error_if`` if the requested inclination is closer to edge-on
-    than the disk's geometric capacity allows. The threshold is
-    ``arctan(rmax_AU / zmax_AU)`` where ``zmax_AU`` is evaluated at
-    the outer disk radius after flaring.
+    The LOS-around-midplane sampling uses log-spaced nodes concentrated at
+    the midplane crossing (after the GRaTeR-JAX reference), so the integral
+    stays converged at high inclination. It diverges only at the true edge-on
+    singularity (``cos(incl) -> 0``); ``surface_brightness`` raises via
+    ``eqx.error_if`` when ``|cos(incl)| < 1e-2`` (within ~89.4 deg of pole-on).
 """
 
 from __future__ import annotations
@@ -190,20 +189,20 @@ class GraterDisk(AbstractDisk):
             extrap=False,
         )
 
-        # Geometric edge-on check. Threshold = arctan(rmax / zmax(rmax))
-        # is the inclination beyond which the LOS at the outer disk edge
-        # passes through more than the disk's full vertical extent and
-        # the parameterization breaks.
+        # The LOS-around-midplane sampling diverges only at the true edge-on
+        # singularity (cos_i -> 0), where the window half-width zmax/cos_i and
+        # the midplane crossing y*tan(i) both blow up. The log-spaced LOS nodes
+        # keep the integral converged at all inclinations short of that, so the
+        # guard fires only near the genuine singularity (the GRaTeR-JAX
+        # reference shares the same 1/cos_i divergence with no handling).
         zmax_AU = self._zmax_AU()
-        threshold_deg = jnp.rad2deg(jnp.arctan(self.rmax_AU / zmax_AU))
-        dist_from_edge_on = jnp.abs((incl_deg % 180.0) - 90.0)
+        cos_i = jnp.cos(incl_deg * (jnp.pi / 180.0))
         incl_deg = eqx.error_if(
             incl_deg,
-            dist_from_edge_on < (90.0 - threshold_deg),
-            "GraterDisk: incl_deg too close to edge-on for this disk's "
-            "geometry (|incl - 90| < 90 - arctan(rmax_AU / zmax_AU)). "
-            "Increase n_scale_heights * ksi0_AU * (rmax/sma)^beta, "
-            "decrease rmax_AU, or move incl_deg further from 90.",
+            jnp.abs(cos_i) < 1e-2,
+            "GraterDisk: incl_deg too close to edge-on (|cos(incl)| < 1e-2). "
+            "The LOS-around-midplane sampling diverges as cos(incl) -> 0; "
+            "restrict incl_deg to within ~89.4 deg of pole-on.",
         )
 
         # Density closure: substitute sma_AU outside the valid annulus

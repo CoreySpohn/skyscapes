@@ -17,6 +17,12 @@ from jaxtyping import Array
 DensityFn = Callable[[Array, Array, Array], Array]
 PhaseFn = Callable[[Array], Array]
 
+# Concentration of the log-spaced LOS nodes about the midplane crossing.
+# Matches the GRaTeR-JAX reference (lwidth = 100): larger packs more nodes
+# near the dense midplane, which is what keeps the integral converged as the
+# LOS window (zmax / cos_i) stretches toward edge-on.
+_LOS_LWIDTH = 100.0
+
 
 def los_integrate_scattered(
     density_fn: DensityFn,
@@ -81,7 +87,14 @@ def los_integrate_scattered(
     l_mid = y_rot * sin_i / cos_i
     l_half = zmax_AU / cos_i
 
-    t = jnp.linspace(-1.0, 1.0, n_slices_los)
+    # LOS nodes in [-1, 1], log-spaced and symmetric about the midplane
+    # crossing (dense at t = 0). For odd n_slices_los this yields exactly
+    # n_slices_los nodes; for even, n_slices_los - 1 (the count is internal --
+    # the LOS is summed away, the output shape is unchanged).
+    half = (n_slices_los + 1) // 2
+    u = jnp.linspace(0.0, 1.0, half)
+    tmp = (jnp.exp(u * jnp.log(_LOS_LWIDTH + 1.0)) - 1.0) / _LOS_LWIDTH
+    t = jnp.concatenate([-tmp[:0:-1], tmp])
     l_grid = l_mid[None, :, :] + t[:, None, None] * l_half
 
     y_d = y_rot[None, :, :] * cos_i + l_grid * sin_i
@@ -106,5 +119,6 @@ def los_integrate_scattered(
     phase = phase_fn(cos_phi)
 
     integrand = jnp.where(valid, rho * phase / safe_d_sq, 0.0)
-    dl = 2.0 * l_half / (n_slices_los - 1)
-    return 0.5 * dl * (integrand[:-1] + integrand[1:]).sum(axis=0)
+    # Trapezoid with non-uniform node spacing (the nodes are log-spaced).
+    dl = (t[1:] - t[:-1]) * l_half
+    return 0.5 * (dl[:, None, None] * (integrand[:-1] + integrand[1:])).sum(axis=0)

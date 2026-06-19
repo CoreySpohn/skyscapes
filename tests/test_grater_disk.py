@@ -140,8 +140,31 @@ def test_wavelength_dependent_g_HG():
     )
 
 
+def test_high_inclination_is_finite():
+    """A highly inclined (but not edge-on) disk renders finite and positive.
+
+    The LOS quadrature is log-spaced and concentrated at the midplane crossing
+    (matching the GRaTeR-JAX reference), so the model stays accurate well past
+    the old arctan(rmax/zmax) guard (~83 deg for this disk). incl=88 (cos=0.035)
+    is highly inclined but far from the true cos_i -> 0 singularity.
+    """
+    sb = _render(make_disk(), incl_deg=88.0)
+    assert sb.shape == (51, 51)
+    assert bool(jnp.all(jnp.isfinite(sb)))
+    assert bool(jnp.all(sb >= 0.0))
+    assert float(sb.sum()) > 0.0
+
+
+def test_los_quadrature_converges_at_high_inclination():
+    """Log-spaced LOS quadrature is converged: 31 slices ~= 121 slices."""
+    coarse = _render(make_disk(n_slices_los=31), incl_deg=80.0)
+    fine = _render(make_disk(n_slices_los=121), incl_deg=80.0)
+    rel = float(jnp.abs(coarse.sum() - fine.sum()) / fine.sum())
+    assert rel < 0.03, f"LOS quadrature not converged at incl=80: rel={rel}"
+
+
 def test_edge_on_render_is_rejected():
-    """Rendering close to edge-on raises at surface_brightness time."""
+    """Rendering at the true cos_i -> 0 singularity raises at render time."""
     d = make_disk()
     with pytest.raises(Exception, match="edge-on"):
         _render(d, incl_deg=89.9)
