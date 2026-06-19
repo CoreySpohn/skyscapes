@@ -277,6 +277,101 @@ def test_precompute_requires_single_planet():
         _precompute_absorption_model(make_physical_model(K=2))
 
 
+class _FakeOpaAbsorbing(_FakeOpa):
+    """Fake opa with non-negligible, optionally T-sensitive cross-sections.
+
+    ``make_physical_model``'s default ``peak_xs=1e-22`` makes the optical depth
+    negligible, so its spectrum is insensitive to abundance/temperature. These
+    retrieval tests need real sensitivity, and the inert-T test needs the full model
+    to actually depend on T (the default fake ignores ``Tarr``).
+    """
+
+    def __init__(self, nu_grid, n_layers, t_sensitive: bool = False):
+        super().__init__(nu_grid, n_layers, peak_xs=50.0)
+        self.t_sensitive = t_sensitive
+
+    def xsmatrix(self, Tarr, pressure):
+        scale = jnp.mean(Tarr) / 288.0 if self.t_sensitive else 1.0
+        return self.peak_xs * scale * jnp.ones((self.n_layers, len(self.nu_grid)))
+
+
+def _absorbing_model(t_sensitive: bool = False):
+    """K=1 fake model with non-negligible (optionally T-sensitive) absorption."""
+    m = make_physical_model(K=1, n_nu=30, n_layers=20)
+    n_layers = m.rt_engine.n_layers
+    species = tuple(
+        MolecularSpecies(
+            profile=s.profile,
+            name=s.name,
+            molmass=s.molmass,
+            opa=_FakeOpaAbsorbing(m.nu_grid, n_layers, t_sensitive),
+            rayleigh_xs=s.rayleigh_xs,
+        )
+        for s in m.species
+    )
+    return eqx.tree_at(lambda x: x.species, m, species)
+
+
+def _render_cube(model, K=1):
+    phase = jnp.zeros((K, 1))
+    dist = jnp.ones((K, 1))
+    wl = jnp.linspace(500.0, 1000.0, 40)
+    Rp = jnp.ones((K,))
+    return model.contrast_cube(phase, dist, wl, Rp)
+
+
+def _spectra_differ(a, b):
+    """True if spectra differ relatively (atol=0, so tiny contrasts count)."""
+    return not bool(jnp.allclose(a, b, rtol=1e-4, atol=0.0))
+
+
+def test_for_retrieval_matches_full_recompute():
+    """Precompute is exact: contrast_cube equals the full-recompute model's."""
+    m = _absorbing_model()
+    m_ret = _precompute_absorption_model(m)
+    a = _render_cube(m)
+    b = _render_cube(m_ret)
+    atol = 1e-6 * float(jnp.max(jnp.abs(a)))
+    assert jnp.allclose(a, b, rtol=1e-6, atol=atol)
+
+
+def test_for_retrieval_abundance_is_live_and_differentiable():
+    """Changing log_mmr changes the spectrum; grad is finite and matches recompute."""
+    m = _absorbing_model()
+    m_ret = _precompute_absorption_model(m)
+
+    bumped = eqx.tree_at(
+        lambda x: x.species[0].profile.log_mmr,
+        m_ret,
+        m_ret.species[0].profile.log_mmr + 3.0,
+    )
+    assert _spectra_differ(_render_cube(m_ret), _render_cube(bumped))
+
+    def loss(model):
+        return jnp.sum(_render_cube(model) ** 2)
+
+    g_ret = eqx.filter_grad(loss)(m_ret).species[0].profile.log_mmr
+    g_full = eqx.filter_grad(loss)(m).species[0].profile.log_mmr
+    assert bool(jnp.all(jnp.isfinite(g_ret)))
+    assert jnp.allclose(g_ret, g_full, rtol=1e-5, atol=1e-8)
+
+
+def test_for_retrieval_is_inert_in_temperature():
+    """T leaves do not change a for_retrieval model's spectrum (xsmatrix is frozen)."""
+    m = _absorbing_model(t_sensitive=True)
+    m_ret = _precompute_absorption_model(m)
+
+    warmer_ret = eqx.tree_at(
+        lambda x: x.tp_profile.T_eq_K, m_ret, m_ret.tp_profile.T_eq_K + 50.0
+    )
+    warmer_full = eqx.tree_at(
+        lambda x: x.tp_profile.T_eq_K, m, m.tp_profile.T_eq_K + 50.0
+    )
+    # Inert for the precomputed model, live for the full recompute.
+    assert jnp.allclose(_render_cube(m_ret), _render_cube(warmer_ret))
+    assert _spectra_differ(_render_cube(m), _render_cube(warmer_full))
+
+
 def test_vmap_over_wavelength_returns_cube():
     """Vmapping over wavelength expands the output to (n_wave, K, T)."""
     K, T = 2, 3
