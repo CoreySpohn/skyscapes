@@ -12,6 +12,7 @@ from __future__ import annotations
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import pytest
 
 from skyscapes.physical_model import (
     AbstractPhysicalModel,
@@ -30,6 +31,7 @@ from skyscapes.physical_model.exojax.components import (
     RayleighScattering,
     WavelengthDependentSurface,
 )
+from skyscapes.physical_model.exojax.physical_model import _precompute_absorption_model
 
 # ---------------------------------------------------------------------------
 # Fake ExoJAX engines with the same call signature shape contracts.
@@ -261,6 +263,18 @@ def test_precomputed_absorption_matches_stock():
     a = Absorption().compute(species_one, Tarr, pressure, gravity, m.rt_engine)
     b = pre.compute(species_one, Tarr, pressure, gravity, m.rt_engine)
     assert jnp.allclose(a.dtau_total, b.dtau_total)
+
+
+def test_precompute_swaps_absorption():
+    """The retrieval core swaps in a PrecomputedAbsorption."""
+    m_ret = _precompute_absorption_model(make_physical_model(K=1))
+    assert isinstance(m_ret.absorption, PrecomputedAbsorption)
+
+
+def test_precompute_requires_single_planet():
+    """K != 1 is rejected (v1 scope)."""
+    with pytest.raises(ValueError, match="single planet"):
+        _precompute_absorption_model(make_physical_model(K=2))
 
 
 def test_vmap_over_wavelength_returns_cube():

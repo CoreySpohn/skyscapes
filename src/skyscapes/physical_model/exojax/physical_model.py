@@ -76,6 +76,7 @@ from .components import (
     GrayCloud,
     MolecularSpecies,
     PowerLawTPProfile,
+    PrecomputedAbsorption,
     RayleighScattering,
     WavelengthDependentSurface,
     build_bulk_prebuilt,
@@ -290,6 +291,32 @@ def _cache_key(**kwargs: Any) -> str:
     return h.hexdigest()[:16]
 
 
+def _precompute_absorption_model(model: ExoJaxPhysicalModel) -> ExoJaxPhysicalModel:
+    """Swap a model's Absorption for a PrecomputedAbsorption (fixed-TP opacity).
+
+    Computes each absorbing species' ``xsmatrix`` once at the model's fixed
+    temperature-pressure structure and replaces the ``Absorption`` component with a
+    ``PrecomputedAbsorption``. Single planet only (``K == 1``): the precomputed
+    cross-sections are planet-specific.
+    """
+    K = model.log_gravity_cgs.shape[0]
+    if K != 1:
+        raise ValueError(
+            f"for_retrieval supports a single planet (K=1); got K={K}. "
+            "Multi-planet precompute is not yet implemented."
+        )
+    pressure = model.rt_engine.pressure
+    Tarr = model.tp_profile.compute_Tarr(
+        model.rt_engine, model.tp_profile.T_eq_K[0], model.tp_profile.T_alpha[0]
+    )
+    xsm = tuple(
+        s.opa.xsmatrix(Tarr, pressure) for s in model.species if s.opa is not None
+    )
+    return eqx.tree_at(
+        lambda m: m.absorption, model, PrecomputedAbsorption(xsmatrix_per_species=xsm)
+    )
+
+
 class ExoJaxPhysicalModel(AbstractPhysicalModel):
     """Composition-based reflected-light planet model over ExoJAX's 2-stream RT.
 
@@ -433,6 +460,20 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
             nu_grid=engines["nu_grid"],
             n_nu=engines["n_nu"],
         )
+
+    @classmethod
+    def for_retrieval(cls, **kwargs) -> ExoJaxPhysicalModel:
+        """Build a retrieval-ready model: opacity precomputed at the fixed TP.
+
+        Same arguments as :meth:`from_default_setup`. The returned model's
+        ``contrast`` / ``contrast_cube`` are differentiable in ABUNDANCE (per-species
+        ``log_mmr``), surface albedo, and clouds, but **INERT IN TEMPERATURE** -- the
+        ``xsmatrix`` is precomputed at ``T_eq_K`` / ``T_alpha``, so changing those
+        leaves no longer changes the spectrum. To fit temperature, use
+        :meth:`from_default_setup` (the full per-eval recompute) instead. Single
+        planet only (``K == 1``).
+        """
+        return _precompute_absorption_model(cls.from_default_setup(**kwargs))
 
     @classmethod
     def from_default_setup_cached(
