@@ -175,7 +175,11 @@ def test_jit_round_trip():
             jnp.array(0.0),
         )
 
-    assert jnp.allclose(f(d), _render(d), rtol=1e-5, atol=1e-12)
+    sb_eager = _render(d)
+    # jit and eager fuse the log-spaced LOS trapezoid reduction differently, so the
+    # near-zero outer-disk pixels agree only to the field scale, not to 1e-12.
+    atol = 1e-6 * float(jnp.max(sb_eager))
+    assert jnp.allclose(f(d), sb_eager, rtol=1e-5, atol=atol)
 
 
 def test_edge_on_is_rejected():

@@ -104,7 +104,10 @@ def test_jit_round_trip():
 
     sb_jit = f(d)
     sb_eager = _render(d, incl_deg=60.0)
-    assert jnp.allclose(sb_jit, sb_eager, rtol=1e-5, atol=1e-12)
+    # jit and eager fuse the log-spaced LOS trapezoid reduction differently, so the
+    # near-zero outer-disk pixels agree only to the field scale, not to 1e-12.
+    atol = 1e-6 * float(jnp.max(sb_eager))
+    assert jnp.allclose(sb_jit, sb_eager, rtol=1e-5, atol=atol)
 
 
 def test_grad_through_sma():

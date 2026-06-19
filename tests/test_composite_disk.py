@@ -64,7 +64,10 @@ def test_composite_jit_round_trip():
 
     sb_jit = f(composite)
     sb_eager = composite.surface_brightness(_WL, _T, _INCL, _PA)
-    assert jnp.allclose(sb_jit, sb_eager, rtol=1e-5, atol=1e-12)
+    # jit and eager fuse the log-spaced LOS trapezoid reduction differently, so the
+    # near-zero outer-disk pixels agree only to the field scale, not to 1e-12.
+    atol = 1e-6 * float(jnp.max(sb_eager))
+    assert jnp.allclose(sb_jit, sb_eager, rtol=1e-5, atol=atol)
 
 
 def test_composite_rejects_empty():
