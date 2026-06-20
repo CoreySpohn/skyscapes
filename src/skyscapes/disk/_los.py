@@ -102,8 +102,16 @@ def los_integrate_scattered(
 
     xy_sq = x_rot * x_rot + y_d * y_d
     d_star_sq = xy_sq + z_d * z_d
-    rmin_sq = rmin_AU * rmin_AU
-    rmax_sq = rmax_AU * rmax_AU
+    # Relative guard band on the truncation edges. The dense midplane node lands
+    # the deprojected inner-edge pixels within a ULP of rmin_sq, and xy_sq is
+    # rounded differently under jit vs eager on x86 (FMA contraction of
+    # x_rot*x_rot + y_d*y_d), so a hard >=/<= flips that node's high-density
+    # contribution on/off between the two paths -- a platform-dependent jit/eager
+    # mismatch. A 1e-9 band sits far above 1-ULP noise and costs a negligible
+    # sliver of disk radius.
+    edge = 1e-9
+    rmin_sq = rmin_AU * rmin_AU * (1.0 - edge)
+    rmax_sq = rmax_AU * rmax_AU * (1.0 + edge)
     valid = (xy_sq >= rmin_sq) & (xy_sq <= rmax_sq) & (d_star_sq > 0.0)
 
     # Sqrt only inside the valid annulus; the caller's density_fn handles
