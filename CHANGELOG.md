@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.0](https://github.com/CoreySpohn/skyscapes/compare/v1.0.3...v1.1.0) (2026-06-20)
+
+
+### Features
+
+* **physical_model:** ExoJaxPhysicalModel.for_retrieval (precomputed-opacity factory) ([d408a82](https://github.com/CoreySpohn/skyscapes/commit/d408a82c1e0a909022f1a2b93cbc476eb478d6c3))
+* **physical_model:** PrecomputedAbsorption (fixed-TP opacity, live abundance) ([bb4c6a0](https://github.com/CoreySpohn/skyscapes/commit/bb4c6a08f3864a0be6ec1a8a205d182eaea8f8ce))
+
+
+### Bug Fixes
+
+* Add guard to avoid x86 error ([a50b3d8](https://github.com/CoreySpohn/skyscapes/commit/a50b3d80170bc85ca99c77a218ffb6a151cf8be6))
+
 ## [1.0.3](https://github.com/CoreySpohn/skyscapes/compare/v1.0.2...v1.0.3) (2026-06-19)
 
 
