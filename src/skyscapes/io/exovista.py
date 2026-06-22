@@ -31,7 +31,6 @@ from orbix.system.orbit import KeplerianOrbit
 from ..disk import ExovistaDisk
 from ..physical_model import GridPhysicalModel
 from ..scene import Planet, Star, System
-from ._frames import rotate_to_sky_coords
 
 
 def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
@@ -71,20 +70,20 @@ def _load_single_planet(
     star: Star,
     wavelengths_nm: jnp.ndarray,
     trig_solver,
-    midplane_inc_deg: float,
-    midplane_pa_deg: float,
 ) -> tuple[Planet, float]:
     """Load one planet and return ``(Planet, t0_d)``.
 
-    The barycentric ``(r, v)`` state vectors from the FITS file are
-    rotated into the on-sky frame at load time using the system midplane
-    angles before being converted to Keplerian elements. This means
-    ``KeplerianOrbit.propagate`` produces on-sky positions directly --
-    no frame metadata is consulted at runtime.
+    ExoVista stores the planet ``(r, v)`` state vectors already in the
+    on-sky ("bary-sky") frame -- the same frame the disk cube is rendered
+    in -- so they are converted to Keplerian elements directly, with NO
+    additional sky rotation. Rotating them again (as an earlier version
+    did) double-applies the system inclination and PA and tilts every
+    planetary system off its disk.
 
     The contrast grid is indexed by phase angle beta = arccos(r_z / |r|),
     computed at load time with the same ``trig_solver`` the runtime
-    ``System`` uses.
+    ``System`` uses; this stays self-consistent with rendering because the
+    grid is keyed by the same ``orbit.propagate`` beta used at render time.
     """
     obj_data = hdul[5 + idx].data
     obj_header = hdul[5 + idx].header
@@ -95,17 +94,11 @@ def _load_single_planet(
 
     contrast_data = jnp.asarray(obj_data[:, 16:].T.astype(np.float32))
 
-    # Rotate barycentric state vectors into the sky frame BEFORE
-    # computing Keplerian elements. FITS data is big-endian ('>f8');
-    # convert to native float64 before passing to JAX.
-    r_bary_au = jnp.asarray(obj_data[0:1, 9:12].astype(np.float64))  # (1, 3)
-    v_bary_au_yr = jnp.asarray(obj_data[0:1, 12:15].astype(np.float64))  # (1, 3)
-    r_sky_au = rotate_to_sky_coords(
-        r_bary_au, inc_deg=midplane_inc_deg, pa_deg=midplane_pa_deg
-    )[0]
-    v_sky_au_yr = rotate_to_sky_coords(
-        v_bary_au_yr, inc_deg=midplane_inc_deg, pa_deg=midplane_pa_deg
-    )[0]
+    # ExoVista's state vectors are already in the on-sky ("bary-sky") frame;
+    # use them directly. FITS data is big-endian ('>f8'); convert to native
+    # float64 before passing to JAX.
+    r_sky_au = jnp.asarray(obj_data[0, 9:12].astype(np.float64))  # (3,)
+    v_sky_au_yr = jnp.asarray(obj_data[0, 12:15].astype(np.float64))  # (3,)
 
     r_sky_m = r_sky_au * AU2m
     v_sky_m_s = jnp.array(au_per_yr_to_m_per_s(v_sky_au_yr))
@@ -272,15 +265,7 @@ def from_exovista(
         star = _load_star(hdul, fits_ext=4)
         solver = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
         planets = tuple(
-            _load_single_planet(
-                hdul,
-                i,
-                star,
-                wavelengths_nm,
-                solver,
-                midplane_inc_deg=midplane_inc_deg,
-                midplane_pa_deg=midplane_pa_deg,
-            )[0]
+            _load_single_planet(hdul, i, star, wavelengths_nm, solver)[0]
             for i in planet_indices
         )
         disk = _load_disk(hdul, disk_ext)

@@ -31,6 +31,25 @@ def test_from_exovista_planets_are_tuple(fits_fixture):
         assert isinstance(p, Planet)
 
 
+def test_from_exovista_planets_coplanar_with_disk(fits_fixture):
+    """Loaded planets are coplanar with the disk midplane.
+
+    Each planet's orbital inclination matches the system midplane inclination
+    (within the small mutual spread). Regression guard for the double
+    sky-rotation bug that tilted every planetary system off its disk.
+    """
+    sys_obj = from_exovista(fits_fixture)
+    disk_inc = sys_obj.midplane_inc_deg
+    for p in sys_obj.planets:
+        i_deg = float(jnp.rad2deg(p.orbit.i_rad[0]))
+        # The disk plane is i == disk_inc (or its 180 - i mirror).
+        delta = min(abs(i_deg - disk_inc), abs(i_deg - (180.0 - disk_inc)))
+        assert delta < 8.0, (
+            f"planet inclination {i_deg:.1f} deg not coplanar with disk "
+            f"midplane {disk_inc:.1f} deg"
+        )
+
+
 def test_from_exovista_disk_is_exovista_disk(fits_fixture):
     """Loaded disk is an ExovistaDisk."""
     sys_obj = from_exovista(fits_fixture)
