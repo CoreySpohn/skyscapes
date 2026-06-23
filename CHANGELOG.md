@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/CoreySpohn/skyscapes/compare/v1.1.0...v1.1.1) (2026-06-23)
+
+
+### Bug Fixes
+
+* **io:** drop double sky-rotation of ExoVista planet states so planets load coplanar with their disk ([1ab4582](https://github.com/CoreySpohn/skyscapes/commit/1ab4582c88f32f56c94d0497bccfdb74a4ca5092))
+
 ## [1.1.0](https://github.com/CoreySpohn/skyscapes/compare/v1.0.3...v1.1.0) (2026-06-20)
 
 
