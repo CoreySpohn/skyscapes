@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: skyscapes
+abstract: "skyscapes is an open-source JAX library for astrophysical scene modeling, assembling stars, planets, debris disks, and zodiacal and exozodiacal dust into surface-brightness scenes for Habitable Worlds Observatory direct imaging simulations."
+authors:
+  - family-names: Spohn
+    given-names: Corey
+    orcid: "https://orcid.org/0000-0002-3138-0240"
+    affiliation: "NASA Goddard Space Flight Center"
+repository-code: "https://github.com/CoreySpohn/skyscapes"
+license: MIT
+doi: "10.5281/zenodo.20819385"
