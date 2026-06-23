@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/CoreySpohn/skyscapes/compare/v1.1.1...v1.2.0) (2026-06-23)
+
+
+### Features
+
+* Add zenodo info ([9ff1e42](https://github.com/CoreySpohn/skyscapes/commit/9ff1e42be602462dc4a1e450ca3102c876ddf784))
+
 ## [1.1.1](https://github.com/CoreySpohn/skyscapes/compare/v1.1.0...v1.1.1) (2026-06-23)
 
 
