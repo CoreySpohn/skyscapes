@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/CoreySpohn/skyscapes/compare/v1.2.0...v1.3.0) (2026-06-23)
+
+
+### Miscellaneous Chores
+
+* release 1.3.0 ([36758fd](https://github.com/CoreySpohn/skyscapes/commit/36758fd0fbf2ae915697c0347b82024339c0ac07))
+
 ## [1.2.0](https://github.com/CoreySpohn/skyscapes/compare/v1.1.1...v1.2.0) (2026-06-23)
 
 
