@@ -1,0 +1,29 @@
+{
+  "upload_type": "software",
+  "creators": [
+    {
+      "orcid": "0000-0002-3138-0240",
+      "affiliation": "NASA Goddard Space Flight Center, Greenbelt, MD",
+      "name": "Spohn, Corey"
+    }
+  ],
+  "license": "MIT",
+  "title": "skyscapes",
+  "description": "skyscapes is an open-source JAX library for astrophysical scene modeling, assembling stars, planets, debris disks, and zodiacal and exozodiacal dust into surface-brightness scenes for Habitable Worlds Observatory direct imaging simulations.",
+  "keywords": [
+    "exoplanets",
+    "scene modeling",
+    "debris disks",
+    "zodiacal light",
+    "Habitable Worlds Observatory",
+    "direct imaging",
+    "JAX"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/CoreySpohn/skyscapes",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}
