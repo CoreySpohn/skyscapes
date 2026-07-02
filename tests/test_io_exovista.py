@@ -56,6 +56,12 @@ def test_from_exovista_disk_is_exovista_disk(fits_fixture):
     assert isinstance(sys_obj.disk, ExovistaDisk)
 
 
+def test_from_exovista_load_disk_false_skips_disk(fits_fixture):
+    """load_disk=False leaves System.disk as None."""
+    sys_obj = from_exovista(fits_fixture, load_disk=False)
+    assert sys_obj.disk is None
+
+
 def test_from_exovista_only_earths_filters(fits_fixture):
     """only_earths=True keeps only Earth-like planets."""
     sys_obj_all = from_exovista(fits_fixture)

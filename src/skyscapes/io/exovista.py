@@ -226,6 +226,7 @@ def from_exovista(
     fits_file: str,
     planet_indices: Sequence[int] | None = None,
     only_earths: bool = False,
+    load_disk: bool = True,
 ) -> System:
     """Load an ExoVista FITS file into a ``scene.System``.
 
@@ -240,6 +241,10 @@ def from_exovista(
         fits_file: Path to ExoVista FITS file.
         planet_indices: Planet indices to load (0-based). ``None`` = all.
         only_earths: If True and *planet_indices* is None, auto-filter Earths.
+        load_disk: If False, skip the disk extension entirely and set
+            ``System.disk`` to ``None``. Useful when the downstream
+            pipeline cannot render a disk (e.g. a coronagraph without a
+            PSF datacube).
 
     Returns:
         ``scene.System`` with star, planets (tuple), disk, and midplane metadata.
@@ -268,7 +273,7 @@ def from_exovista(
             _load_single_planet(hdul, i, star, wavelengths_nm, solver)[0]
             for i in planet_indices
         )
-        disk = _load_disk(hdul, disk_ext)
+        disk = _load_disk(hdul, disk_ext) if load_disk else None
 
     return System(
         star=star,
