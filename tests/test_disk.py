@@ -44,4 +44,4 @@ def test_exovista_disk_is_abstract():
 #   ExovistaDisk with a small synthetic cube (see test_scene_system.py).
 # - Per-disk inclination_deg / position_angle_deg fields: canonical disk
 #   midplane orientation now lives on System.midplane_inc_deg /
-#   System.midplane_pa_deg. See brain/specs/2026-05-16-sim-disk-redesign-design.md.
+#   System.midplane_pa_deg.
