@@ -224,19 +224,24 @@ class TestZodiSourceLeinert:
         )
         assert f_lein_135 < f_ayo
 
-    def test_out_of_range_returns_nan(self, zodi_leinert):
-        """Looking too close to the Sun is out-of-table -> NaN.
+    def test_near_sun_query_clamps_to_finite(self, zodi_leinert):
+        """Looking too close to the Sun clamps to the nearest tabulated value.
 
         Leinert+1998 Table 17 starts at ``Delta_lambda_sun = 0`` only for
         moderately high latitudes; for an ecliptic-plane look vector at
-        ~few-degree elongation the table is empty and the lookup must
-        return NaN so that observability gates downstream can detect
-        the unobservable epoch.
+        ~few-degree elongation the table's near-Sun cells are excluded
+        (sentinel -1). skyscapes.background.leinert fills those sentinel
+        cells with the nearest valid value at import, so the lookup
+        clamps to a finite brightness instead of silently propagating NaN
+        into downstream flux maps (coronagraphoto.simulation.zodi_rate
+        does not NaN-guard its zodi flux multiply -- geometric keepout in
+        orbix.observatory.keepout.is_observable is the actual unobservable-
+        epoch gate, independent of this lookup).
         """
         flux = zodi_leinert.spec_flux_density(
             550.0, 0.0, ecliptic_lat_deg=0.0, solar_lon_deg=2.0
         )
-        assert bool(jnp.isnan(flux))
+        assert jnp.isfinite(flux)
 
 
 class TestZodiSourcePhotonFlux:

@@ -23,11 +23,11 @@ import equinox as eqx
 import interpax
 import jax.numpy as jnp
 from hwoutils.constants import Jy, h
-from hwoutils.conversions import jy_to_photons_per_nm_per_m2
-from orbix.observatory.zodiacal import (
+from hwoutils.conversions import jy_to_photons_per_nm_per_m2, mag_to_flux_jy
+
+from skyscapes.background.leinert import (
     create_zodi_spectrum_jax,
     leinert_zodi_mag,
-    mag_to_flux_jy,
     zodi_color_correction,
 )
 
