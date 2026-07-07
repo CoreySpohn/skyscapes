@@ -80,15 +80,14 @@ def test_lambertian_wavelength_independent():
 
 
 def test_lambertian_matches_orbix_alpha_dmag():
-    """Hand-built LambertianPhysicalModel reproduces orbix.Planets.alpha_dMag."""
+    """Hand-built LambertianPhysicalModel reproduces the exact Lambert dMag."""
+    from orbix.equations.phase import lambert_phase_exact
     from orbix.kepler.shortcuts.grid import get_grid_solver
-    from orbix.system.planets import Planets as OrbixPlanets
+    from orbix.orbit import KeplerianOrbit
 
     solver = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
 
-    orbix_p = OrbixPlanets(
-        Ms_kg=jnp.array([1.989e30]),
-        dist_pc=jnp.array([10.0]),
+    orbit = KeplerianOrbit(
         a_AU=jnp.array([1.0]),
         e=jnp.array([0.0]),
         W_rad=jnp.array([0.0]),
@@ -96,18 +95,19 @@ def test_lambertian_matches_orbix_alpha_dmag():
         w_rad=jnp.array([0.0]),
         M0_rad=jnp.array([jnp.pi / 4]),
         t0_d=jnp.array([0.0]),
-        Mp_Mearth=jnp.array([1.0]),
-        Rp_Rearth=jnp.array([1.0]),
-        Ag=jnp.array([0.3]),
     )
+    Ms_kg = jnp.array([1.989e30])
+    Ag = jnp.array([0.3])
+    Rp_AU = jnp.array([1.0]) * Rearth2AU
     t_jd = jnp.array([0.0])
-    _, dMag_orbix = orbix_p.alpha_dMag(solver, t_jd)
 
     # Rebuild the same phase/distance via orbit.propagate then feed
     # LambertianPhysicalModel. The output contrast must match dMag exactly.
-    _, phase_angle_rad, dist_AU = orbix_p.orbit.propagate(
-        solver, t_jd, Ms_kg=orbix_p.Ms_kg
-    )
+    _, phase_angle_rad, dist_AU = orbit.propagate(solver, t_jd, Ms_kg=Ms_kg)
+
+    phase = lambert_phase_exact(jnp.cos(phase_angle_rad), jnp.sin(phase_angle_rad))
+    log_arg = Ag[:, None] * (Rp_AU[:, None] / dist_AU) ** 2 * phase
+    dMag_ref = -2.5 * jnp.log10(log_arg + jnp.finfo(log_arg.dtype).tiny)
 
     lamb = LambertianPhysicalModel(Ag=jnp.array([0.3]))
     contrast = lamb.contrast(
@@ -117,4 +117,4 @@ def test_lambertian_matches_orbix_alpha_dmag():
         Rp_Rearth=jnp.array([1.0]),
     )
     dMag_new = -2.5 * jnp.log10(contrast + jnp.finfo(contrast.dtype).tiny)
-    assert jnp.allclose(dMag_new, dMag_orbix, rtol=1e-6)
+    assert jnp.allclose(dMag_new, dMag_ref, rtol=1e-6)

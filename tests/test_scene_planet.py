@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import jax.numpy as jnp
+from hwoutils.constants import Rearth2AU
+from orbix.equations.phase import lambert_phase_exact
 from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.orbit import KeplerianOrbit
 
@@ -47,18 +49,14 @@ def test_planet_position_shape():
 
 
 def test_planet_alpha_dMag_matches_orbix():
-    """Planet.alpha_dMag reproduces orbix.Planets.alpha_dMag exactly."""
-    from orbix.system.planets import Planets as OrbixPlanets
-
+    """Planet.alpha_dMag reproduces the exact Lambert dMag formula."""
     star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     p = _single_planet()
     t_jd = jnp.array([0.0, 100.0, 200.0])
 
     alpha_new, dMag_new = p.alpha_dMag(SOLVER, t_jd, star=star)
 
-    orbix_p = OrbixPlanets(
-        Ms_kg=jnp.array([1.989e30]),
-        dist_pc=jnp.array([10.0]),
+    orbit = KeplerianOrbit(
         a_AU=jnp.array([1.0]),
         e=jnp.array([0.0]),
         W_rad=jnp.array([0.0]),
@@ -66,14 +64,20 @@ def test_planet_alpha_dMag_matches_orbix():
         w_rad=jnp.array([0.0]),
         M0_rad=jnp.array([jnp.pi / 4]),
         t0_d=jnp.array([0.0]),
-        Mp_Mearth=jnp.array([1.0]),
-        Rp_Rearth=jnp.array([1.0]),
-        Ag=jnp.array([0.3]),
     )
-    alpha_orbix, dMag_orbix = orbix_p.alpha_dMag(SOLVER, t_jd)
+    Ms_kg = jnp.array([1.989e30])
+    dist_pc = jnp.array([10.0])
+    Ag = jnp.array([0.3])
+    Rp_AU = jnp.array([1.0]) * Rearth2AU
 
-    assert jnp.allclose(alpha_new, alpha_orbix, rtol=1e-6)
-    assert jnp.allclose(dMag_new, dMag_orbix, rtol=1e-6)
+    _, beta, dist_AU = orbit.propagate(SOLVER, t_jd, Ms_kg=Ms_kg)
+    phase = lambert_phase_exact(jnp.cos(beta), jnp.sin(beta))
+    log_arg = Ag[:, None] * (Rp_AU[:, None] / dist_AU) ** 2 * phase
+    dMag_ref = -2.5 * jnp.log10(log_arg + jnp.finfo(log_arg.dtype).tiny)
+    alpha_ref = orbit.separation_arcsec(SOLVER, t_jd, Ms_kg=Ms_kg, dist_pc=dist_pc)
+
+    assert jnp.allclose(alpha_new, alpha_ref, rtol=1e-6)
+    assert jnp.allclose(dMag_new, dMag_ref, rtol=1e-6)
 
 
 def test_planet_contrast_wavelength_agnostic_for_lambertian():
