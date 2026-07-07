@@ -101,7 +101,7 @@ Building one from scratch:
 
 ```python
 import jax.numpy as jnp
-from orbix.system.orbit import KeplerianOrbit
+from orbix.orbit import KeplerianOrbit
 
 from skyscapes import Scene, System
 from skyscapes.scene import FlatStar, Planet

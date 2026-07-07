@@ -26,7 +26,7 @@ from hwoutils.constants import (
 from hwoutils.conversions import au_per_yr_to_m_per_s, decimal_year_to_jd
 from orbix.equations.orbit import state_vector_to_keplerian
 from orbix.kepler.shortcuts.grid import get_grid_solver
-from orbix.system.orbit import KeplerianOrbit
+from orbix.orbit import KeplerianOrbit
 
 from ..disk import ExovistaDisk
 from ..physical_model import GridPhysicalModel

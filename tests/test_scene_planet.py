@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 from orbix.kepler.shortcuts.grid import get_grid_solver
-from orbix.system.orbit import KeplerianOrbit
+from orbix.orbit import KeplerianOrbit
 
 from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.scene import FlatStar, Planet

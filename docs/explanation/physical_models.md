@@ -141,7 +141,7 @@ plus an orbit and a physical model:
 
 ```python
 import jax.numpy as jnp
-from orbix.system.orbit import KeplerianOrbit
+from orbix.orbit import KeplerianOrbit
 from skyscapes.scene import Planet
 from skyscapes.physical_model import LambertianPhysicalModel
 

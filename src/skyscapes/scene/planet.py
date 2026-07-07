@@ -23,7 +23,7 @@ import jax.numpy as jnp
 from hwoutils.constants import G, pc2AU, rad2arcsec, two_pi
 from jaxtyping import Array
 from orbix.equations.orbit import mean_anomaly_tp, mean_motion, period_n
-from orbix.system.orbit import AbstractOrbit
+from orbix.orbit import AbstractOrbit
 
 from .._repr import fmt_scalar_or_array, indent
 from ..physical_model import AbstractPhysicalModel
