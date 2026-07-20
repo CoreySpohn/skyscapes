@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0](https://github.com/CoreySpohn/skyscapes/compare/v1.3.0...v1.4.0) (2026-07-18)
+
+
+### Features
+
+* **background:** absorb Leinert/AYO zodi physics from orbix; clamp near-Sun domain ([71b7ad8](https://github.com/CoreySpohn/skyscapes/commit/71b7ad8175f063dcb48dfcc5cec668914322aec1))
+* **io:** add load_disk flag to from_exovista ([a6ec2a6](https://github.com/CoreySpohn/skyscapes/commit/a6ec2a6a8bdfe366828eb219e050ebfe2cd04459))
+
 ## [1.3.0](https://github.com/CoreySpohn/skyscapes/compare/v1.2.0...v1.3.0) (2026-06-23)
 
 
