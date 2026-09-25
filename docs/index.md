@@ -120,6 +120,10 @@ pip install skyscapes
 - [`skyscapes.background`](explanation/source_models) -- `Zodi`
   (union), `AYOZodi`, `LeinertZodi`, `PrecomputedZodi`
 
+**Views** (the `viz` extra, `pip install 'skyscapes[viz]'`):
+- [`skyscapes.viz`](explanation/scene_geometry) -- `plot_system`,
+  `plot_disk_image`, `plot_disk_geometry`, `plot_local_zodi_geometry`
+
 **Loaders**:
 - `from_exovista` (top-level) -- one-call ingestion of ExoVista FITS
 
@@ -130,6 +134,8 @@ pip install skyscapes
   hierarchy (reflective, emissive, joint) and how contrast is computed
 - [Local zodi + telescope geometry](explanation/local_zodi_geometry)
   -- the geometry required for position-dependent zodi models
+- [Scene geometry and views](explanation/scene_geometry) -- the sky
+  and disk frames, drawn from one synthetic system
 
 ```{toctree}
 :maxdepth: 1
@@ -139,6 +145,7 @@ pip install skyscapes
 explanation/source_models
 explanation/physical_models
 explanation/local_zodi_geometry
+explanation/scene_geometry
 ```
 
 <!-- TODO(post-1.0): write tutorials/01_loading_a_scene and re-add a "Get started" toctree. -->

@@ -1,3 +1,12 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+  display_name: Python 3
+mystnb:
+  execution_mode: force
+---
+
 # Local zodi + telescope geometry
 
 The Leinert+1998 zodiacal-light surface brightness tables are indexed by
@@ -46,6 +55,29 @@ flux = zodi.spec_flux_density(
     ecliptic_lat_deg=ecl_lat,
     solar_lon_deg=helio_lon,
 )
+```
+
+{func}`skyscapes.viz.plot_local_zodi_geometry` draws what the two inputs
+mean. Seen from the ecliptic pole, the sightline's projection leaves the
+observer at the helio-ecliptic longitude difference from the Sun
+direction; seen in the sightline's own vertical plane, it rises at the
+ecliptic latitude. The brightness integrates along the half-ray from the
+observer, and the inset shows, for one grain on that ray, the scattering
+angle between the sunlight it receives and the light it sends back. The
+readout under each panel gives the 3D solar elongation too, which is 128
+degrees here against a 135 degree longitude difference, the distinction
+the next section is about.
+
+```{code-cell} ipython3
+import hwostyle
+import matplotlib.pyplot as plt
+
+from skyscapes import viz
+
+hwostyle.use("light")
+fig, axes = plt.subplots(1, 2, figsize=(10, 4.4), layout="constrained")
+viz.plot_local_zodi_geometry(30.0, 135.0, ax=axes[0])
+viz.plot_local_zodi_geometry(30.0, 135.0, view="side", ax=axes[1]);
 ```
 
 The EXOSIMS documentation gives an equivalent walk-through of the
