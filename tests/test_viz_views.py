@@ -556,3 +556,182 @@ def test_bad_inputs_raise_named_errors(call, match):
     """Each refused input raises with a message naming the problem."""
     with pytest.raises((ValueError, TypeError), match=match):
         call(make_system())
+
+
+# --------------------------------------------------------------------------
+# Positions and signs, not only "it moved"
+# --------------------------------------------------------------------------
+
+
+def _kernel_centroid(system, incl, pa):
+    """Flux centroid (col, row offsets) of the kernel's rendered disk."""
+    image = np.asarray(
+        system.disk.surface_brightness(
+            jnp.array(550.0), jnp.array(0.0), jnp.array(incl), jnp.array(pa)
+        )
+    )
+    ny, nx = image.shape
+    x, y = np.meshgrid(np.arange(nx) - (nx - 1) / 2, np.arange(ny) - (ny - 1) / 2)
+    return np.array([(image * x).sum(), (image * y).sum()]) / image.sum()
+
+
+@pytest.mark.parametrize(("incl", "pa"), [(60.0, 30.0), (40.0, 150.0)])
+def test_image_sightline_marker_sits_on_the_projected_minor_axis(incl, pa):
+    """The marker is r |cos i| / d arcsec out, on the bright side for +r."""
+    system = make_system(incl, pa, disk=make_disk(g=0.6))
+    centroid = _kernel_centroid(system, incl, pa)
+    for radius in (3.0, -3.0):
+        gids = by_gid(
+            viz.plot_disk_image(system, wavelength_nm=550.0, grain_radius_AU=radius)
+        )
+        marker = gids["sightline"].get_offsets()[0]
+        expected = abs(radius) * abs(np.cos(np.radians(incl))) / DIST_PC
+        assert np.hypot(*marker) == pytest.approx(expected, rel=1e-9)
+        # Perpendicular to the line of nodes, which lies at pa from +x.
+        nodes = np.array([np.cos(np.radians(pa)), np.sin(np.radians(pa))])
+        assert marker @ nodes == pytest.approx(0.0, abs=1e-12)
+        # Near-side grains mark the forward-scattering (bright) half.
+        assert np.sign(marker @ centroid) == np.sign(radius)
+
+
+@pytest.mark.parametrize("dlon", [30.0, 135.0, 170.0])
+def test_zodi_side_view_sun_is_at_r_cos_dlon(dlon):
+    """The projected Sun sits at R cos(Delta lambda) on the ecliptic."""
+    result = viz.plot_local_zodi_geometry(20.0, dlon, view="side")
+    sun = by_gid(result)["sun"].get_offsets()[0]
+    assert sun == pytest.approx([np.cos(np.radians(dlon)), 0.0])
+    result.update(20.0, 60.0)
+    sun = by_gid(result)["sun"].get_offsets()[0]
+    assert sun == pytest.approx([np.cos(np.radians(60.0)), 0.0])
+
+
+@pytest.mark.parametrize(("beta", "dlon"), [(0.0, 30.0), (25.0, 110.0), (-40.0, 160.0)])
+def test_zodi_top_view_rays_point_the_right_way(beta, dlon):
+    """Sunlight leaves the Sun toward the grain; scattered light heads home.
+
+    Directions are compared as angles to 1e-4 degrees, the resolution
+    arccos keeps near zero.
+
+    The longitude arc starts on the Sun direction and ends on the
+    sightline's projection, which leaves the observer toward +y.
+    """
+    gids = by_gid(viz.plot_local_zodi_geometry(beta, dlon))
+    observer = gids["observer"].get_offsets()[0]
+    grain = gids["grain"].get_offsets()[0]
+
+    incident = arrow_vector(gids["incident"])
+    assert angle_between(incident, grain) == pytest.approx(0.0, abs=1e-4)
+    assert np.linalg.norm(gids["incident"].xyann) < np.linalg.norm(grain)
+
+    scattered = arrow_vector(gids["scattered"])
+    assert angle_between(scattered, observer - grain) == pytest.approx(0.0, abs=1e-4)
+
+    (x0, y0), (x1, y1) = gids["sightline"].get_xydata()
+    assert (x0, y0) == pytest.approx(tuple(observer))
+    assert y1 > y0 or dlon == 0.0
+
+    arc = gids["look_angle"].get_xydata()
+    first, last = arc[0] - observer, arc[-1] - observer
+    assert angle_between(first, [-1.0, 0.0]) == pytest.approx(0.0, abs=1e-4)
+    assert angle_between(last, [x1 - x0, y1 - y0]) == pytest.approx(0.0, abs=1e-4)
+
+
+def test_zodi_side_inset_turns_sunlight_the_right_way():
+    """The side-view inset keeps the incident ray on its projected side."""
+    beta, dlon = 30.0, 135.0
+    gids = by_gid(
+        viz.plot_local_zodi_geometry(beta, dlon, view="side", grain_distance_AU=0.5)
+    )
+    look = np.array(
+        [
+            -np.cos(np.radians(beta)) * np.cos(np.radians(dlon)),
+            np.cos(np.radians(beta)) * np.sin(np.radians(dlon)),
+            np.sin(np.radians(beta)),
+        ]
+    )
+    grain3 = np.array([1.0, 0.0, 0.0]) + 0.5 * look
+    along = np.array([-np.cos(np.radians(dlon)), np.sin(np.radians(dlon)), 0.0])
+    k_in = grain3 / np.linalg.norm(grain3)
+    expected_in = np.array([k_in @ along, k_in[2]])
+    out = -np.array([np.cos(np.radians(beta)), np.sin(np.radians(beta))])
+    inset_in = arrow_vector(gids["inset/incident"])
+    inset_out = arrow_vector(gids["inset/scattered"])
+    expected_side = np.sign(out[0] * expected_in[1] - out[1] * expected_in[0])
+    drawn_side = np.sign(inset_out[0] * inset_in[1] - inset_out[1] * inset_in[0])
+    assert drawn_side == expected_side != 0.0
+
+
+@pytest.mark.parametrize(
+    ("beta", "dlon"), [(30.0, 135.0), (30.0, 40.0), (-30.0, 150.0)]
+)
+def test_zodi_side_inset_leaves_the_sun_visible(beta, dlon):
+    """The default side-view inset never covers the projected Sun."""
+    result = viz.plot_local_zodi_geometry(beta, dlon, view="side")
+    result.fig.canvas.draw()
+    sun = by_gid(result)["sun"].get_offsets()[0]
+    sun_px = result.ax.transData.transform(sun)
+    (inset,) = result.ax.child_axes
+    assert not inset.get_window_extent().contains(*sun_px)
+
+
+def test_zodi_pole_look_empties_the_longitude_arc():
+    """At beta = 90 there is no longitude difference to draw in the top view."""
+    result = viz.plot_local_zodi_geometry(30.0, 100.0)
+    result.update(90.0, 100.0)
+    gids = by_gid(result)
+    assert len(gids["look_angle"].get_xydata()) == 0
+    assert gids["look_angle/label"].get_text() == ""
+
+
+def test_face_on_disk_has_no_near_side_label():
+    """Within a few degrees of face-on no half is labeled near."""
+    system = make_system(2.0, 30.0)
+    assert "label/near_side" not in by_gid(viz.plot_system(system, 0.0))
+    geometry = viz.plot_disk_geometry(system)
+    assert by_gid(geometry)["label/near_side"].get_text() == ""
+    geometry.update(40.0)
+    assert by_gid(geometry)["label/near_side"].get_text() == "near side"
+
+
+# --------------------------------------------------------------------------
+# Inclination range and nonnegative surface brightness
+# --------------------------------------------------------------------------
+
+
+def test_disk_image_refuses_the_negated_map_above_90_degrees():
+    """Above 90 degrees the kernel map is negated; the view names the fix."""
+    system = make_system(120.0, 30.0, disk=make_disk(g=0.6))
+    with pytest.raises(ValueError, match="incl_deg = 60"):
+        viz.plot_disk_image(system, wavelength_nm=550.0)
+    # The named orientation is the same midplane and renders cleanly.
+    viz.plot_disk_image(system.disk, wavelength_nm=550.0, incl_deg=60.0, pa_deg=210.0)
+
+
+def test_disk_image_refuses_blank_and_negative_arrays():
+    """A map with no positive pixel, or real negatives, is not drawn blank."""
+    with pytest.raises(ValueError, match="nonnegative"):
+        viz.plot_disk_image(np.zeros((8, 8)), pixel_scale_arcsec=0.1)
+    image = np.ones((8, 8))
+    image[2, 3] = -0.5
+    with pytest.raises(ValueError, match="nonnegative"):
+        viz.plot_disk_image(image, pixel_scale_arcsec=0.1)
+    result = viz.plot_disk_image(np.ones((8, 8)), pixel_scale_arcsec=0.1)
+    with pytest.raises(ValueError, match="nonnegative"):
+        result.update(-np.ones((8, 8)))
+
+
+def test_every_view_accepts_zero_to_180_and_refuses_beyond():
+    """All disk views share one inclination range, [0, 180]."""
+    for incl in (0.0, 135.0, 180.0):
+        viz.plot_system(make_system(incl, 30.0), 0.0)
+        viz.plot_system(make_system(incl, 30.0), 0.0, view="side")
+        viz.plot_disk_geometry(make_system(incl, 30.0))
+    for incl in (-5.0, 185.0):
+        with pytest.raises(ValueError, match="180"):
+            viz.plot_system(make_system(incl, 30.0), 0.0)
+        with pytest.raises(ValueError, match="180"):
+            viz.plot_disk_geometry(make_system(incl, 30.0))
+        with pytest.raises(ValueError, match="180"):
+            viz.plot_disk_image(
+                np.ones((8, 8)), pixel_scale_arcsec=0.1, incl_deg=incl, pa_deg=0.0
+            )

@@ -13,16 +13,29 @@ from skyscapes.viz import _style
 
 
 def halo(text):
-    """Outline ``text`` in the axes background so it reads over an image."""
-    import matplotlib as mpl
-    from matplotlib import patheffects
+    """Outline ``text`` so it reads over whatever lies under it.
 
+    On an axes that holds an image the outline is black or white, whichever
+    contrasts more with the text color, because the image, not the axes
+    background, is what the label sits on. Otherwise the outline takes the
+    facecolor of the axes the text belongs to.
+    """
+    from matplotlib import patheffects
+    from matplotlib.colors import to_rgb
+
+    ax = text.axes
+    if ax is not None and ax.images:
+        r, g, b = to_rgb(text.get_color())
+        luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        foreground = "black" if luminance > 0.45 else "white"
+    elif ax is not None:
+        foreground = ax.get_facecolor()
+    else:
+        import matplotlib as mpl
+
+        foreground = mpl.rcParams["axes.facecolor"]
     text.set_path_effects(
-        [
-            patheffects.withStroke(
-                linewidth=2.5, foreground=mpl.rcParams["axes.facecolor"]
-            )
-        ]
+        [patheffects.withStroke(linewidth=2.5, foreground=foreground)]
     )
     return text
 
@@ -78,14 +91,22 @@ class AngleArc:
         self.text.set_gid(gid + "/label")
         halo(self.text)
 
-    def set(self, center, v_from, v_to, radius, label, label_scale=1.45):
-        """Draw the arc about ``center`` from direction ``v_from`` to ``v_to``."""
+    def set(
+        self, center, v_from, v_to, radius, label, label_scale=1.45, label_dir=None
+    ):
+        """Draw the arc about ``center`` from direction ``v_from`` to ``v_to``.
+
+        The label sits at ``label_scale * radius`` along the arc's middle
+        direction, or along ``label_dir`` when the middle is crowded.
+        """
         a0 = np.arctan2(v_from[1], v_from[0])
         sweep = _wrap(np.arctan2(v_to[1], v_to[0]) - a0)
         t = a0 + np.linspace(0.0, 1.0, 48) * sweep
         cx, cy = center
         self.line.set_data(cx + radius * np.cos(t), cy + radius * np.sin(t))
         mid = a0 + 0.5 * sweep
+        if label_dir is not None:
+            mid = np.arctan2(label_dir[1], label_dir[0])
         self.text.set_position(
             (
                 cx + label_scale * radius * np.cos(mid),
@@ -93,6 +114,11 @@ class AngleArc:
             )
         )
         self.text.set_text(label)
+
+    def clear(self):
+        """Empty the arc and its label, for a configuration with no angle."""
+        self.line.set_data([], [])
+        self.text.set_text("")
 
 
 def unit(v):

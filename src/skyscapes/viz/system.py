@@ -95,9 +95,14 @@ def plot_system(
     and each planet sits at its true distance toward or away from the
     observer.
 
-    The disk's orientation comes only from ``System.midplane_inc_deg`` and
-    ``midplane_pa_deg``; the planets' orbits carry their own elements and
-    are not assumed coplanar with it.
+    The disk's orientation comes only from ``System.midplane_inc_deg``
+    (in ``[0, 180]``) and ``midplane_pa_deg``; the planets' orbits carry
+    their own elements and are not assumed coplanar with it. The position
+    angle is the library's, not the astronomical one: it turns the line of
+    nodes from ``+x`` (RA offset) toward ``+y`` (Dec offset), so with ``+x``
+    east the major axis lies at astronomical PA (north through east)
+    ``90 - midplane_pa_deg`` (mod 180). Within about 6 degrees of face-on
+    the near-side label is left off.
 
     Args:
         system_or_scene: A ``skyscapes.System`` or ``skyscapes.Scene``.
@@ -131,8 +136,9 @@ def plot_system(
         belongs to ``orbix.viz.animate_orbit``.
 
     Raises:
-        ValueError: If ``view`` is unknown or the labels do not match the
-            planet count.
+        ValueError: If ``view`` is unknown, the labels do not match the
+            planet count, or the midplane inclination is outside
+            ``[0, 180]``.
         TypeError: If the system has planets and ``t_jd`` is None.
     """
     ep = eyepiece()
@@ -159,6 +165,8 @@ def plot_system(
         previous = float(np.max(np.abs([*ax.get_xlim(), *ax.get_ylim()])))
     radii = disk_radii_AU or _geometry.disk_radii_AU(system.disk)
     incl = float(system.midplane_inc_deg)
+    if not 0.0 <= incl <= 180.0:
+        raise ValueError(f"midplane_inc_deg must lie in [0, 180], got {incl}")
     pa = float(system.midplane_pa_deg)
     dist_pc = float(system.star.dist_pc)
 
@@ -196,7 +204,9 @@ def plot_system(
                 line.set_gid(f"disk/{name}")
                 lines.append(line)
                 extent.append(float(np.max(np.abs(np.concatenate([h, v])))))
-        if labels:
+        # Face-on, no half is nearer the observer: no near-side label.
+        tilted = abs(np.sin(np.radians(incl))) >= 0.1
+        if labels and tilted:
             h, v = to_2d((1.1 * radii[1] * near)[None, :])
             text = ax.text(
                 float(h[0]),

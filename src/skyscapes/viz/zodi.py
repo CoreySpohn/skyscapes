@@ -117,10 +117,14 @@ class _ZodiPanel:
         self.texts.append(self.readout)
         self.sun_label = None
         if labels:
+            # Top view: below right, clear of the sightline (which leaves
+            # toward +y). Side view: above left, clear of the latitude arc.
+            side = view == "side"
             observer_label = ax.annotate(
                 "observer",
                 tuple(self.observer_xy),
-                xytext=(6, -12),
+                xytext=(-6, 6) if side else (6, -12),
+                ha="right" if side else "left",
                 textcoords="offset points",
                 color=observer_color,
                 fontsize="small",
@@ -130,7 +134,8 @@ class _ZodiPanel:
             self.sun_label = ax.annotate(
                 "Sun" if view == "top" else "Sun, projected",
                 (0.0, 0.0),
-                xytext=(6, 6),
+                # Below the Sun: the incident ray leaves it toward +y.
+                xytext=(4, -14),
                 textcoords="offset points",
                 color=star,
                 fontsize="small",
@@ -167,7 +172,19 @@ class _ZodiPanel:
                 self.scattered.set(
                     grain, grain + 0.45 * min(back_len, R) * back / back_len
                 )
+            else:  # looking at the pole: the scattered ray is out of the page
+                self.scattered.set(grain, grain)
             if np.linalg.norm(proj) > 1e-9:
+                # A narrow angle leaves no room between the Sun line and the
+                # sightline, which the incident ray also crosses, so its
+                # label moves to the far side of the sightline.
+                label_dir = None
+                if float(solar_lon_deg) <= 60.0:
+                    turn = np.radians(-30.0)
+                    c, s = np.cos(turn), np.sin(turn)
+                    label_dir = np.array(
+                        [c * proj[0] - s * proj[1], s * proj[0] + c * proj[1]]
+                    )
                 self.angle.set(
                     obs,
                     sun_dir[:2],
@@ -175,7 +192,10 @@ class _ZodiPanel:
                     0.3 * R,
                     rf"$\Delta\lambda_\odot$ = {float(solar_lon_deg):.0f}$^\circ$",
                     1.8,
+                    label_dir,
                 )
+            else:
+                self.angle.clear()
             out_2d = back if np.linalg.norm(back[:2]) > 0.0 else np.array([1.0, 0.0])
             in_2d = k_in
         else:
@@ -202,9 +222,15 @@ class _ZodiPanel:
                 1.9,
             )
             out_2d = -direction
-            in_2d = direction
+            # k_in in this plane: along the sightline's ecliptic projection
+            # and ecliptic north.
+            along = np.array([-np.cos(dlon), np.sin(dlon), 0.0])
+            k_in3 = grain3 / np.linalg.norm(grain3)
+            in_2d = np.array([k_in3 @ along, k_in3[2]])
         if self.ray_label is not None:
             self.ray_label.set_position((end[0], end[1]))
+            flat = self.view == "top" and np.linalg.norm(look[:2]) <= 1e-9
+            self.ray_label.set_text("sightline, to the pole" if flat else "sightline")
         self.readout.set_text(
             rf"$\beta$ = {float(ecliptic_lat_deg):.0f}$^\circ$, "
             rf"$\Delta\lambda_\odot$ = {float(solar_lon_deg):.0f}$^\circ$, "
@@ -226,6 +252,23 @@ class _ZodiPanel:
             for key, values in self.inset.artists().items():
                 out[key] = out[key] + values
         return out
+
+
+def _default_inset(view, ecliptic_lat_deg, solar_lon_deg):
+    """An inset corner clear of the sightline and the Sun.
+
+    The top view's sightline always leaves toward ``+y`` and the Sun sits at
+    the center, so the lower left is clear. In the side view the sightline
+    rises for ``beta >= 0`` and falls otherwise, and the projected Sun lies
+    on the ecliptic at ``R cos(Delta lambda)``, so the inset takes the
+    vertical half the sightline leaves empty and the horizontal half away
+    from the Sun.
+    """
+    if view == "top":
+        return (0.02, 0.1, 0.34, 0.34)
+    x0 = 0.64 if np.cos(np.radians(float(solar_lon_deg))) < 0.0 else 0.02
+    y0 = 0.1 if float(ecliptic_lat_deg) >= 0.0 else 0.56
+    return (x0, y0, 0.34, 0.34)
 
 
 def plot_local_zodi_geometry(
@@ -283,20 +326,26 @@ def plot_local_zodi_geometry(
         inset: Whether to draw the grain inset, in the grain's scattering
             plane.
         inset_bounds: The inset's ``[x0, y0, width, height]`` in axes
-            fractions. None puts it in a lower-left corner the sightline
-            never enters (upper left in a side view that looks below the
-            ecliptic).
+            fractions. None picks a corner clear of the sightline and the
+            Sun for the angles of the first draw: lower left in the top
+            view; in the side view, the half the sightline does not enter
+            and the side away from the projected Sun. The corner stays put
+            under ``update``.
         labels: Whether to add direct text labels.
         ax: Axes to draw into. None creates a new figure and axes.
 
     Returns:
         An ``eyepiece.PlotResult`` with ``"scatter"`` (``sun``,
         ``observer``, ``grain``), ``"lines"`` and ``"text"`` (arrows are
-        annotations), inset artists appended. Every artist carries a
-        ``gid``. ``update(ecliptic_lat_deg, solar_lon_deg)`` moves the
-        sightline, grain, rays, arcs and readout, leaving the observer,
-        the observer's orbit and the fixed labels untouched, for a sweep
-        over the year.
+        annotations). The inset's artists are appended to the same lists
+        but live on the inset, a child axes of ``result.ax`` whose gid is
+        ``inset`` (``artist.axes`` reaches it); their gids start with
+        ``inset/``. Every artist carries a ``gid``.
+        ``update(ecliptic_lat_deg, solar_lon_deg)`` moves the sightline,
+        grain, rays, arcs and readout, leaving the observer, the
+        observer's orbit and the fixed labels untouched, for a sweep over
+        the year. At ``beta = +/-90`` the top view has no longitude
+        difference to draw, and its arc is emptied.
 
     Raises:
         ValueError: If ``view`` is unknown or an angle is out of range.
@@ -312,8 +361,7 @@ def plot_local_zodi_geometry(
     ray_length = 1.6 * R if ray_length_AU is None else ray_length_AU
 
     if inset_bounds is None:
-        below = view == "side" and float(ecliptic_lat_deg) < 0.0
-        inset_bounds = (0.02, 0.62, 0.34, 0.34) if below else (0.02, 0.1, 0.34, 0.34)
+        inset_bounds = _default_inset(view, ecliptic_lat_deg, solar_lon_deg)
 
     if ax is None:
         _, ax = plt.subplots(layout="constrained")
@@ -336,7 +384,7 @@ def plot_local_zodi_geometry(
         ax.set_ylabel(r"$y$ [AU]")
     else:
         ax.set_xlim(-1.15 * max(R, ray_length), 1.15 * max(R, ray_length))
-        ax.set_ylim(-0.75 * max(R, ray_length), 1.05 * ray_length)
+        ax.set_ylim(-1.05 * ray_length, 1.05 * ray_length)
         ax.set_xlabel("distance along the sightline's ecliptic projection [AU]")
         ax.set_ylabel("height above the ecliptic [AU]")
     ax.set_aspect("equal")

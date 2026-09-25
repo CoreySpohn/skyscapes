@@ -13,6 +13,10 @@ frame ``Planet.position_arcsec`` and the parametric disk kernels share. The
 disk midplane is placed in that frame by ``System.midplane_inc_deg`` and
 ``System.midplane_pa_deg`` through the same rotation the ExoVista loader
 uses, so a drawn outline and a rendered surface-brightness map agree.
+That position angle turns the line of nodes from ``+x`` toward ``+y``; it
+is not the astronomical position angle, which (with ``+x`` east) is
+``90 - pa`` (mod 180) for the major axis. Inclinations run over
+``[0, 180]`` in every view.
 """
 
 import importlib

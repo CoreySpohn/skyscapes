@@ -21,6 +21,9 @@ from skyscapes.viz._draw import AngleArc, Arrow, GrainInset, halo
 from skyscapes.viz._require import eyepiece
 
 _SKY_LABELS = ("RA offset [arcsec]", "Dec offset [arcsec]")
+# Below this sin(i) (about 6 degrees from face-on) no half of the disk is
+# meaningfully nearer the observer, and the near/far labels are left off.
+_MIN_SIN_FOR_NEAR = 0.1
 _SIDE_LABELS = (
     r"$z$, toward the observer [AU]",
     "offset along the projected minor axis [AU]",
@@ -76,9 +79,16 @@ def plot_disk_image(
             bare ``(ny, nx)`` contrast map.
         wavelength_nm: Wavelength to render at [nm]. Required for a disk.
         time_jd: Time to render at [JD].
-        incl_deg: Midplane inclination [deg]. Defaults to the system's;
-            required for a bare disk; optional for an array (outline only).
+        incl_deg: Midplane inclination [deg], in ``[0, 180]``. Defaults to
+            the system's; required for a bare disk; optional for an array
+            (outline only). ``i`` and ``180 - i`` at ``pa + 180`` are the
+            same midplane; the parametric disk kernels return a negated map
+            above 90, which this view refuses (see Raises).
         pa_deg: Midplane position angle [deg], as ``incl_deg``.
+            ``pa_deg`` is the library's position angle, not the astronomical
+            one: it turns the line of nodes from ``+x`` (RA offset) toward
+            ``+y`` (Dec offset), so with ``+x`` east the major axis lies at
+            astronomical PA (north through east) ``90 - pa_deg`` (mod 180).
         pixel_scale_arcsec: Pixel scale [arcsec/pixel]. Read from the disk
             when it has one; required for an array.
         dist_pc: Distance [pc], used to place the AU outlines. Read from
@@ -109,10 +119,19 @@ def plot_disk_image(
         brightness, so render the frames first.
 
     Raises:
-        ValueError: If a required input is missing or the image is not 2D.
+        ValueError: If a required input is missing, the image is not 2D,
+            the inclination is outside ``[0, 180]``, or the map has no
+            positive pixel or has negative pixels beyond round-off (at
+            ``1e-6`` of the largest magnitude). A surface brightness cannot
+            be negative; ``GraterDisk`` and ``ExovistaParametricDisk``
+            return the negated map for ``incl_deg > 90``, so render the
+            same midplane at ``180 - incl_deg`` and ``pa_deg + 180``
+            instead. ``update`` applies the same check to each new frame.
     """
     ep = eyepiece()
     disk, incl, pa, dist = _resolve_disk(disk_or_image, incl_deg, pa_deg, dist_pc)
+    if incl is not None:
+        _check_incl(incl)
     if disk is not None:
         if wavelength_nm is None or incl is None or pa is None:
             raise ValueError(
@@ -134,6 +153,7 @@ def plot_disk_image(
     image = np.asarray(image, dtype=float)
     if image.ndim != 2:
         raise ValueError(f"expected a 2D image, got shape {image.shape}")
+    _check_brightness(image, incl)
     if pixel_scale_arcsec is None:
         raise ValueError("pixel_scale_arcsec is required for a bare array")
 
@@ -218,7 +238,11 @@ def plot_disk_image(
 
     def update(new_image, incl_deg=None, pa_deg=None):
         """Show a new image; move the outlines when angles are given."""
-        base.update(np.asarray(new_image, dtype=float))
+        new_image = np.asarray(new_image, dtype=float)
+        if incl_deg is not None:
+            _check_incl(incl_deg)
+        _check_brightness(new_image, incl_deg)
+        base.update(new_image)
         if incl_deg is None and pa_deg is None:
             return
         state["incl"] = state["incl"] if incl_deg is None else incl_deg
@@ -376,6 +400,10 @@ class _GeometryPanel:
             1.4,
         )
         if self.near_label is not None:
+            # Face-on, neither half is nearer: the labels go blank.
+            tilted = abs(np.sin(np.radians(incl))) >= _MIN_SIN_FOR_NEAR
+            self.near_label.set_text("near side" if tilted else "")
+            self.far_label.set_text("far side" if tilted else "")
             self.near_label.set_position(tuple(1.14 * r_out * d))
             self.far_label.set_position(tuple(-1.14 * r_out * d))
         if self.inset is not None:
@@ -448,17 +476,24 @@ def plot_disk_geometry(
     axis. The panel draws the sightline through it, the starlight arriving
     at it, the light it scatters toward the observer, and the scattering
     angle between the two, which the disk kernels evaluate their phase
-    functions at. For a grain on the minor axis that angle is
-    ``90 - i`` on the near side (forward scattering) and ``90 + i`` on the
-    far side. An inset magnifies the grain and sets the scattering angle
+    functions at. For a grain on the minor axis and ``i <= 90`` that angle
+    is ``90 - i`` on the near side (forward scattering) and ``90 + i`` on
+    the far side. An inset magnifies the grain and sets the scattering angle
     beside its supplement, the illumination angle.
 
     Args:
         system_or_disk: A ``System``/``Scene`` (its disk and midplane
             orientation are used) or an ``AbstractDisk``.
-        incl_deg: Midplane inclination [deg]; defaults to the system's.
+        incl_deg: Midplane inclination [deg], in ``[0, 180]``; defaults to
+            the system's. Above 90 the near half lies below the sky-plane
+            crossing of the minor axis, and a near-side grain scatters at
+            ``i - 90``.
         pa_deg: Midplane position angle [deg]; defaults to the system's,
             else 0. It fixes which sky direction the vertical axis is.
+            ``pa_deg`` is the library's position angle, not the astronomical
+            one: it turns the line of nodes from ``+x`` (RA offset) toward
+            ``+y`` (Dec offset), so with ``+x`` east the major axis lies at
+            astronomical PA (north through east) ``90 - pa_deg`` (mod 180).
         radii_AU: ``(r_in, r_out)``. None reads a parametric disk's
             truncation radii.
         grain_radius_AU: Disk radius of the marked grain, positive on the
@@ -478,7 +513,11 @@ def plot_disk_geometry(
     Returns:
         An ``eyepiece.PlotResult`` with ``"scatter"``, ``"lines"``,
         ``"text"`` (annotations include the arrows) and, with a thickness,
-        ``"fill"``; inset artists are appended after the panel's own. Each
+        ``"fill"``, which holds the two layer bands as ``Polygon`` patches
+        (``ax.fill``). The inset's artists are appended after the panel's
+        own but live on the inset, a child axes of ``result.ax`` whose gid
+        is ``inset`` (``artist.axes`` reaches it); their gids start with
+        ``inset/``. Each
         artist carries a ``gid``: ``star``, ``grain``, ``sky_plane``,
         ``disk/near``, ``disk/far``, ``disk/layer_near``,
         ``disk/layer_far``, ``sightline``, ``sightline/path``,
@@ -539,6 +578,30 @@ def plot_disk_geometry(
     ax.set_xlabel(_SIDE_LABELS[0])
     ax.set_ylabel(_SIDE_LABELS[1])
     return ep.PlotResult(ax=ax, artists=panel.artists(), update=update)
+
+
+def _check_brightness(image, incl_deg):
+    """Refuse a map a log display would silently blank or misrepresent."""
+    finite = image[np.isfinite(image)]
+    if finite.size == 0:
+        raise ValueError("the disk map has no finite pixels")
+    peak = float(finite.max())
+    worst = float(finite.min())
+    scale = float(np.max(np.abs(finite)))
+    if peak > 0.0 and worst >= -1e-6 * scale:
+        return
+    hint = ""
+    if incl_deg is not None and float(incl_deg) > 90.0:
+        hint = (
+            f" The parametric disk kernels return the negated map above 90"
+            f" degrees; render the same midplane at incl_deg ="
+            f" {180.0 - float(incl_deg):g} and pa_deg + 180 instead."
+        )
+    raise ValueError(
+        f"the disk map is not a nonnegative surface brightness (peak {peak:.3g},"
+        f" minimum {worst:.3g}); a log display would draw it blank or"
+        f" clipped.{hint}"
+    )
 
 
 def _check_incl(incl_deg):

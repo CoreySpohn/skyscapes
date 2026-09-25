@@ -63,8 +63,9 @@ test = [
     "skyscapes[viz]",
 ]
 # skyscapes.viz draws through eyepiece (imshow_log, PlotResult, SourceStyles,
-# ARTIST_KEYS), which brings matplotlib and hwostyle with it.
-viz = ["eyepiece>=0.4.0"]
+# ARTIST_KEYS) and resolves brand colors from hwostyle's Roles, which ship
+# from hwostyle 1.4.0.
+viz = ["eyepiece>=0.4.0", "hwostyle>=1.4.0"]
 
 [project.urls]
 Homepage = "https://github.com/CoreySpohn/skyscapes"
