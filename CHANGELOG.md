@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.0](https://github.com/CoreySpohn/skyscapes/compare/v1.4.0...v1.5.0) (2026-09-25)
+
+
+### Features
+
+* **viz:** add system, disk geometry and local zodi views ([572c298](https://github.com/CoreySpohn/skyscapes/commit/572c298937d942f13c5b99423b544137d33315fa))
+
+
+### Bug Fixes
+
+* **viz:** refuse negated disk maps, unify inclination range, and keep labels and insets clear ([2907a0c](https://github.com/CoreySpohn/skyscapes/commit/2907a0cb4e8c94e2ad933b961b3bc575431bfd28))
+
 ## [1.4.0](https://github.com/CoreySpohn/skyscapes/compare/v1.3.0...v1.4.0) (2026-07-18)
 
 
