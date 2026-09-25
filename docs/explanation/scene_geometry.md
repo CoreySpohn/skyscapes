@@ -90,8 +90,8 @@ system = System(
 | Sky frame | `(x, y, z)`, star-centered. `x` is the RA offset, `y` the Dec offset, and `+z` points from the star toward the observer. `Planet.position_arcsec` returns `(x, y)` in arcsec, and orbix measures its phase angle from the `+z` axis. |
 | Sky images | Pixel `(row, col)` lies at `(y, x)`; the RA offset is drawn increasing to the left. |
 | Disk orientation | Set once, on the system, by `System.midplane_inc_deg` and `System.midplane_pa_deg`. Every disk component renders at that orientation; the planets' orbits carry their own elements and need not be coplanar with it. |
-| Inclination | The angle between the midplane normal and the line of sight, 0 for a face-on disk. The projected axis ratio is `abs(cos(i))`. |
-| Position angle | The projected major axis (the line of nodes) lies at `pa` from `+x` toward `+y`. |
+| Inclination | The angle between the midplane normal and the line of sight, in `[0, 180]`, 0 for a face-on disk. The projected axis ratio is `abs(cos(i))`, and `i` at `pa` is the same midplane as `180 - i` at `pa + 180`. The parametric disk kernels return a negated map above 90 degrees, so {func}`~skyscapes.viz.plot_disk_image` refuses such a map and names the equivalent orientation to render instead. |
+| Position angle | The projected major axis (the line of nodes) lies at `pa` from `+x` toward `+y`, so `pa = 0` puts it along the RA axis. This is **not** the astronomical position angle: with `+x` east, the major axis lies at astronomical PA (north through east) `90 - pa`, modulo 180. |
 | Near side | The half of the disk displaced toward `+z`. Its grains scatter forward, so a forward-scattering phase function brightens it. |
 | Scattering angle | The angle at a grain between the incident propagation direction (star to grain) and the direction toward the observer; 0 is forward scattering. The illumination angle is its supplement. |
 
@@ -117,8 +117,9 @@ viz.plot_system(system, 0.0, view="side", ax=axes[1], track_t_jd=track);
 ```
 
 The dashed line on the sky view is the line of nodes, at 30 degrees from
-`+x` toward `+y`; the label marks the near side, which the side view puts
-on the observer's side of the sky plane.
+`+x` toward `+y`, which is an astronomical position angle of 60 degrees
+east of north. The label marks the near side, which the side view puts on
+the observer's side of the sky plane.
 
 ## From the midplane to the projected image
 
