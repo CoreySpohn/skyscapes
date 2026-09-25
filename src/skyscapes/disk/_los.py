@@ -41,10 +41,19 @@ def los_integrate_scattered(
 ) -> Array:
     """Integrate scattered light along LOS around the disk midplane.
 
-    Sky frame: ``+x`` right, ``+y`` toward N, observer along ``+z``.
-    ``pa_deg`` is measured from N toward the disk's projected major
-    axis (CCW). ``incl_deg`` is the angle between the disk normal and
-    the observer's line of sight (0 = pole-on).
+    Sky frame: ``+x`` along the image columns (the axis
+    ``Planet.position_arcsec`` reports as the RA offset), ``+y`` along the
+    rows toward N, observer along ``+z``. ``pa_deg`` rotates the disk's
+    projected major axis (the line of nodes) from ``+x`` toward ``+y``, so
+    ``pa_deg = 0`` puts the major axis along ``+x``. This is not the
+    astronomical position angle: with ``+x`` east, the major axis lies at
+    astronomical PA (north through east) ``90 - pa_deg`` (mod 180). The
+    near, forward-scattering half of the disk lies along
+    ``(-sin(pa), cos(pa))`` for ``incl_deg < 90``. ``incl_deg`` is the
+    angle between the disk normal and the observer's line of sight
+    (0 = pole-on). The integration weight carries the sign of
+    ``cos(incl_deg)``, so for ``incl_deg > 90`` the returned map is the
+    negative of the physical one.
 
     Args:
         density_fn: ``(r_AU, z_AU, valid) -> rho``. The kernel ensures
@@ -53,7 +62,8 @@ def los_integrate_scattered(
             points (e.g. avoid ``r=0`` for ``r^alpha`` profiles).
         phase_fn: ``cos_phi -> phase`` evaluated at every LOS sample.
         incl_deg: Disk inclination [deg].
-        pa_deg: Disk position angle [deg] from N, CCW.
+        pa_deg: Disk position angle [deg], from ``+x`` toward ``+y`` (see
+            above; not the astronomical PA).
         rmin_AU: Inner truncation radius [AU].
         rmax_AU: Outer truncation radius [AU].
         zmax_AU: LOS half-extent in disk-frame z [AU]. Should comfortably
