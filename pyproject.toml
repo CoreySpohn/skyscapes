@@ -48,8 +48,23 @@ docs = [
     "sphinxcontrib-mermaid",
     "ipython",
     "matplotlib",
+    "eyepiece>=0.4.0",
 ]
-test = ["nox", "pytest", "hypothesis", "pytest-cov", "orbix", "exoverses"]
+# The viz tests import matplotlib and eyepiece, so the test extra carries the
+# viz extra: without it those modules fail to import on a clean runner and the
+# viz suite silently does not run.
+test = [
+    "nox",
+    "pytest",
+    "hypothesis",
+    "pytest-cov",
+    "orbix",
+    "exoverses",
+    "skyscapes[viz]",
+]
+# skyscapes.viz draws through eyepiece (imshow_log, PlotResult, SourceStyles,
+# ARTIST_KEYS), which brings matplotlib and hwostyle with it.
+viz = ["eyepiece>=0.4.0"]
 
 [project.urls]
 Homepage = "https://github.com/CoreySpohn/skyscapes"
