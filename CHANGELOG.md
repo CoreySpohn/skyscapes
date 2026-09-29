@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.6.0](https://github.com/CoreySpohn/skyscapes/compare/v1.5.0...v1.6.0) (2026-09-29)
+
+
+### Features
+
+* **viz:** add grain, observer, look-angle and disk-image view options ([3af8ded](https://github.com/CoreySpohn/skyscapes/commit/3af8dedf9af9edc34ce3b7998b092297214d8215))
+
+
+### Bug Fixes
+
+* **viz:** keep the top view's longitude label clear of the rays ([50304c1](https://github.com/CoreySpohn/skyscapes/commit/50304c167f18c95006ad5fc9e540250a923d5e40))
+* **viz:** set degree signs tight against the number in every view ([d9caca7](https://github.com/CoreySpohn/skyscapes/commit/d9caca7f49305f5f3ab17ed00eef571fa5958f79))
+
 ## [1.5.0](https://github.com/CoreySpohn/skyscapes/compare/v1.4.0...v1.5.0) (2026-09-29)
 
 
