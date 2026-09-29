@@ -206,6 +206,9 @@ VIEWS = {
     "zodi_side": lambda s, ax: viz.plot_local_zodi_geometry(
         30.0, 135.0, view="side", ax=ax
     ),
+    "scattering_angle": lambda s, ax: viz.plot_scattering_angle(
+        [1.0, 0.0], [0.5, 0.8], ax=ax
+    ),
 }
 
 
@@ -739,3 +742,305 @@ def test_every_view_accepts_zero_to_180_and_refuses_beyond():
             viz.plot_disk_image(
                 np.ones((8, 8)), pixel_scale_arcsec=0.1, incl_deg=incl, pa_deg=0.0
             )
+
+
+# --------------------------------------------------------------------------
+# The scattering-angle view
+# --------------------------------------------------------------------------
+
+
+def _degrees_in(text):
+    """The integer degrees printed in an angle value, such as 154."""
+    return int(text.split("=")[1].split("$")[0])
+
+
+@pytest.mark.parametrize("theta", [20.0, 90.0, 154.0])
+def test_scattering_angle_known_answer(theta):
+    """Theta runs from the forward continuation of k_in to k_out; alpha is 180 - Theta.
+
+    The rays point along their propagation directions, the forward line
+    continues ``k_in`` past the grain, the star sits behind the incident ray
+    and the observer ahead of the scattered one.
+    """
+    k_in = np.array([1.0, 0.0])
+    t = np.radians(theta)
+    k_out = np.array([np.cos(t), np.sin(t)])
+    gids = by_gid(viz.plot_scattering_angle(k_in, k_out))
+
+    assert _degrees_in(gids["scattering_angle/value"].get_text()) == round(theta)
+    assert _degrees_in(gids["illumination_angle/value"].get_text()) == round(
+        180.0 - theta
+    )
+    assert angle_between(arrow_vector(gids["incident"]), k_in) == pytest.approx(
+        0.0, abs=1e-4
+    )
+    assert angle_between(arrow_vector(gids["scattered"]), k_out) == pytest.approx(
+        0.0, abs=1e-4
+    )
+    (x0, y0), (x1, y1) = gids["forward"].get_xydata()
+    assert angle_between([x1 - x0, y1 - y0], k_in) == pytest.approx(0.0, abs=1e-4)
+    grain = gids["grain"].get_offsets()[0]
+    assert angle_between(gids["star"].get_offsets()[0] - grain, -k_in) == (
+        pytest.approx(0.0, abs=1e-4)
+    )
+    assert angle_between(gids["observer"].get_offsets()[0] - grain, k_out) == (
+        pytest.approx(0.0, abs=1e-4)
+    )
+    for name in ("incident", "scattered", "forward"):
+        assert gids[f"label/{name}"].get_text()
+
+
+@pytest.mark.parametrize(
+    ("beta", "dlon", "d"), [(30.0, 135.0, 1.0), (-20.0, 60.0, 0.4)]
+)
+def test_scattering_angle_draws_the_zodi_inset_construction(beta, dlon, d):
+    """A 3D pair is turned exactly as the top view turns its grain inset.
+
+    The grain ``d`` AU out along the look direction receives sunlight along
+    the Sun-to-grain direction and sends light home along ``-look``; the
+    full-size drawing and the top view's inset draw the same rays and print
+    the same angles.
+    """
+    look = np.array(
+        [
+            -np.cos(np.radians(beta)) * np.cos(np.radians(dlon)),
+            np.cos(np.radians(beta)) * np.sin(np.radians(dlon)),
+            np.sin(np.radians(beta)),
+        ]
+    )
+    grain = np.array([1.0, 0.0, 0.0]) + d * look
+    full = by_gid(viz.plot_scattering_angle(grain, -look))
+    inset = by_gid(viz.plot_local_zodi_geometry(beta, dlon, grain_distance_AU=d))
+    for name in ("incident", "scattered"):
+        np.testing.assert_allclose(
+            arrow_vector(full[name]), arrow_vector(inset[f"inset/{name}"]), atol=1e-12
+        )
+    for name in ("scattering_angle/value", "illumination_angle/value"):
+        assert full[name].get_text() == inset[f"inset/{name}"].get_text()
+
+
+def test_scattering_angle_update_redraws_in_place():
+    """``update`` moves the rays and reprints the angles, adding no artist."""
+    result = viz.plot_scattering_angle([1.0, 0.0], [0.0, 1.0])
+    n_children = len(result.ax.get_children())
+    result.update([1.0, 0.0], [-1.0, 0.1])
+    gids = by_gid(result)
+    assert _degrees_in(gids["scattering_angle/value"].get_text()) == 174
+    assert len(result.ax.get_children()) == n_children
+
+
+def test_scattering_angle_optional_parts_are_absent_when_off():
+    """Without star, observer and labels, only the construction is drawn."""
+    gids = by_gid(
+        viz.plot_scattering_angle(
+            [1.0, 0.0], [0.0, 1.0], star=False, observer=False, labels=False
+        )
+    )
+    assert not {"star", "observer", "label/incident"} & set(gids)
+    assert {"incident", "scattered", "forward", "grain"} <= set(gids)
+
+
+@pytest.mark.parametrize(
+    ("k_in", "k_out"),
+    [([1.0, 0.0], [0.0, 1.0, 0.0]), ([0.0, 0.0], [1.0, 0.0]), ([1.0], [1.0])],
+)
+def test_scattering_angle_refuses_bad_directions(k_in, k_out):
+    """Mixed, zero or one-element directions raise a named error."""
+    with pytest.raises(ValueError, match="k_in"):
+        viz.plot_scattering_angle(k_in, k_out)
+
+
+# --------------------------------------------------------------------------
+# show: drawing a subset of a geometry view
+# --------------------------------------------------------------------------
+
+# Each part and the gids it owns, written out here rather than read from
+# the views, so the tests pin the documented names.
+ZODI_TOP_PARTS = {
+    "orbit": ["observer_orbit"],
+    "sun": ["sun", "label/sun", "to_sun"],
+    "observer": ["observer", "label/observer"],
+    "sightline": ["sightline", "label/sightline"],
+    "grain": ["grain"],
+    "incident": ["incident"],
+    "scattered": ["scattered"],
+    "look_angle": ["look_angle", "look_angle/label"],
+    "readout": ["label/angles"],
+    "inset": [],
+}
+ZODI_SIDE_PARTS = {
+    **{k: v for k, v in ZODI_TOP_PARTS.items() if k not in ("incident", "scattered")},
+    "orbit": ["ecliptic"],
+    "incident": [],
+    "scattered": [],
+}
+DISK_PARTS = {
+    "star": ["star"],
+    "sky_plane": ["sky_plane", "label/sky_plane"],
+    "disk": ["disk/near", "disk/far", "label/near_side", "label/far_side"],
+    "layer": ["disk/layer_near", "disk/layer_far"],
+    "sightline": ["sightline"],
+    "grain": ["grain"],
+    "incident": ["incident"],
+    "scattered": ["scattered"],
+    "scattering_angle": ["forward", "scattering_angle", "scattering_angle/label"],
+    "inclination": ["inclination", "inclination/label"],
+    "observer": ["observer", "label/observer"],
+    "inset": [],
+}
+SHOW_VIEWS = {
+    "zodi_top": (
+        lambda show: viz.plot_local_zodi_geometry(30.0, 135.0, show=show),
+        ZODI_TOP_PARTS,
+    ),
+    "zodi_side": (
+        lambda show: viz.plot_local_zodi_geometry(30.0, 135.0, view="side", show=show),
+        ZODI_SIDE_PARTS,
+    ),
+    "disk": (
+        lambda show: viz.plot_disk_geometry(
+            make_system(60.0, 0.0), thickness_AU=0.5, show=show
+        ),
+        DISK_PARTS,
+    ),
+}
+
+
+def _visible(result):
+    """Visibility of every gid-carrying artist, plus the inset axes."""
+    out = {gid: a.get_visible() for gid, a in by_gid(result).items()}
+    for child in result.ax.child_axes:
+        out[child.get_gid()] = child.get_visible()
+    return out
+
+
+@pytest.mark.parametrize("name", sorted(SHOW_VIEWS))
+def test_show_none_draws_every_part(name):
+    """The default draws every artist, as before ``show`` existed."""
+    make, _ = SHOW_VIEWS[name]
+    assert all(_visible(make(None)).values())
+
+
+@pytest.mark.parametrize("name", sorted(SHOW_VIEWS))
+def test_show_leaves_out_exactly_the_named_part(name):
+    """Dropping one part hides its artists (and labels) and nothing else."""
+    make, parts = SHOW_VIEWS[name]
+    for part, gids in parts.items():
+        visible = _visible(make([p for p in parts if p != part]))
+        hidden = set(gids) | ({"inset"} if part == "inset" else set())
+        if part in ("sightline", "layer") and "sightline/path" in visible:
+            hidden.add("sightline/path")
+        for gid, shown in visible.items():
+            assert shown == (gid not in hidden), (part, gid)
+
+
+@pytest.mark.parametrize("name", sorted(SHOW_VIEWS))
+def test_show_draws_the_same_pixels_as_the_default_when_complete(name):
+    """Naming every part renders byte for byte what the default renders."""
+    import io
+
+    make, parts = SHOW_VIEWS[name]
+    renders = []
+    for show in (None, list(parts)):
+        result = make(show)
+        buf = io.BytesIO()
+        result.fig.savefig(buf, format="png")
+        renders.append(buf.getvalue())
+    assert renders[0] == renders[1]
+
+
+def test_show_hidden_parts_still_move_with_update():
+    """A hidden part keeps its gid and follows ``update``, ready to reveal."""
+    result = viz.plot_disk_geometry(make_system(60.0, 0.0), show=("star", "disk"))
+    before = state(by_gid(result)["grain"])
+    result.update(30.0)
+    grain = by_gid(result)["grain"]
+    assert not grain.get_visible()
+    assert not same(before, state(grain))
+
+
+def test_show_accepts_one_name_and_refuses_unknown_parts():
+    """A single part name is a one-part show; an unknown name is refused."""
+    visible = _visible(viz.plot_local_zodi_geometry(30.0, 135.0, show="grain"))
+    assert visible["grain"]
+    assert not visible["sightline"]
+    with pytest.raises(ValueError, match="look_arc"):
+        viz.plot_local_zodi_geometry(30.0, 135.0, show=("grain", "look_arc"))
+    with pytest.raises(ValueError, match="cloud"):
+        viz.plot_disk_geometry(make_system(), show=("cloud",))
+
+
+# --------------------------------------------------------------------------
+# Several grains on the local-zodi sightline
+# --------------------------------------------------------------------------
+
+
+def test_zodi_grains_each_lit_from_the_sun_at_their_own_distance():
+    """Every grain sits on the sightline and gets its own sunlight ray.
+
+    The first grain is the marked one: the inset prints its angles, the
+    in-ecliptic 135 degrees of a grain 1 AU out at a 90 degree look.
+    """
+    distances = [1.0, 0.5, 1.5]
+    result = viz.plot_local_zodi_geometry(0.0, 90.0, grain_distance_AU=distances)
+    gids = by_gid(result)
+    grains = gids["grain"].get_offsets()
+    observer = np.array([1.0, 0.0])
+    np.testing.assert_allclose(
+        grains, observer + np.outer(distances, [0.0, 1.0]), atol=1e-12
+    )
+    for k, grain in enumerate(grains):
+        tag = "" if k == 0 else f"/{k}"
+        assert angle_between(arrow_vector(gids["incident" + tag]), grain) == (
+            pytest.approx(0.0, abs=1e-4)
+        )
+        assert angle_between(
+            arrow_vector(gids["scattered" + tag]), observer - grain
+        ) == pytest.approx(0.0, abs=1e-4)
+    assert "135" in gids["inset/scattering_angle/value"].get_text()
+
+    before = state(gids["incident/2"])
+    result.update(20.0, 60.0)
+    assert not same(before, state(gids["incident/2"]))
+
+    side = by_gid(
+        viz.plot_local_zodi_geometry(
+            30.0, 90.0, view="side", grain_distance_AU=distances
+        )
+    )
+    radial = np.linalg.norm(side["grain"].get_offsets(), axis=1)
+    np.testing.assert_allclose(radial, distances, atol=1e-12)
+
+
+@pytest.mark.parametrize("bad", [[], [[1.0, 2.0]]])
+def test_zodi_refuses_empty_or_nested_grain_distances(bad):
+    """A grain distance is a number or a flat, nonempty sequence."""
+    with pytest.raises(ValueError, match="grain_distance_AU"):
+        viz.plot_local_zodi_geometry(30.0, 135.0, grain_distance_AU=bad)
+
+
+# --------------------------------------------------------------------------
+# Labels stay inside the figure
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("figsize", [(6.4, 4.8), (10.0, 4.5)])
+def test_zodi_side_view_axis_label_fits_the_figure(figsize):
+    """The side view's x label is not cut off at the figure edge.
+
+    The wide case puts the side view in the right half of a two-panel
+    figure, beside the top view, where the label used to run off the edge.
+    Both are drawn in the house style, whose type is wider than the
+    matplotlib default.
+    """
+    import hwostyle
+
+    with hwostyle.light():
+        fig, axes = plt.subplots(1, 2, figsize=figsize, layout="constrained")
+        viz.plot_local_zodi_geometry(30.0, 135.0, ax=axes[0])
+        viz.plot_local_zodi_geometry(30.0, 135.0, view="side", ax=axes[1])
+        fig.canvas.draw()
+    box = axes[1].xaxis.label.get_window_extent()
+    fig_box = fig.bbox
+    assert box.x0 >= fig_box.x0 and box.x1 <= fig_box.x1
+    assert box.y0 >= fig_box.y0

@@ -80,6 +80,25 @@ viz.plot_local_zodi_geometry(30.0, 135.0, ax=axes[0])
 viz.plot_local_zodi_geometry(30.0, 135.0, view="side", ax=axes[1]);
 ```
 
+Every grain on the sightline is lit by the Sun at its own distance, not
+from the observer. Passing several distances marks several grains, each
+with its own sunlight ray, and `show=` keeps the view to the parts a
+figure needs; here the longitude arc, the readout and the scattered rays
+are left out.
+
+```{code-cell} ipython3
+fig, ax = plt.subplots(figsize=(5.2, 4.4), layout="constrained")
+viz.plot_local_zodi_geometry(
+    30.0,
+    135.0,
+    grain_distance_AU=[0.4, 1.0, 1.4],
+    show=("orbit", "sun", "observer", "sightline", "grain", "incident", "inset"),
+    ax=ax,
+);
+```
+
+The inset draws the first grain.
+
 The EXOSIMS documentation gives an equivalent walk-through of the
 Leinert convention and the resulting brightness tables, and that
 reference is helpful when cross-checking values against the original

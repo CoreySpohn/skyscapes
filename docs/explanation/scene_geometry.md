@@ -28,6 +28,7 @@ import hwostyle
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import numpy as np
 from hwoutils.constants import Msun2kg
 from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.orbit import KeplerianOrbit
@@ -121,6 +122,27 @@ The dashed line on the sky view is the line of nodes, at 30 degrees from
 east of north. The label marks the near side, which the side view puts on
 the observer's side of the sky plane.
 
+## One grain, two angles
+
+{func}`~skyscapes.viz.plot_scattering_angle` draws the definition in the
+table above at full size: one grain in the plane its incident and
+scattered directions span, the star behind the incident ray, the observer
+ahead of the scattered one, and the scattering angle measured from the
+forward continuation of the incident ray (dashed). It is the drawing the
+geometry views magnify in their insets, so a figure can introduce the two
+angles on their own before placing the grain in a disk.
+
+```{code-cell} ipython3
+incl = np.radians(60.0)
+fig, ax = plt.subplots(figsize=(4.2, 3.6), layout="constrained")
+viz.plot_scattering_angle([np.sin(incl), np.cos(incl)], [1.0, 0.0], ax=ax);
+```
+
+Here the incident ray reaches a near-side grain on the minor axis of a
+disk inclined by 60 degrees, and the scattered ray leaves along the line
+of sight, so the grain scatters at 30 degrees. Three-element directions
+are also accepted and are laid into the plane they span.
+
 ## From the midplane to the projected image
 
 {func}`~skyscapes.viz.plot_disk_geometry` draws the disk side on with one
@@ -141,6 +163,28 @@ near side is the brighter half of the image. The inset magnifies the grain
 and sets the scattering angle beside the illumination angle, the
 quantity a planetary phase function takes; passing one where the other is
 expected exchanges forward and back scattering.
+
+## Drawing part of a view
+
+`plot_disk_geometry` and `plot_local_zodi_geometry` take `show=`, the
+parts to draw, so a figure can build a view up one idea at a time with a
+single constructor. The parts left out are created hidden and keep their
+gids, so a later figure that shows them draws them from the same numbers.
+
+```{code-cell} ipython3
+fig, axes = plt.subplots(1, 2, figsize=(10, 4.6), layout="constrained")
+viz.plot_disk_geometry(
+    system,
+    grain_radius_AU=3.0,
+    thickness_AU=0.6,
+    show=("star", "sky_plane", "disk", "layer", "inclination", "observer"),
+    ax=axes[0],
+)
+viz.plot_disk_geometry(system, grain_radius_AU=3.0, thickness_AU=0.6, ax=axes[1]);
+```
+
+The left panel is the tilted disk alone; the right adds the sightline, the
+grain, its rays and the inset. Each view's docstring lists its part names.
 
 ## Sweeping the inclination
 

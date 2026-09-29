@@ -122,7 +122,8 @@ pip install skyscapes
 
 **Views** (the `viz` extra, `pip install 'skyscapes[viz]'`):
 - [`skyscapes.viz`](explanation/scene_geometry) -- `plot_system`,
-  `plot_disk_image`, `plot_disk_geometry`, `plot_local_zodi_geometry`
+  `plot_disk_image`, `plot_disk_geometry`, `plot_local_zodi_geometry`,
+  `plot_scattering_angle`
 
 **Loaders**:
 - `from_exovista` (top-level) -- one-call ingestion of ExoVista FITS

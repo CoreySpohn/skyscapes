@@ -25,6 +25,7 @@ _LAZY = {
     "plot_disk_geometry": "skyscapes.viz.disk",
     "plot_disk_image": "skyscapes.viz.disk",
     "plot_local_zodi_geometry": "skyscapes.viz.zodi",
+    "plot_scattering_angle": "skyscapes.viz.scattering",
     "plot_system": "skyscapes.viz.system",
 }
 
