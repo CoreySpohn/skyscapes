@@ -99,6 +99,37 @@ viz.plot_local_zodi_geometry(
 
 The inset draws the first grain.
 
+The longitude arc takes its label text as a template given the angle in
+degrees (`look_angle_label`), its radius (`look_angle_radius_AU`) and, when
+the automatic placement does not suit a figure, a fixed label position
+about the observer (`look_angle_label_at`, an angle and a distance). The
+observer's label can be kept while its mark is left out
+(`"observer_label"` without `"observer_mark"`) and renamed
+(`observer_text`).
+
+```{code-cell} ipython3
+fig, ax = plt.subplots(figsize=(5.2, 4.4), layout="constrained")
+viz.plot_local_zodi_geometry(
+    30.0,
+    135.0,
+    look_angle_label="longitude difference\n= {value:.0f}$\\degree$",
+    look_angle_radius_AU=0.45,
+    look_angle_label_at=(100.0, 0.6),
+    observer_text="telescope",
+    show=(
+        "orbit",
+        "sun",
+        "observer_label",
+        "sightline",
+        "grain",
+        "incident",
+        "look_angle",
+        "inset",
+    ),
+    ax=ax,
+);
+```
+
 The EXOSIMS documentation gives an equivalent walk-through of the
 Leinert convention and the resulting brightness tables, and that
 reference is helpful when cross-checking values against the original

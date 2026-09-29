@@ -11,7 +11,12 @@ from __future__ import annotations
 import numpy as np
 
 from skyscapes.viz import _style
-from skyscapes.viz._draw import ScatteringAngle, scattering_plane
+from skyscapes.viz._draw import (
+    ALPHA_RADIUS,
+    THETA_RADIUS,
+    ScatteringAngle,
+    scattering_plane,
+)
 from skyscapes.viz._require import eyepiece
 
 # The drawing's rays are about one unit long; the glyphs and labels sit
@@ -44,6 +49,10 @@ def plot_scattering_angle(
     star=True,
     observer=True,
     labels=True,
+    values="corner",
+    theta_radius=THETA_RADIUS,
+    alpha_radius=ALPHA_RADIUS,
+    gid_prefix="",
     ax=None,
 ):
     """Draw one grain in its scattering plane, with both angles marked.
@@ -79,6 +88,20 @@ def plot_scattering_angle(
             ray.
         labels: Whether to label the incident ray, the scattered ray and
             the forward continuation.
+        values: Where to print the two angle values: ``"corner"`` (the
+            upper and lower left corners), ``"arcs"`` (on the arc labels,
+            which then read ``Theta = 62`` and ``alpha = 118`` degrees and
+            grow away from the grain), or None (the arcs keep their bare
+            symbols and nothing else is printed). The corner texts keep
+            their gids in every case and are empty when unused.
+        theta_radius: Radius of the scattering-angle arc, in units of the
+            ray length. Its label sits a fixed gap beyond it.
+        alpha_radius: Radius of the illumination-angle arc, as
+            ``theta_radius``. A narrow illumination wedge reads better on
+            a larger arc.
+        gid_prefix: Prefix for every gid, joined with ``/``, so
+            ``"inset"`` gives the gids the geometry views' insets carry
+            (``inset/incident`` and so on). The empty default adds none.
         ax: Axes to draw into. None creates a new figure and axes.
 
     Returns:
@@ -89,12 +112,14 @@ def plot_scattering_angle(
         ``scattered``, ``forward``, ``grain``, ``scattering_angle``,
         ``illumination_angle`` (each arc's text adds ``/label``, its value
         ``/value``), ``star``, ``observer`` and ``label/incident``,
-        ``label/scattered``, ``label/forward``. The grain insets of the
-        geometry views carry the same gids under ``inset/``.
+        ``label/scattered``, ``label/forward``, each under ``gid_prefix``
+        when one is given. The grain insets of the geometry views carry the
+        same gids under ``inset/``.
         ``update(k_in, k_out)`` redraws for a new pair of directions.
 
     Raises:
-        ValueError: If the directions are zero or not both 2D or both 3D.
+        ValueError: If the directions are zero or not both 2D or both 3D,
+            ``values`` is unknown, or an arc radius is not positive.
     """
     ep = eyepiece()
     import matplotlib.pyplot as plt
@@ -110,6 +135,10 @@ def plot_scattering_angle(
         star=star,
         observer=observer,
         labels=labels,
+        values=values,
+        theta_radius=theta_radius,
+        alpha_radius=alpha_radius,
+        gid_prefix=gid_prefix,
     )
     drawing.set(k_in_2d, k_out_2d)
     ax.set_xlim(-_HALF_SPAN, _HALF_SPAN)

@@ -11,6 +11,10 @@ import numpy as np
 
 from skyscapes.viz import _style
 
+# The degree sign every view prints after an angle: set tight against the
+# number, as in "135" followed by the sign, not raised after a gap.
+DEGREE = r"$^\circ$"
+
 
 def halo(text):
     """Outline ``text`` so it reads over whatever lies under it.
@@ -92,12 +96,24 @@ class AngleArc:
         halo(self.text)
 
     def set(
-        self, center, v_from, v_to, radius, label, label_scale=1.45, label_dir=None
+        self,
+        center,
+        v_from,
+        v_to,
+        radius,
+        label,
+        label_scale=1.45,
+        label_dir=None,
+        *,
+        label_distance=None,
+        outward=False,
     ):
         """Draw the arc about ``center`` from direction ``v_from`` to ``v_to``.
 
-        The label sits at ``label_scale * radius`` along the arc's middle
-        direction, or along ``label_dir`` when the middle is crowded.
+        The label sits at ``label_scale * radius`` (or ``label_distance``)
+        along the arc's middle direction, or along ``label_dir`` when the
+        middle is crowded. With ``outward`` it is aligned so it grows away
+        from ``center``; otherwise its alignment is left as it is.
         """
         a0 = np.arctan2(v_from[1], v_from[0])
         sweep = _wrap(np.arctan2(v_to[1], v_to[0]) - a0)
@@ -107,12 +123,14 @@ class AngleArc:
         mid = a0 + 0.5 * sweep
         if label_dir is not None:
             mid = np.arctan2(label_dir[1], label_dir[0])
+        distance = label_scale * radius if label_distance is None else label_distance
         self.text.set_position(
-            (
-                cx + label_scale * radius * np.cos(mid),
-                cy + label_scale * radius * np.sin(mid),
-            )
+            (cx + distance * np.cos(mid), cy + distance * np.sin(mid))
         )
+        if outward:
+            ha, va = _anchor((np.cos(mid), np.sin(mid)))
+            self.text.set_ha(ha)
+            self.text.set_va(va)
         self.text.set_text(label)
 
     def clear(self):
@@ -127,26 +145,33 @@ def unit(v):
     return v / np.linalg.norm(v)
 
 
-def resolve_show(show, parts):
+def resolve_show(show, parts, groups=None):
     """The set of parts to draw, from a view's ``show`` argument.
 
     Args:
         show: None (every part), one part name, or an iterable of names.
         parts: Every part name the view knows, in documentation order.
+        groups: Optional names that stand for several parts at once, as
+            ``{name: (part, ...)}``; naming a group shows all its parts.
 
     Returns:
         A ``frozenset`` of part names.
 
     Raises:
-        ValueError: If a name is not one of ``parts``.
+        ValueError: If a name is neither one of ``parts`` nor a group.
     """
     if show is None:
         return frozenset(parts)
+    groups = {} if groups is None else groups
     names = (show,) if isinstance(show, str) else tuple(show)
-    unknown = [n for n in names if n not in parts]
+    unknown = [n for n in names if n not in parts and n not in groups]
     if unknown:
-        raise ValueError(f"unknown show part(s) {unknown}; choose from {parts}")
-    return frozenset(names)
+        choices = (*parts, *groups)
+        raise ValueError(f"unknown show part(s) {unknown}; choose from {choices}")
+    shown = set()
+    for name in names:
+        shown.update(groups.get(name, (name,)))
+    return frozenset(shown)
 
 
 def hide(artists_by_part, shown):
@@ -160,6 +185,16 @@ def hide(artists_by_part, shown):
             for artist in artists:
                 if artist is not None:
                     artist.set_visible(False)
+
+
+# Where a grain drawing prints its two angle values.
+VALUE_PLACES = ("corner", "arcs", None)
+# Arc radii of a grain drawing, in units of its ray length, and the gap from
+# each arc to its label.
+THETA_RADIUS = 0.5
+ALPHA_RADIUS = 0.3
+_THETA_GAP = 0.225
+_ALPHA_GAP = 0.27
 
 
 def _anchor(direction):
@@ -187,6 +222,11 @@ class ScatteringAngle:
     The star glyph, the observer glyph and the ray labels are optional and
     are created after the core artists, so a drawing without them has
     exactly the core artists in their original order.
+
+    ``values`` says where the two angle values are printed: in the corners
+    (``"corner"``), on the arc labels (``"arcs"``, which then read
+    ``Theta = 154 deg``), or nowhere (None). The corner texts exist in
+    every case and are empty when unused, so the gids do not depend on it.
     """
 
     def __init__(
@@ -199,8 +239,19 @@ class ScatteringAngle:
         star=False,
         observer=False,
         labels=False,
+        values="corner",
+        theta_radius=THETA_RADIUS,
+        alpha_radius=ALPHA_RADIUS,
     ):
         """Create the (unplaced) artists; place them with ``set``."""
+        if values not in VALUE_PLACES:
+            raise ValueError(f"values must be one of {VALUE_PLACES}, got {values!r}")
+        for name, radius in (("theta", theta_radius), ("alpha", alpha_radius)):
+            if not float(radius) > 0.0:
+                raise ValueError(f"{name}_radius must be positive, got {radius}")
+        self.values = values
+        self.theta_radius = float(theta_radius)
+        self.alpha_radius = float(alpha_radius)
 
         def gid(name):
             return f"{gid_prefix}/{name}" if gid_prefix else name
@@ -261,12 +312,32 @@ class ScatteringAngle:
         self.outgoing.set(0.08 * k_out, 1.05 * k_out)
         self.forward.set_data([0.0, 0.8 * k_in[0]], [0.0, 0.8 * k_in[1]])
         theta = np.degrees(np.arccos(np.clip(k_in @ k_out, -1.0, 1.0)))
-        self.theta.set((0.0, 0.0), k_in, k_out, 0.5, r"$\Theta$", 1.45)
-        self.alpha.set((0.0, 0.0), -k_in, k_out, 0.3, r"$\alpha$", 1.9)
-        self.theta_value.set_text(rf"scattering $\Theta$ = {theta:.0f}$^\circ$")
-        self.alpha_value.set_text(
-            rf"illumination $\alpha$ = {180.0 - theta:.0f}$^\circ$"
+        theta_text = rf"$\Theta$ = {theta:.0f}{DEGREE}"
+        alpha_text = rf"$\alpha$ = {180.0 - theta:.0f}{DEGREE}"
+        on_arcs = self.values == "arcs"
+        # Each label sits a fixed gap beyond its arc; on the arcs the longer
+        # value text is aligned to grow away from the grain.
+        self.theta.set(
+            (0.0, 0.0),
+            k_in,
+            k_out,
+            self.theta_radius,
+            theta_text if on_arcs else r"$\Theta$",
+            label_distance=self.theta_radius + _THETA_GAP,
+            outward=on_arcs,
         )
+        self.alpha.set(
+            (0.0, 0.0),
+            -k_in,
+            k_out,
+            self.alpha_radius,
+            alpha_text if on_arcs else r"$\alpha$",
+            label_distance=self.alpha_radius + _ALPHA_GAP,
+            outward=on_arcs,
+        )
+        corner = self.values == "corner"
+        self.theta_value.set_text(f"scattering {theta_text}" if corner else "")
+        self.alpha_value.set_text(f"illumination {alpha_text}" if corner else "")
         # The glyphs sit just beyond the ray ends, the labels beyond them.
         if self.star is not None:
             self.star.set_offsets([-1.16 * k_in])
@@ -307,7 +378,7 @@ class ScatteringAngle:
 class GrainInset:
     """A ``ScatteringAngle`` drawing on a framed inset axes of a view."""
 
-    def __init__(self, ax, bounds, *, grain_color, gid_prefix="inset"):
+    def __init__(self, ax, bounds, *, grain_color, gid_prefix="inset", values="corner"):
         """Create the inset axes and its drawing; place it with ``set``."""
         self.ax = ax.inset_axes(bounds)
         self.ax.set_gid(gid_prefix)
@@ -321,7 +392,7 @@ class GrainInset:
             spine.set_color(_style.neutral(0.35))
             spine.set_linewidth(0.8)
         self.drawing = ScatteringAngle(
-            inset, grain_color=grain_color, gid_prefix=gid_prefix
+            inset, grain_color=grain_color, gid_prefix=gid_prefix, values=values
         )
 
     def set(self, k_in, k_out):
