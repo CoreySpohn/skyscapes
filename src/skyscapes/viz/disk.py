@@ -82,8 +82,7 @@ def plot_disk_image(
         incl_deg: Midplane inclination [deg], in ``[0, 180]``. Defaults to
             the system's; required for a bare disk; optional for an array
             (outline only). ``i`` and ``180 - i`` at ``pa + 180`` are the
-            same midplane; the parametric disk kernels return a negated map
-            above 90, which this view refuses (see Raises).
+            same midplane and render the same map.
         pa_deg: Midplane position angle [deg], as ``incl_deg``.
             ``pa_deg`` is the library's position angle, not the astronomical
             one: it turns the line of nodes from ``+x`` (RA offset) toward
@@ -123,10 +122,8 @@ def plot_disk_image(
             the inclination is outside ``[0, 180]``, or the map has no
             positive pixel or has negative pixels beyond round-off (at
             ``1e-6`` of the largest magnitude). A surface brightness cannot
-            be negative; ``GraterDisk`` and ``ExovistaParametricDisk``
-            return the negated map for ``incl_deg > 90``, so render the
-            same midplane at ``180 - incl_deg`` and ``pa_deg + 180``
-            instead. ``update`` applies the same check to each new frame.
+            be negative. ``update`` applies the same check to each new
+            frame.
     """
     ep = eyepiece()
     disk, incl, pa, dist = _resolve_disk(disk_or_image, incl_deg, pa_deg, dist_pc)
@@ -153,7 +150,7 @@ def plot_disk_image(
     image = np.asarray(image, dtype=float)
     if image.ndim != 2:
         raise ValueError(f"expected a 2D image, got shape {image.shape}")
-    _check_brightness(image, incl)
+    _check_brightness(image)
     if pixel_scale_arcsec is None:
         raise ValueError("pixel_scale_arcsec is required for a bare array")
 
@@ -241,7 +238,7 @@ def plot_disk_image(
         new_image = np.asarray(new_image, dtype=float)
         if incl_deg is not None:
             _check_incl(incl_deg)
-        _check_brightness(new_image, incl_deg)
+        _check_brightness(new_image)
         base.update(new_image)
         if incl_deg is None and pa_deg is None:
             return
@@ -580,7 +577,7 @@ def plot_disk_geometry(
     return ep.PlotResult(ax=ax, artists=panel.artists(), update=update)
 
 
-def _check_brightness(image, incl_deg):
+def _check_brightness(image):
     """Refuse a map a log display would silently blank or misrepresent."""
     finite = image[np.isfinite(image)]
     if finite.size == 0:
@@ -590,17 +587,10 @@ def _check_brightness(image, incl_deg):
     scale = float(np.max(np.abs(finite)))
     if peak > 0.0 and worst >= -1e-6 * scale:
         return
-    hint = ""
-    if incl_deg is not None and float(incl_deg) > 90.0:
-        hint = (
-            f" The parametric disk kernels return the negated map above 90"
-            f" degrees; render the same midplane at incl_deg ="
-            f" {180.0 - float(incl_deg):g} and pa_deg + 180 instead."
-        )
     raise ValueError(
         f"the disk map is not a nonnegative surface brightness (peak {peak:.3g},"
         f" minimum {worst:.3g}); a log display would draw it blank or"
-        f" clipped.{hint}"
+        f" clipped."
     )
 
 

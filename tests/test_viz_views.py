@@ -698,13 +698,17 @@ def test_face_on_disk_has_no_near_side_label():
 # --------------------------------------------------------------------------
 
 
-def test_disk_image_refuses_the_negated_map_above_90_degrees():
-    """Above 90 degrees the kernel map is negated; the view names the fix."""
+def test_disk_image_draws_the_same_midplane_above_90_degrees():
+    """``(120, 30)`` and ``(60, 210)`` are one midplane and draw one image."""
     system = make_system(120.0, 30.0, disk=make_disk(g=0.6))
-    with pytest.raises(ValueError, match="incl_deg = 60"):
-        viz.plot_disk_image(system, wavelength_nm=550.0)
-    # The named orientation is the same midplane and renders cleanly.
-    viz.plot_disk_image(system.disk, wavelength_nm=550.0, incl_deg=60.0, pa_deg=210.0)
+    above = viz.plot_disk_image(system, wavelength_nm=550.0)
+    below = viz.plot_disk_image(
+        system.disk, wavelength_nm=550.0, incl_deg=60.0, pa_deg=210.0
+    )
+    a = np.asarray(above.artists["image"].get_array())
+    b = np.asarray(below.artists["image"].get_array())
+    assert np.all(a >= 0.0)
+    np.testing.assert_allclose(a, b, rtol=1e-9, atol=1e-12 * b.max())
 
 
 def test_disk_image_refuses_blank_and_negative_arrays():

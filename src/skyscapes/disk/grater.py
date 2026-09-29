@@ -30,7 +30,10 @@ Notes on convention:
     the midplane crossing (after the GRaTeR-JAX reference), so the integral
     stays converged at high inclination. It diverges only at the true edge-on
     singularity (``cos(incl) -> 0``); ``surface_brightness`` raises via
-    ``eqx.error_if`` when ``|cos(incl)| < 1e-2`` (within ~89.4 deg of pole-on).
+    ``eqx.error_if`` when ``|cos(incl)| < 1e-2`` (within ~0.57 deg of 90).
+    Inclinations above 90 view the disk from its other face and return the
+    physical, nonnegative map, mirrored across the line of nodes relative to
+    ``180 - incl``.
 """
 
 from __future__ import annotations
@@ -190,20 +193,11 @@ class GraterDisk(AbstractDisk):
         )
 
         # The LOS-around-midplane sampling diverges only at the true edge-on
-        # singularity (cos_i -> 0), where the window half-width zmax/cos_i and
-        # the midplane crossing y*tan(i) both blow up. The log-spaced LOS nodes
-        # keep the integral converged at all inclinations short of that, so the
-        # guard fires only near the genuine singularity (the GRaTeR-JAX
-        # reference shares the same 1/cos_i divergence with no handling).
+        # singularity (cos_i -> 0), where the window half-width zmax/|cos_i|
+        # and the midplane crossing y*tan(i) both blow up (the GRaTeR-JAX
+        # reference shares the same 1/cos_i divergence with no handling). The
+        # shared kernel rejects |cos_i| < 1e-2 explicitly.
         zmax_AU = self._zmax_AU()
-        cos_i = jnp.cos(incl_deg * (jnp.pi / 180.0))
-        incl_deg = eqx.error_if(
-            incl_deg,
-            jnp.abs(cos_i) < 1e-2,
-            "GraterDisk: incl_deg too close to edge-on (|cos(incl)| < 1e-2). "
-            "The LOS-around-midplane sampling diverges as cos(incl) -> 0; "
-            "restrict incl_deg to within ~89.4 deg of pole-on.",
-        )
 
         # Density closure: substitute sma_AU outside the valid annulus
         # so the (-2 alpha_in) power stays bounded in float32; the kernel

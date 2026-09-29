@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
 
 from skyscapes.disk import AbstractDisk, CompositeDisk, ExovistaDisk, GraterDisk
@@ -52,6 +53,21 @@ def test_composite_sums_components():
     )
     assert sb_sum.shape == (51, 51)
     assert jnp.allclose(sb_sum, sb_indiv, rtol=1e-5, atol=1e-12)
+
+
+def test_composite_retrograde_render_is_nonnegative_and_mirrored():
+    """Above 90 degrees the summed map is the physical, mirrored one.
+
+    Each component at ``180 - incl`` is its ``incl`` map reflected across the
+    line of nodes (row reversal at ``pa = 0``), so the sum is too; a component
+    returning a negated map would make the sum negative. Tolerance basis:
+    floating-point.
+    """
+    composite = CompositeDisk(components=(_make_grater(20.0), _make_grater(40.0)))
+    low = np.asarray(composite.surface_brightness(_WL, _T, jnp.array(60.0), _PA))
+    high = np.asarray(composite.surface_brightness(_WL, _T, jnp.array(120.0), _PA))
+    assert np.all(high >= 0.0), f"negative radiance, min {high.min():.3g}"
+    np.testing.assert_allclose(high, low[::-1], rtol=1e-9, atol=1e-12 * low.max())
 
 
 def test_composite_jit_round_trip():

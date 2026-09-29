@@ -216,6 +216,15 @@ class ExovistaParametricDisk(AbstractDisk):
         LOS-bound ``rmax_AU`` gives an LOS extent matched to where the
         density actually lives, so per-slice dz scales with the scale
         height at the ring rather than with the (much larger) LOS-bound.
+
+        The cost is the outer halo: at radius ``r`` the window spans
+        ``n_scale_heights * r0_AU / r`` local scale heights, so it keeps
+        the fraction ``erf(n_scale_heights * r0_AU / (sqrt(2) * r))`` of the
+        Gaussian column. With the default 6 that is complete on the ring
+        but 0.95 at ``3 * r0_AU`` and 0.87 at ``4 * r0_AU``; raise
+        ``n_scale_heights`` (and ``n_slices_los`` with it) when the halo
+        brightness matters. ``GraterDisk`` sizes its window at ``rmax_AU``
+        instead.
         """
         return self.n_scale_heights * self.r0_AU * self.hor
 
@@ -236,21 +245,9 @@ class ExovistaParametricDisk(AbstractDisk):
         )
 
         zmax_AU = self._zmax_AU()
-        # ExoVista disks can be intrinsically thick,
-        # so the rmax/zmax geometric threshold used
-        # in GraterDisk is overly restrictive here. The real numerical
-        # problem is only at true edge-on (cos_i -> 0) where l_half
-        # diverges. Guard against that and let the LOS-around-midplane
-        # parameterization be approximate for puffy disks at moderate
-        # inclinations.
-        cos_i = jnp.cos(incl_deg * (jnp.pi / 180.0))
-        incl_deg = eqx.error_if(
-            incl_deg,
-            jnp.abs(cos_i) < 1e-2,
-            "ExovistaParametricDisk: incl_deg too close to edge-on "
-            "(|cos(incl)| < 1e-2). The LOS-around-midplane sampling "
-            "diverges; restrict incl_deg to within ~89.4 deg of pole-on.",
-        )
+        # The numerical problem is only at true edge-on (cos_i -> 0), where
+        # the LOS window half-width diverges; the shared kernel rejects
+        # |cos_i| < 1e-2 explicitly.
 
         def density_fn(r_AU: Array, z_AU: Array, valid: Array) -> Array:
             # Substitute r0_AU outside the annulus so the radial-profile

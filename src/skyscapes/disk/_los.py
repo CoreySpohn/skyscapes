@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import equinox as eqx
 import jax.numpy as jnp
 from hwoutils.constants import deg2rad
 from hwoutils.transforms import ccw_rotation_matrix
@@ -20,8 +21,14 @@ PhaseFn = Callable[[Array], Array]
 # Concentration of the log-spaced LOS nodes about the midplane crossing.
 # Matches the GRaTeR-JAX reference (lwidth = 100): larger packs more nodes
 # near the dense midplane, which is what keeps the integral converged as the
-# LOS window (zmax / cos_i) stretches toward edge-on.
+# LOS window (zmax / |cos_i|) stretches toward edge-on.
 _LOS_LWIDTH = 100.0
+
+# Smallest |cos(incl)| the kernel accepts. The LOS window is centered on the
+# midplane crossing y * tan(incl) and spans zmax / |cos(incl)|; both diverge as
+# the disk turns edge-on, so inclinations within ~0.57 deg of 90 are rejected
+# rather than integrated over a window with a near-zero denominator.
+_MIN_ABS_COS_INCL = 1e-2
 
 
 def los_integrate_scattered(
@@ -51,9 +58,17 @@ def los_integrate_scattered(
     near, forward-scattering half of the disk lies along
     ``(-sin(pa), cos(pa))`` for ``incl_deg < 90``. ``incl_deg`` is the
     angle between the disk normal and the observer's line of sight
-    (0 = pole-on). The integration weight carries the sign of
-    ``cos(incl_deg)``, so for ``incl_deg > 90`` the returned map is the
-    negative of the physical one.
+    (0 = pole-on); above 90 the near half lies along ``(sin(pa), -cos(pa))``
+    instead, so ``180 - incl_deg`` renders the ``incl_deg`` map mirrored
+    across the line of nodes and ``(180 - incl_deg, pa_deg + 180)`` renders
+    the same map. The coordinate transforms keep the sign of
+    ``cos(incl_deg)``; the LOS window half-width and the quadrature weights
+    are path lengths and are positive at every inclination, so the map is a
+    nonnegative surface brightness on both sides of 90.
+
+    The kernel rejects ``|cos(incl_deg)| < 1e-2`` (within ~0.57 deg of
+    edge-on) through ``eqx.error_if``: the LOS window around the midplane
+    crossing has no finite limit there.
 
     Args:
         density_fn: ``(r_AU, z_AU, valid) -> rho``. The kernel ensures
@@ -84,6 +99,13 @@ def los_integrate_scattered(
     y_pix = (jnp.arange(ny) - (ny - 1) / 2.0) * px_AU
     x_sky, y_sky = jnp.meshgrid(x_pix, y_pix)
 
+    incl_deg = eqx.error_if(
+        incl_deg,
+        jnp.abs(jnp.cos(incl_deg * deg2rad)) < _MIN_ABS_COS_INCL,
+        "incl_deg too close to edge-on (|cos(incl)| < 1e-2). The LOS window "
+        "around the midplane crossing, zmax / |cos(incl)|, diverges as "
+        "cos(incl) -> 0; keep incl_deg more than ~0.57 deg away from 90.",
+    )
     incl = incl_deg * deg2rad
     cos_i = jnp.cos(incl)
     sin_i = jnp.sin(incl)
@@ -92,10 +114,13 @@ def los_integrate_scattered(
     x_rot = r_pa_inv[0, 0] * x_sky + r_pa_inv[0, 1] * y_sky
     y_rot = r_pa_inv[1, 0] * x_sky + r_pa_inv[1, 1] * y_sky
 
-    # Per-pixel midplane crossing in LOS depth, then sample a fixed
-    # disk-frame z extent around it.
+    # Per-pixel midplane crossing in LOS depth (signed: it moves to the
+    # other side of the sky plane above 90 deg), then sample a fixed
+    # disk-frame z extent around it. The window half-width is a path length
+    # and stays positive; with a signed half-width the nodes run backward in
+    # depth above 90 deg and the trapezoid weights, hence the map, change sign.
     l_mid = y_rot * sin_i / cos_i
-    l_half = zmax_AU / cos_i
+    l_half = zmax_AU / jnp.abs(cos_i)
 
     # LOS nodes in [-1, 1], log-spaced and symmetric about the midplane
     # crossing (dense at t = 0). For odd n_slices_los this yields exactly
