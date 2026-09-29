@@ -13,7 +13,7 @@ from skyscapes.viz import _style
 
 # The degree sign every view prints after an angle: set tight against the
 # number, as in "135" followed by the sign, not raised after a gap.
-DEGREE = r"$^\circ$"
+DEGREE = r"$\degree$"
 
 
 def halo(text):

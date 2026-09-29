@@ -9,6 +9,8 @@ side with orbix's phase angle (measured from the ``+z`` observer axis).
 
 from __future__ import annotations
 
+import re
+
 import eyepiece
 import jax.numpy as jnp
 import matplotlib
@@ -1221,3 +1223,22 @@ def test_look_angle_refuses_bad_options(kwargs):
     """A non-positive radius or a malformed label position is a named error."""
     with pytest.raises(ValueError, match=next(iter(kwargs))):
         viz.plot_local_zodi_geometry(30.0, 135.0, **kwargs)
+
+
+@pytest.mark.parametrize("name", sorted(VIEWS))
+def test_degree_signs_sit_tight_against_their_numbers(name):
+    """Every printed angle reads like 135 followed by the sign, one style.
+
+    The sign is the mathtext degree glyph directly after the digits, never
+    a raised circle (a mathtext superscript), which sets off after a gap.
+    """
+    from matplotlib.text import Text
+
+    result = VIEWS[name](make_system(), None)
+    texts = [t.get_text() for t in result.fig.findobj(Text) if t.get_text()]
+    angles = [t for t in texts if "degree" in t or "circ" in t]
+    if name.startswith(("zodi", "disk_geometry", "scattering")):
+        assert angles, "the view prints at least one angle"
+    for text in angles:
+        assert "^\\circ" not in text, text
+        assert re.search(r"\d\$\\degree\$", text), text
