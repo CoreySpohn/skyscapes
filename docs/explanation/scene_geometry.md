@@ -28,6 +28,7 @@ import hwostyle
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import numpy as np
 from hwoutils.constants import Msun2kg
 from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.orbit import KeplerianOrbit
@@ -120,6 +121,27 @@ The dashed line on the sky view is the line of nodes, at 30 degrees from
 `+x` toward `+y`, which is an astronomical position angle of 60 degrees
 east of north. The label marks the near side, which the side view puts on
 the observer's side of the sky plane.
+
+## One grain, two angles
+
+{func}`~skyscapes.viz.plot_scattering_angle` draws the definition in the
+table above at full size: one grain in the plane its incident and
+scattered directions span, the star behind the incident ray, the observer
+ahead of the scattered one, and the scattering angle measured from the
+forward continuation of the incident ray (dashed). It is the drawing the
+geometry views magnify in their insets, so a figure can introduce the two
+angles on their own before placing the grain in a disk.
+
+```{code-cell} ipython3
+incl = np.radians(60.0)
+fig, ax = plt.subplots(figsize=(4.2, 3.6), layout="constrained")
+viz.plot_scattering_angle([np.sin(incl), np.cos(incl)], [1.0, 0.0], ax=ax);
+```
+
+Here the incident ray reaches a near-side grain on the minor axis of a
+disk inclined by 60 degrees, and the scattered ray leaves along the line
+of sight, so the grain scatters at 30 degrees. Three-element directions
+are also accepted and are laid into the plane they span.
 
 ## From the midplane to the projected image
 

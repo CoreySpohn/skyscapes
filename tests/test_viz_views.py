@@ -206,6 +206,9 @@ VIEWS = {
     "zodi_side": lambda s, ax: viz.plot_local_zodi_geometry(
         30.0, 135.0, view="side", ax=ax
     ),
+    "scattering_angle": lambda s, ax: viz.plot_scattering_angle(
+        [1.0, 0.0], [0.5, 0.8], ax=ax
+    ),
 }
 
 
@@ -739,6 +742,112 @@ def test_every_view_accepts_zero_to_180_and_refuses_beyond():
             viz.plot_disk_image(
                 np.ones((8, 8)), pixel_scale_arcsec=0.1, incl_deg=incl, pa_deg=0.0
             )
+
+
+# --------------------------------------------------------------------------
+# The scattering-angle view
+# --------------------------------------------------------------------------
+
+
+def _degrees_in(text):
+    """The integer degrees printed in an angle value, such as 154."""
+    return int(text.split("=")[1].split("$")[0])
+
+
+@pytest.mark.parametrize("theta", [20.0, 90.0, 154.0])
+def test_scattering_angle_known_answer(theta):
+    """Theta runs from the forward continuation of k_in to k_out; alpha is 180 - Theta.
+
+    The rays point along their propagation directions, the forward line
+    continues ``k_in`` past the grain, the star sits behind the incident ray
+    and the observer ahead of the scattered one.
+    """
+    k_in = np.array([1.0, 0.0])
+    t = np.radians(theta)
+    k_out = np.array([np.cos(t), np.sin(t)])
+    gids = by_gid(viz.plot_scattering_angle(k_in, k_out))
+
+    assert _degrees_in(gids["scattering_angle/value"].get_text()) == round(theta)
+    assert _degrees_in(gids["illumination_angle/value"].get_text()) == round(
+        180.0 - theta
+    )
+    assert angle_between(arrow_vector(gids["incident"]), k_in) == pytest.approx(
+        0.0, abs=1e-4
+    )
+    assert angle_between(arrow_vector(gids["scattered"]), k_out) == pytest.approx(
+        0.0, abs=1e-4
+    )
+    (x0, y0), (x1, y1) = gids["forward"].get_xydata()
+    assert angle_between([x1 - x0, y1 - y0], k_in) == pytest.approx(0.0, abs=1e-4)
+    grain = gids["grain"].get_offsets()[0]
+    assert angle_between(gids["star"].get_offsets()[0] - grain, -k_in) == (
+        pytest.approx(0.0, abs=1e-4)
+    )
+    assert angle_between(gids["observer"].get_offsets()[0] - grain, k_out) == (
+        pytest.approx(0.0, abs=1e-4)
+    )
+    for name in ("incident", "scattered", "forward"):
+        assert gids[f"label/{name}"].get_text()
+
+
+@pytest.mark.parametrize(
+    ("beta", "dlon", "d"), [(30.0, 135.0, 1.0), (-20.0, 60.0, 0.4)]
+)
+def test_scattering_angle_draws_the_zodi_inset_construction(beta, dlon, d):
+    """A 3D pair is turned exactly as the top view turns its grain inset.
+
+    The grain ``d`` AU out along the look direction receives sunlight along
+    the Sun-to-grain direction and sends light home along ``-look``; the
+    full-size drawing and the top view's inset draw the same rays and print
+    the same angles.
+    """
+    look = np.array(
+        [
+            -np.cos(np.radians(beta)) * np.cos(np.radians(dlon)),
+            np.cos(np.radians(beta)) * np.sin(np.radians(dlon)),
+            np.sin(np.radians(beta)),
+        ]
+    )
+    grain = np.array([1.0, 0.0, 0.0]) + d * look
+    full = by_gid(viz.plot_scattering_angle(grain, -look))
+    inset = by_gid(viz.plot_local_zodi_geometry(beta, dlon, grain_distance_AU=d))
+    for name in ("incident", "scattered"):
+        np.testing.assert_allclose(
+            arrow_vector(full[name]), arrow_vector(inset[f"inset/{name}"]), atol=1e-12
+        )
+    for name in ("scattering_angle/value", "illumination_angle/value"):
+        assert full[name].get_text() == inset[f"inset/{name}"].get_text()
+
+
+def test_scattering_angle_update_redraws_in_place():
+    """``update`` moves the rays and reprints the angles, adding no artist."""
+    result = viz.plot_scattering_angle([1.0, 0.0], [0.0, 1.0])
+    n_children = len(result.ax.get_children())
+    result.update([1.0, 0.0], [-1.0, 0.1])
+    gids = by_gid(result)
+    assert _degrees_in(gids["scattering_angle/value"].get_text()) == 174
+    assert len(result.ax.get_children()) == n_children
+
+
+def test_scattering_angle_optional_parts_are_absent_when_off():
+    """Without star, observer and labels, only the construction is drawn."""
+    gids = by_gid(
+        viz.plot_scattering_angle(
+            [1.0, 0.0], [0.0, 1.0], star=False, observer=False, labels=False
+        )
+    )
+    assert not {"star", "observer", "label/incident"} & set(gids)
+    assert {"incident", "scattered", "forward", "grain"} <= set(gids)
+
+
+@pytest.mark.parametrize(
+    ("k_in", "k_out"),
+    [([1.0, 0.0], [0.0, 1.0, 0.0]), ([0.0, 0.0], [1.0, 0.0]), ([1.0], [1.0])],
+)
+def test_scattering_angle_refuses_bad_directions(k_in, k_out):
+    """Mixed, zero or one-element directions raise a named error."""
+    with pytest.raises(ValueError, match="k_in"):
+        viz.plot_scattering_angle(k_in, k_out)
 
 
 # --------------------------------------------------------------------------

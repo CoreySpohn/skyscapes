@@ -127,73 +127,98 @@ def unit(v):
     return v / np.linalg.norm(v)
 
 
-class GrainInset:
-    """A magnified grain in its scattering plane: the two angles defined.
+def _anchor(direction):
+    """Text alignment that puts a label beyond a point, along ``direction``."""
+    dx, dy = direction
+    ha = "left" if dx > 0.35 else "right" if dx < -0.35 else "center"
+    va = "bottom" if dy > 0.35 else "top" if dy < -0.35 else "center"
+    return ha, va
 
-    The incident light arrives along ``k_in`` (star to grain), and the
-    scattered light leaves toward the observer along ``k_out``. The
-    scattering angle is measured from the forward continuation of ``k_in``
-    to ``k_out``; the illumination angle, its supplement, from the
-    direction back toward the star to ``k_out``. For a disk seen from far
-    along ``+z`` this is the angle the disk kernels evaluate their phase
-    functions at: their ``cos_phi`` is the line-of-sight coordinate over the
-    star-grain distance, which is ``k_in . k_out``.
+
+class ScatteringAngle:
+    """A grain in its scattering plane: the two angles defined.
+
+    The drawing sits on ``ax`` in its own unit coordinates, the grain at
+    the origin and each ray about one unit long. The incident light
+    arrives along ``k_in`` (star to grain), and the scattered light leaves
+    toward the observer along ``k_out``. The scattering angle is measured
+    from the forward continuation of ``k_in`` to ``k_out``; the
+    illumination angle, its supplement, from the direction back toward the
+    star to ``k_out``. For a disk seen from far along ``+z`` this is the
+    angle the disk kernels evaluate their phase functions at: their
+    ``cos_phi`` is the line-of-sight coordinate over the star-grain
+    distance, which is ``k_in . k_out``.
+
+    The star glyph, the observer glyph and the ray labels are optional and
+    are created after the core artists, so a drawing without them has
+    exactly the core artists in their original order.
     """
 
-    def __init__(self, ax, bounds, *, grain_color, gid_prefix="inset"):
-        """Create the inset axes and its artists; place them with ``set``."""
-        self.ax = ax.inset_axes(bounds)
-        self.ax.set_gid(gid_prefix)
-        inset = self.ax
-        inset.set_xlim(-1.35, 1.35)
-        inset.set_ylim(-1.35, 1.35)
-        inset.set_aspect("equal")
-        inset.set_xticks([])
-        inset.set_yticks([])
-        for spine in inset.spines.values():
-            spine.set_color(_style.neutral(0.35))
-            spine.set_linewidth(0.8)
+    def __init__(
+        self,
+        ax,
+        *,
+        grain_color,
+        gid_prefix="",
+        value_size="x-small",
+        star=False,
+        observer=False,
+        labels=False,
+    ):
+        """Create the (unplaced) artists; place them with ``set``."""
+
+        def gid(name):
+            return f"{gid_prefix}/{name}" if gid_prefix else name
+
         scenery = _style.neutral(0.55)
         self.incident = Arrow(
-            inset,
-            (-1.0, 0.0),
-            (0.0, 0.0),
-            color=_style.role("star"),
-            gid=f"{gid_prefix}/incident",
+            ax, (-1.0, 0.0), (0.0, 0.0), color=_style.role("star"), gid=gid("incident")
         )
         self.outgoing = Arrow(
-            inset,
-            (0.0, 0.0),
-            (1.0, 0.0),
-            color=grain_color,
-            gid=f"{gid_prefix}/scattered",
+            ax, (0.0, 0.0), (1.0, 0.0), color=grain_color, gid=gid("scattered")
         )
-        (self.forward,) = inset.plot([], [], color=scenery, lw=0.9, ls="--")
-        self.forward.set_gid(f"{gid_prefix}/forward")
-        self.theta = AngleArc(
-            inset, color=_style.text(), gid=f"{gid_prefix}/scattering_angle"
-        )
-        self.alpha = AngleArc(
-            inset, color=scenery, gid=f"{gid_prefix}/illumination_angle"
-        )
-        self.grain = inset.scatter(
+        (self.forward,) = ax.plot([], [], color=scenery, lw=0.9, ls="--")
+        self.forward.set_gid(gid("forward"))
+        self.theta = AngleArc(ax, color=_style.text(), gid=gid("scattering_angle"))
+        self.alpha = AngleArc(ax, color=scenery, gid=gid("illumination_angle"))
+        self.grain = ax.scatter(
             [0.0], [0.0], s=46, color=grain_color, zorder=5, edgecolors="none"
         )
-        self.grain.set_gid(f"{gid_prefix}/grain")
-        small = {"fontsize": "x-small", "transform": inset.transAxes, "ha": "left"}
-        self.theta_value = inset.text(
+        self.grain.set_gid(gid("grain"))
+        small = {"fontsize": value_size, "transform": ax.transAxes, "ha": "left"}
+        self.theta_value = ax.text(
             0.04, 0.96, "", color=_style.text(), va="top", **small
         )
-        self.theta_value.set_gid(f"{gid_prefix}/scattering_angle/value")
-        self.alpha_value = inset.text(
-            0.04, 0.04, "", color=scenery, va="bottom", **small
-        )
-        self.alpha_value.set_gid(f"{gid_prefix}/illumination_angle/value")
+        self.theta_value.set_gid(gid("scattering_angle/value"))
+        self.alpha_value = ax.text(0.04, 0.04, "", color=scenery, va="bottom", **small)
+        self.alpha_value.set_gid(gid("illumination_angle/value"))
+
+        self.star = self.observer = None
+        if star:
+            self.star = ax.scatter(
+                [0.0], [0.0], s=190, marker="*", color=_style.role("star"), zorder=5
+            )
+            self.star.set_gid(gid("star"))
+        if observer:
+            self.observer = ax.scatter(
+                [0.0], [0.0], s=45, marker="s", color=_style.neutral(0.8), zorder=6
+            )
+            self.observer.set_gid(gid("observer"))
+        self.labels = {}
+        if labels:
+            for name, text, color in (
+                ("incident", "starlight", _style.role("star")),
+                ("scattered", "to observer", grain_color),
+                ("forward", "forward", scenery),
+            ):
+                label = halo(ax.text(0.0, 0.0, text, color=color, fontsize="small"))
+                label.set_gid(gid(f"label/{name}"))
+                self.labels[name] = label
 
     def set(self, k_in, k_out):
         """Draw the grain for incident direction ``k_in`` and outgoing ``k_out``.
 
-        Both are 2D directions in the inset's plane; they need not be unit.
+        Both are 2D directions in the drawing's plane; they need not be unit.
         """
         k_in = unit(k_in)
         k_out = unit(k_out)
@@ -207,21 +232,70 @@ class GrainInset:
         self.alpha_value.set_text(
             rf"illumination $\alpha$ = {180.0 - theta:.0f}$^\circ$"
         )
+        # The glyphs sit just beyond the ray ends, the labels beyond them.
+        if self.star is not None:
+            self.star.set_offsets([-1.16 * k_in])
+        if self.observer is not None:
+            self.observer.set_offsets([1.16 * k_out])
+        for name, where in (
+            ("incident", -1.3 * k_in),
+            ("scattered", 1.3 * k_out),
+            ("forward", 0.88 * k_in),
+        ):
+            label = self.labels.get(name)
+            if label is not None:
+                ha, va = _anchor(unit(where))
+                label.set_position(tuple(where))
+                label.set_ha(ha)
+                label.set_va(va)
+
+    def artists(self):
+        """Every artist the drawing owns, grouped by artist-vocabulary key."""
+        text = [
+            self.incident.artist,
+            self.outgoing.artist,
+            self.theta.text,
+            self.alpha.text,
+            self.theta_value,
+            self.alpha_value,
+        ]
+        text += list(self.labels.values())
+        scatter = [self.grain]
+        scatter += [a for a in (self.star, self.observer) if a is not None]
+        return {
+            "text": text,
+            "lines": [self.forward, self.theta.line, self.alpha.line],
+            "scatter": scatter,
+        }
+
+
+class GrainInset:
+    """A ``ScatteringAngle`` drawing on a framed inset axes of a view."""
+
+    def __init__(self, ax, bounds, *, grain_color, gid_prefix="inset"):
+        """Create the inset axes and its drawing; place it with ``set``."""
+        self.ax = ax.inset_axes(bounds)
+        self.ax.set_gid(gid_prefix)
+        inset = self.ax
+        inset.set_xlim(-1.35, 1.35)
+        inset.set_ylim(-1.35, 1.35)
+        inset.set_aspect("equal")
+        inset.set_xticks([])
+        inset.set_yticks([])
+        for spine in inset.spines.values():
+            spine.set_color(_style.neutral(0.35))
+            spine.set_linewidth(0.8)
+        self.drawing = ScatteringAngle(
+            inset, grain_color=grain_color, gid_prefix=gid_prefix
+        )
+
+    def set(self, k_in, k_out):
+        """Draw the grain for 2D incident ``k_in`` and outgoing ``k_out``."""
+        self.drawing.set(k_in, k_out)
 
     def artists(self):
         """Every artist the inset owns, grouped by artist-vocabulary key."""
-        return {
-            "text": [
-                self.incident.artist,
-                self.outgoing.artist,
-                self.theta.text,
-                self.alpha.text,
-                self.theta_value,
-                self.alpha_value,
-            ],
-            "lines": [self.forward, self.theta.line, self.alpha.line],
-            "scatter": [self.grain],
-        }
+        return self.drawing.artists()
 
 
 def scattering_plane(k_in, k_out, reference_out_2d, reference_in_2d=None):
