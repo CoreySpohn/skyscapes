@@ -1024,18 +1024,21 @@ def test_zodi_refuses_empty_or_nested_grain_distances(bad):
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("font", ["Inter", "DejaVu Sans"])
 @pytest.mark.parametrize("figsize", [(6.4, 4.8), (10.0, 4.5)])
-def test_zodi_side_view_axis_label_fits_the_figure(figsize):
+def test_zodi_side_view_axis_label_fits_the_figure(figsize, font):
     """The side view's x label is not cut off at the figure edge.
 
     The wide case puts the side view in the right half of a two-panel
     figure, beside the top view, where the label used to run off the edge.
     Both are drawn in the house style, whose type is wider than the
-    matplotlib default.
+    matplotlib default, and in DejaVu Sans, the wider fallback used where
+    the house font is not installed (as on CI runners).
     """
     import hwostyle
 
     with hwostyle.light():
+        plt.rcParams["font.family"] = [font]
         fig, axes = plt.subplots(1, 2, figsize=figsize, layout="constrained")
         viz.plot_local_zodi_geometry(30.0, 135.0, ax=axes[0])
         viz.plot_local_zodi_geometry(30.0, 135.0, view="side", ax=axes[1])

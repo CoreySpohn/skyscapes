@@ -470,9 +470,9 @@ def plot_local_zodi_geometry(
     else:
         ax.set_xlim(-1.15 * max(R, ray_length), 1.15 * max(R, ray_length))
         ax.set_ylim(-1.05 * ray_length, 1.05 * ray_length)
-        # Two lines: at equal aspect the axes is narrow, and one line of
-        # this length runs past the figure edge.
-        ax.set_xlabel("distance along the sightline's\necliptic projection [AU]")
+        # Two short lines: at equal aspect the axes is narrow, and a longer
+        # label runs past the figure edge in wider fallback fonts.
+        ax.set_xlabel("along the sightline's\necliptic projection [AU]")
         ax.set_ylabel("height above the ecliptic [AU]")
     ax.set_aspect("equal")
 
