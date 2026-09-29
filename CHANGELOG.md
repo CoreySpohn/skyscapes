@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.5.0](https://github.com/CoreySpohn/skyscapes/compare/v1.4.0...v1.5.0) (2026-09-29)
+
+
+### Features
+
+* **viz:** add plot_scattering_angle, the grain inset's construction at full size ([74f7636](https://github.com/CoreySpohn/skyscapes/commit/74f7636272af369eea922c1eaead5b2a01013117))
+* **viz:** add show= parts to the disk and local-zodi geometry views and several grains per zodi sightline ([e55f25e](https://github.com/CoreySpohn/skyscapes/commit/e55f25e2f473b5b34ed946d36a277e18a10646dd))
+* **viz:** add system, disk geometry and local zodi views ([572c298](https://github.com/CoreySpohn/skyscapes/commit/572c298937d942f13c5b99423b544137d33315fa))
+
+
+### Bug Fixes
+
+* **disk:** keep LOS path weights positive above 90 deg, reject edge-on in the shared kernel, and add node and support convergence ladders ([c07c435](https://github.com/CoreySpohn/skyscapes/commit/c07c435ff4558103d967a087b4a0c0e8f323a23e))
+* **viz:** refuse negated disk maps, unify inclination range, and keep labels and insets clear ([2907a0c](https://github.com/CoreySpohn/skyscapes/commit/2907a0cb4e8c94e2ad933b961b3bc575431bfd28))
+* **viz:** shorten the local-zodi side view's x label so it fits in the DejaVu fallback font used on CI ([cf325ea](https://github.com/CoreySpohn/skyscapes/commit/cf325eadbf2a9b7a8f1b8acf07be5e440dbca88e))
+* **viz:** wrap the local-zodi side view's x label so it fits the figure ([cc29c47](https://github.com/CoreySpohn/skyscapes/commit/cc29c47940e1b9e9938721ce566c5a34e90a9e86))
+
 ## [1.4.0](https://github.com/CoreySpohn/skyscapes/compare/v1.3.0...v1.4.0) (2026-07-18)
 
 
