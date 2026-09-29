@@ -9,6 +9,8 @@ side with orbix's phase angle (measured from the ``+z`` observer axis).
 
 from __future__ import annotations
 
+import re
+
 import eyepiece
 import jax.numpy as jnp
 import matplotlib
@@ -859,7 +861,8 @@ def test_scattering_angle_refuses_bad_directions(k_in, k_out):
 ZODI_TOP_PARTS = {
     "orbit": ["observer_orbit"],
     "sun": ["sun", "label/sun", "to_sun"],
-    "observer": ["observer", "label/observer"],
+    "observer_mark": ["observer"],
+    "observer_label": ["label/observer"],
     "sightline": ["sightline", "label/sightline"],
     "grain": ["grain"],
     "incident": ["incident"],
@@ -885,8 +888,14 @@ DISK_PARTS = {
     "scattered": ["scattered"],
     "scattering_angle": ["forward", "scattering_angle", "scattering_angle/label"],
     "inclination": ["inclination", "inclination/label"],
-    "observer": ["observer", "label/observer"],
+    "observer_mark": ["observer"],
+    "observer_label": ["label/observer"],
     "inset": [],
+}
+DISK_IMAGE_PARTS = {
+    "star": ["star"],
+    "outline": ["disk/inner", "disk/outer"],
+    "sightline": ["sightline"],
 }
 SHOW_VIEWS = {
     "zodi_top": (
@@ -902,6 +911,12 @@ SHOW_VIEWS = {
             make_system(60.0, 0.0), thickness_AU=0.5, show=show
         ),
         DISK_PARTS,
+    ),
+    "disk_image": (
+        lambda show: viz.plot_disk_image(
+            make_system(60.0, 30.0), wavelength_nm=550.0, grain_radius_AU=3.0, show=show
+        ),
+        DISK_IMAGE_PARTS,
     ),
 }
 
@@ -959,6 +974,26 @@ def test_show_hidden_parts_still_move_with_update():
     assert not same(before, state(grain))
 
 
+@pytest.mark.parametrize("name", ["zodi_top", "zodi_side", "disk"])
+def test_show_observer_still_names_the_mark_and_its_label(name):
+    """The name ``observer`` from before the split shows both halves."""
+    make, parts = SHOW_VIEWS[name]
+    rest = [p for p in parts if not p.startswith("observer_")]
+    together = _visible(make([*rest, "observer"]))
+    assert together == _visible(make(None))
+    label_only = _visible(make([*rest, "observer_label"]))
+    assert label_only["label/observer"]
+    assert not label_only["observer"]
+
+
+def test_observer_label_text_is_settable():
+    """A figure can rename the observer, in both geometry views."""
+    zodi = by_gid(viz.plot_local_zodi_geometry(30.0, 135.0, observer_text="telescope"))
+    assert zodi["label/observer"].get_text() == "telescope"
+    disk = by_gid(viz.plot_disk_geometry(make_system(), observer_text="telescope"))
+    assert disk["label/observer"].get_text() == "telescope"
+
+
 def test_show_accepts_one_name_and_refuses_unknown_parts():
     """A single part name is a one-part show; an unknown name is refused."""
     visible = _visible(viz.plot_local_zodi_geometry(30.0, 135.0, show="grain"))
@@ -968,6 +1003,10 @@ def test_show_accepts_one_name_and_refuses_unknown_parts():
         viz.plot_local_zodi_geometry(30.0, 135.0, show=("grain", "look_arc"))
     with pytest.raises(ValueError, match="cloud"):
         viz.plot_disk_geometry(make_system(), show=("cloud",))
+    with pytest.raises(ValueError, match="rings"):
+        viz.plot_disk_image(
+            np.ones((8, 8)), pixel_scale_arcsec=0.1, show=("star", "rings")
+        )
 
 
 # --------------------------------------------------------------------------
@@ -1047,3 +1086,207 @@ def test_zodi_side_view_axis_label_fits_the_figure(figsize, font):
     fig_box = fig.bbox
     assert box.x0 >= fig_box.x0 and box.x1 <= fig_box.x1
     assert box.y0 >= fig_box.y0
+
+
+# --------------------------------------------------------------------------
+# The grain drawing's options: gid prefix, where the values go, arc radii
+# --------------------------------------------------------------------------
+
+
+def test_scattering_angle_gid_prefix_matches_the_insets():
+    """With ``gid_prefix="inset"`` the drawing carries the insets' gids."""
+    look = np.array([0.6124, 0.6124, 0.5])
+    grain = np.array([1.0, 0.0, 0.0]) + 0.5 * look
+    drawing = by_gid(
+        viz.plot_scattering_angle(
+            grain, -look, star=False, observer=False, labels=False, gid_prefix="inset"
+        )
+    )
+    view = by_gid(viz.plot_local_zodi_geometry(30.0, 135.0))
+    assert set(drawing) == {g for g in view if g.startswith("inset/")}
+    plain = by_gid(viz.plot_scattering_angle(grain, -look))
+    assert not any(g.startswith("inset/") for g in plain)
+
+
+@pytest.mark.parametrize("values", ["corner", "arcs", None])
+def test_scattering_angle_values_go_where_asked(values):
+    """The values print in the corners, on the arcs, or nowhere, and stay there."""
+    result = viz.plot_scattering_angle([1.0, 0.0], [0.5, 0.8], values=values)
+    for k_out in ([0.5, 0.8], [-1.0, 0.1]):
+        result.update([1.0, 0.0], k_out)
+        theta = round(float(np.degrees(np.arctan2(k_out[1], k_out[0]))))
+        gids = by_gid(result)
+        corner = [gids[f"{a}/value"].get_text() for a in ANGLES]
+        arcs = [gids[f"{a}/label"].get_text() for a in ANGLES]
+        if values == "corner":
+            assert [_degrees_in(t) for t in corner] == [theta, 180 - theta]
+            assert arcs == [r"$\Theta$", r"$\alpha$"]
+        elif values == "arcs":
+            assert corner == ["", ""]
+            assert [_degrees_in(t) for t in arcs] == [theta, 180 - theta]
+        else:
+            assert corner == ["", ""]
+            assert arcs == [r"$\Theta$", r"$\alpha$"]
+
+
+ANGLES = ("scattering_angle", "illumination_angle")
+
+
+@pytest.mark.parametrize(("theta_r", "alpha_r"), [(0.5, 0.3), (0.35, 0.6)])
+def test_scattering_angle_arc_radii_are_settable(theta_r, alpha_r):
+    """Each arc lies at its radius about the grain, its label beyond it."""
+    gids = by_gid(
+        viz.plot_scattering_angle(
+            [1.0, 0.2], [0.3, 1.0], theta_radius=theta_r, alpha_radius=alpha_r
+        )
+    )
+    for name, radius in zip(ANGLES, (theta_r, alpha_r), strict=True):
+        r = np.linalg.norm(gids[name].get_xydata(), axis=1)
+        np.testing.assert_allclose(r, radius, atol=1e-12)
+        assert np.linalg.norm(gids[f"{name}/label"].get_position()) > radius
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"values": "legend"}, {"theta_radius": 0.0}, {"alpha_radius": -0.2}],
+)
+def test_scattering_angle_refuses_bad_options(kwargs):
+    """An unknown value place or a non-positive radius is a named error."""
+    with pytest.raises(ValueError, match=next(iter(kwargs))):
+        viz.plot_scattering_angle([1.0, 0.0], [0.0, 1.0], **kwargs)
+
+
+def test_disk_inset_values_go_on_the_arcs():
+    """``inset_values="arcs"`` moves the inset's values onto its arcs.
+
+    The near-side minor-axis grain at 60 degrees scatters at 30 degrees.
+    """
+    result = viz.plot_disk_geometry(make_system(60.0, 0.0), inset_values="arcs")
+    for incl in (60.0, 40.0):
+        result.update(incl)
+        gids = by_gid(result)
+        theta = [_degrees_in(gids[f"inset/{a}/label"].get_text()) for a in ANGLES]
+        assert theta == [round(90.0 - incl), round(90.0 + incl)]
+        assert gids["inset/scattering_angle/value"].get_text() == ""
+    with pytest.raises(ValueError, match="inset_values"):
+        viz.plot_disk_geometry(make_system(), inset_values="legend")
+
+
+# --------------------------------------------------------------------------
+# The look-angle annotation: text, radius and label position
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("view", "value"), [("top", 135), ("side", 30)])
+def test_look_angle_label_text_and_radius_are_settable(view, value):
+    """The label is the template given the view's angle; the arc has the radius."""
+    result = viz.plot_local_zodi_geometry(
+        30.0,
+        135.0,
+        view=view,
+        look_angle_label="angle\n= {value:.0f} deg",
+        look_angle_radius_AU=0.45,
+    )
+    gids = by_gid(result)
+    assert gids["look_angle/label"].get_text() == f"angle\n= {value} deg"
+    vertex = np.array([1.0, 0.0]) if view == "top" else np.zeros(2)
+    r = np.linalg.norm(gids["look_angle"].get_xydata() - vertex, axis=1)
+    np.testing.assert_allclose(r, 0.45, atol=1e-12)
+    result.update(20.0, 100.0)
+    new = 100 if view == "top" else 20
+    assert gids["look_angle/label"].get_text() == f"angle\n= {new} deg"
+
+
+def test_look_angle_label_can_be_pinned():
+    """A pinned label sits at its polar position, grows outward, and stays."""
+    result = viz.plot_local_zodi_geometry(
+        30.0, 135.0, look_angle_label_at=(100.0, 0.67)
+    )
+    label = by_gid(result)["look_angle/label"]
+    at = np.radians(100.0)
+    expected = np.array([1.0, 0.0]) + 0.67 * np.array([np.cos(at), np.sin(at)])
+    for _ in range(2):
+        np.testing.assert_allclose(label.get_position(), expected, atol=1e-12)
+        assert (label.get_ha(), label.get_va()) == ("center", "bottom")
+        result.update(10.0, 60.0)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"look_angle_radius_AU": 0.0},
+        {"look_angle_label_at": (100.0, -0.2)},
+        {"look_angle_label_at": 100.0},
+    ],
+)
+def test_look_angle_refuses_bad_options(kwargs):
+    """A non-positive radius or a malformed label position is a named error."""
+    with pytest.raises(ValueError, match=next(iter(kwargs))):
+        viz.plot_local_zodi_geometry(30.0, 135.0, **kwargs)
+
+
+@pytest.mark.parametrize("name", sorted(VIEWS))
+def test_degree_signs_sit_tight_against_their_numbers(name):
+    """Every printed angle reads like 135 followed by the sign, one style.
+
+    The sign is the mathtext degree glyph directly after the digits, never
+    a raised circle (a mathtext superscript), which sets off after a gap.
+    """
+    from matplotlib.text import Text
+
+    result = VIEWS[name](make_system(), None)
+    texts = [t.get_text() for t in result.fig.findobj(Text) if t.get_text()]
+    angles = [t for t in texts if "degree" in t or "circ" in t]
+    if name.startswith(("zodi", "disk_geometry", "scattering")):
+        assert angles, "the view prints at least one angle"
+    for text in angles:
+        assert "^\\circ" not in text, text
+        assert re.search(r"\d\$\\degree\$", text), text
+
+
+def _segment_enters(ax, start, end, box):
+    """Whether the data-space segment passes through a display-space box."""
+    points = np.linspace(np.asarray(start, float), np.asarray(end, float), 200)
+    x, y = ax.transData.transform(points).T
+    x0, y0, x1, y1 = box
+    return bool(np.any((x > x0) & (x < x1) & (y > y0) & (y < y1)))
+
+
+@pytest.mark.parametrize("font", ["Inter", "DejaVu Sans"])
+def test_zodi_top_look_label_clears_the_rays(font):
+    """The longitude label's box crosses no ray, line or arc of the top view.
+
+    Checked over looks from narrow to wide, in the house font and in DejaVu
+    Sans, the wider fallback used where the house font is not installed (as
+    on CI runners), with a few points of margin, the backing box a label
+    carries in a figure that boxes its text.
+    """
+    import hwostyle
+
+    with hwostyle.light():
+        plt.rcParams["font.family"] = [font]
+        fig, ax = plt.subplots(figsize=(5.5, 4.5), layout="constrained")
+        result = viz.plot_local_zodi_geometry(30.0, 135.0, ax=ax)
+        gids = by_gid(result)
+        label = gids["look_angle/label"]
+        pad = 3.0 * fig.dpi / 72.0
+        for beta in (-30.0, 0.0, 30.0):
+            for dlon in (20.0, 45.0, 60.0, 75.0, 90.0, 120.0, 135.0, 160.0, 180.0):
+                result.update(beta, dlon)
+                fig.canvas.draw()
+                bb = label.get_window_extent()
+                box = (bb.x0 - pad, bb.y0 - pad, bb.x1 + pad, bb.y1 + pad)
+                segments = {"sunlight": (gids["incident"].xyann, gids["incident"].xy)}
+                for name in ("sightline", "look_angle", "to_sun"):
+                    xy = gids[name].get_xydata()
+                    for k in range(len(xy) - 1):
+                        segments[f"{name}/{k}"] = (xy[k], xy[k + 1])
+                crossed = [
+                    name
+                    for name, (a, b) in segments.items()
+                    if _segment_enters(ax, a, b, box)
+                ]
+                assert not crossed, (beta, dlon, crossed)
+                frame = ax.get_window_extent()
+                assert frame.x0 <= bb.x0 and bb.x1 <= frame.x1, (beta, dlon)
+                assert frame.y0 <= bb.y0 and bb.y1 <= frame.y1, (beta, dlon)

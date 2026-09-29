@@ -17,7 +17,16 @@ from hwoutils.conversions import au_to_arcsec
 
 from skyscapes.disk import AbstractDisk
 from skyscapes.viz import _geometry, _style
-from skyscapes.viz._draw import AngleArc, Arrow, GrainInset, halo, hide, resolve_show
+from skyscapes.viz._draw import (
+    DEGREE,
+    VALUE_PLACES,
+    AngleArc,
+    Arrow,
+    GrainInset,
+    halo,
+    hide,
+    resolve_show,
+)
 from skyscapes.viz._require import eyepiece
 
 _SKY_LABELS = ("RA offset [arcsec]", "Dec offset [arcsec]")
@@ -35,9 +44,14 @@ GEOMETRY_PARTS = (
     "scattered",
     "scattering_angle",
     "inclination",
-    "observer",
+    "observer_mark",
+    "observer_label",
     "inset",
 )
+# Show names that stand for several parts: the observer's arrow and its
+# label, the single part they were before they could be shown apart.
+GEOMETRY_GROUPS = {"observer": ("observer_mark", "observer_label")}
+IMAGE_PARTS = ("star", "outline", "sightline")
 _SIDE_LABELS = (
     r"$z$, toward the observer [AU]",
     "offset along the projected minor axis [AU]",
@@ -73,6 +87,7 @@ def plot_disk_image(
     dynamic_range=1.0e4,
     vmax=None,
     colorbar=True,
+    show=None,
     ax=None,
     imshow_kw=None,
     cbar_kw=None,
@@ -118,6 +133,14 @@ def plot_disk_image(
         vmax: Top of the colormap. None takes the image peak; pin it to
             the brightest frame when the result will be updated.
         colorbar: Forwarded to ``eyepiece.imshow_log``.
+        show: The overlays to draw over the image, as in the geometry
+            views; None draws every one the inputs allow. Part names:
+            ``"star"``, ``"outline"`` (the truncation rings) and
+            ``"sightline"`` (the grain's marker). A part left out is
+            created hidden (``set_visible(False)``), still in the result
+            and still moved by ``update``, so a row of panels can share
+            one set of gids and drop a mark where the comparison does not
+            need it. The image and its colorbar are always drawn.
         ax: Axes to draw into. None creates a new figure and axes.
         imshow_kw: Extra kwargs for ``ax.imshow``.
         cbar_kw: Extra kwargs for the colorbar.
@@ -133,13 +156,14 @@ def plot_disk_image(
 
     Raises:
         ValueError: If a required input is missing, the image is not 2D,
-            the inclination is outside ``[0, 180]``, or the map has no
-            positive pixel or has negative pixels beyond round-off (at
-            ``1e-6`` of the largest magnitude). A surface brightness cannot
-            be negative. ``update`` applies the same check to each new
-            frame.
+            the inclination is outside ``[0, 180]``, a ``show`` part is
+            unknown, or the map has no positive pixel or has negative
+            pixels beyond round-off (at ``1e-6`` of the largest
+            magnitude). A surface brightness cannot be negative.
+            ``update`` applies the same check to each new frame.
     """
     ep = eyepiece()
+    shown = resolve_show(show, IMAGE_PARTS)
     disk, incl, pa, dist = _resolve_disk(disk_or_image, incl_deg, pa_deg, dist_pc)
     if incl is not None:
         _check_incl(incl)
@@ -246,6 +270,7 @@ def plot_disk_image(
     state = {"incl": incl, "pa": pa}
     if incl is not None and pa is not None:
         place(float(incl), float(pa))
+    hide({"star": [star], "outline": rings, "sightline": [marker]}, shown)
 
     def update(new_image, incl_deg=None, pa_deg=None):
         """Show a new image; move the outlines when angles are given."""
@@ -267,7 +292,19 @@ def plot_disk_image(
 class _GeometryPanel:
     """The artists of a disk geometry panel, placed for one inclination."""
 
-    def __init__(self, ax, radii, pa, grain_radius, thickness, labels, inset):
+    def __init__(
+        self,
+        ax,
+        radii,
+        pa,
+        grain_radius,
+        thickness,
+        labels,
+        inset,
+        *,
+        observer_text="to observer",
+        inset_values="corner",
+    ):
         self.ax = ax
         self.radii = radii
         self.pa = pa
@@ -333,7 +370,7 @@ class _GeometryPanel:
             observer = ax.text(
                 1.22 * R,
                 1.0 * R,
-                "to observer",
+                observer_text,
                 color=_style.neutral(0.75),
                 fontsize="small",
                 ha="center",
@@ -356,7 +393,9 @@ class _GeometryPanel:
                 halo(text)
         self.inset = None
         if inset is not None:
-            self.inset = GrainInset(ax, inset, grain_color=disk_color)
+            self.inset = GrainInset(
+                ax, inset, grain_color=disk_color, values=inset_values
+            )
 
     def parts(self, shown):
         """The panel's artists grouped by ``show`` part name.
@@ -375,7 +414,8 @@ class _GeometryPanel:
             "scattered": [self.scattered.artist],
             "scattering_angle": [self.forward, self.theta.line, self.theta.text],
             "inclination": [self.incl_arc.line, self.incl_arc.text],
-            "observer": [self.observer.artist, self.observer_label],
+            "observer_mark": [self.observer.artist],
+            "observer_label": [self.observer_label],
             "inset": [None if self.inset is None else self.inset.ax],
         }
         for part in ("sightline", "layer"):
@@ -435,7 +475,7 @@ class _GeometryPanel:
             np.array([0.0, 1.0]),
             d,
             0.32 * R,
-            rf"$i$ = {float(incl):.0f}$^\circ$",
+            rf"$i$ = {float(incl):.0f}{DEGREE}",
             1.4,
         )
         if self.near_label is not None:
@@ -499,7 +539,9 @@ def plot_disk_geometry(
     thickness_AU=None,
     inset=True,
     inset_bounds=None,
+    inset_values="corner",
     labels=True,
+    observer_text="to observer",
     show=None,
     ax=None,
 ):
@@ -547,7 +589,13 @@ def plot_disk_geometry(
             fractions (``Axes.inset_axes``). None puts it in the quadrant
             the disk and the sightline leave empty: lower right for a
             near-side grain, upper left for a far-side one.
+        inset_values: Where the inset prints the two angle values, as
+            ``values`` of ``plot_scattering_angle``: ``"corner"``,
+            ``"arcs"`` (on the arc labels, which a small inset has more
+            room for) or None.
         labels: Whether to add direct text labels.
+        observer_text: Text of the observer's label, for a figure that
+            names the observer (a telescope, say) otherwise.
         show: The parts to draw, for a figure that builds the view up
             part by part; None draws them all. Part names (each takes its
             own labels with it): ``"star"``, ``"sky_plane"``, ``"disk"``
@@ -555,8 +603,11 @@ def plot_disk_geometry(
             ``"layer"`` (the schematic layer bands), ``"sightline"``,
             ``"grain"``, ``"incident"``, ``"scattered"``,
             ``"scattering_angle"`` (the forward continuation and the
-            arc), ``"inclination"`` (the arc), ``"observer"`` (the arrow
-            and its label) and ``"inset"``. The sightline's chord through
+            arc), ``"inclination"`` (the arc), ``"observer_mark"`` (the
+            arrow), ``"observer_label"`` and ``"inset"``;
+            ``"observer"`` names the arrow and its label together. Showing
+            the label without the arrow keeps the name where a figure
+            draws its own observer. The sightline's chord through
             the layer is drawn only when both ``"sightline"`` and
             ``"layer"`` are. A part left out is created hidden
             (``set_visible(False)``), still in the result and still moved
@@ -584,12 +635,18 @@ def plot_disk_geometry(
 
     Raises:
         ValueError: If no radii are available, the inclination is
-            outside ``[0, 180]``, or a ``show`` part is unknown.
+            outside ``[0, 180]``, a ``show`` part is unknown, or
+            ``inset_values`` is not one of ``"corner"``, ``"arcs"``, None.
     """
     ep = eyepiece()
     import matplotlib.pyplot as plt
 
-    shown = resolve_show(show, GEOMETRY_PARTS)
+    if inset_values not in VALUE_PLACES:
+        raise ValueError(
+            f"inset_values must be one of {VALUE_PLACES}, got {inset_values!r}"
+        )
+
+    shown = resolve_show(show, GEOMETRY_PARTS, GEOMETRY_GROUPS)
     disk, incl, pa, _ = _resolve_disk(system_or_disk, incl_deg, pa_deg, 0.0)
     if incl is None:
         raise ValueError("incl_deg is required for a bare disk")
@@ -617,6 +674,8 @@ def plot_disk_geometry(
         thickness_AU,
         labels,
         inset_bounds if inset else None,
+        observer_text=observer_text,
+        inset_values=inset_values,
     )
 
     def update(incl_deg):

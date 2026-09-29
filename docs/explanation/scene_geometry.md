@@ -143,6 +143,25 @@ disk inclined by 60 degrees, and the scattered ray leaves along the line
 of sight, so the grain scatters at 30 degrees. Three-element directions
 are also accepted and are laid into the plane they span.
 
+`values="arcs"` prints the two values on the arc labels instead of in the
+corners (`values=None` prints neither), and `theta_radius` and
+`alpha_radius` set the arc radii in units of the ray length; a narrow
+illumination wedge reads better on a larger arc. `gid_prefix="inset"`
+gives the drawing the gids the geometry views' insets carry, so a figure
+that introduces the grain on its own can restyle it with the same code
+as the inset it later becomes.
+
+```{code-cell} ipython3
+fig, ax = plt.subplots(figsize=(4.2, 3.6), layout="constrained")
+viz.plot_scattering_angle(
+    [np.sin(incl), np.cos(incl)],
+    [1.0, 0.0],
+    values="arcs",
+    alpha_radius=0.55,
+    ax=ax,
+);
+```
+
 ## From the midplane to the projected image
 
 {func}`~skyscapes.viz.plot_disk_geometry` draws the disk side on with one
@@ -185,6 +204,30 @@ viz.plot_disk_geometry(system, grain_radius_AU=3.0, thickness_AU=0.6, ax=axes[1]
 
 The left panel is the tilted disk alone; the right adds the sightline, the
 grain, its rays and the inset. Each view's docstring lists its part names.
+The observer's mark and its label are separate parts, `"observer_mark"`
+and `"observer_label"` (`"observer"` names both), so a figure that draws
+its own observer can keep the label, renamed with `observer_text`. The
+image view takes `show=` too, for its overlays: `"star"`, `"outline"` and
+`"sightline"`. A small inset has room for its angle values on the arcs
+(`inset_values="arcs"`) rather than in its corners.
+
+```{code-cell} ipython3
+fig, axes = plt.subplots(1, 2, figsize=(10, 4.6), layout="constrained")
+viz.plot_disk_geometry(
+    system,
+    grain_radius_AU=3.0,
+    inset_values="arcs",
+    observer_text="to the telescope",
+    ax=axes[0],
+)
+viz.plot_disk_image(
+    system,
+    wavelength_nm=550.0,
+    grain_radius_AU=3.0,
+    show=("star", "outline"),
+    ax=axes[1],
+);
+```
 
 ## Sweeping the inclination
 
