@@ -261,18 +261,14 @@ class _ZodiPanel:
             k_in = grain / np.linalg.norm(grain)
             back = obs - grain
             if np.linalg.norm(proj) > 1e-9:
-                # A narrow angle leaves no room between the Sun line and the
-                # sightline, which the incident ray also crosses, so its
-                # label moves to the far side of the sightline.
-                label_dir = None
-                if float(solar_lon_deg) <= 60.0:
-                    turn = np.radians(-30.0)
-                    c, s = np.cos(turn), np.sin(turn)
-                    label_dir = np.array(
-                        [c * proj[0] - s * proj[1], s * proj[0] + c * proj[1]]
-                    )
                 self._set_angle(
-                    obs, sun_dir[:2], proj, float(solar_lon_deg), 1.8, label_dir
+                    obs,
+                    sun_dir[:2],
+                    proj,
+                    float(solar_lon_deg),
+                    placement=_top_label_placement(
+                        obs, proj, grain, self.look_radius, float(solar_lon_deg)
+                    ),
                 )
             else:
                 self.angle.clear()
@@ -319,19 +315,34 @@ class _ZodiPanel:
             k_in_2d, k_out_2d = scattering_plane(k_in3, -look, out_2d, in_2d)
             self.inset.set(k_in_2d, k_out_2d)
 
-    def _set_angle(self, vertex, v_from, v_to, value, label_scale, label_dir=None):
+    def _set_angle(
+        self, vertex, v_from, v_to, value, label_scale=1.9, *, placement=None
+    ):
         """Draw the look-angle arc and its label for an angle of ``value``.
 
         A caller's ``look_label_at`` pins the label at that polar position
-        about the vertex, aligned to grow away from it; otherwise the label
-        sits ``label_scale`` arc radii out along ``label_dir`` or the arc's
-        middle.
+        about the vertex, aligned to grow away from it. Otherwise the label
+        takes ``placement``, a ``(direction, distance, ha, va)`` about the
+        vertex, or sits centered ``label_scale`` arc radii out along the
+        arc's middle.
         """
         text = self.look_label.format(value=value)
+        if self.look_label_at is None and placement is None:
+            self.angle.set(vertex, v_from, v_to, self.look_radius, text, label_scale)
+            return
         if self.look_label_at is None:
+            direction, distance, ha, va = placement
             self.angle.set(
-                vertex, v_from, v_to, self.look_radius, text, label_scale, label_dir
+                vertex,
+                v_from,
+                v_to,
+                self.look_radius,
+                text,
+                label_dir=direction,
+                label_distance=distance,
             )
+            self.angle.text.set_ha(ha)
+            self.angle.text.set_va(va)
             return
         angle_deg, distance = self.look_label_at
         at = np.radians(float(angle_deg))
@@ -357,6 +368,47 @@ class _ZodiPanel:
             for key, values in self.inset.artists().items():
                 out[key] = out[key] + values
         return out
+
+
+def _top_label_placement(observer, proj, grain, radius, solar_lon_deg):
+    """Where the top view's longitude label goes, clear of the rays.
+
+    Everything the top view draws near the observer lies on the ``+y``
+    side of the Sun line: the sightline, the arc, and the grain's sunlight
+    ray, a chord from the Sun (on the arc's first side) to the grain (on
+    its second). The label therefore sits above that line and grows
+    upward. For a wide angle it sits in the wedge on the arc's middle,
+    beyond both the arc and the sunlight chord, growing toward the Sun side
+    and away from the sightline. A narrow wedge (``Delta lambda <= 60``)
+    has no room for it, so it sits beyond the sightline instead, 30 degrees
+    clockwise of it, growing away from it.
+
+    Args:
+        observer: The observer's position, the arc's vertex, shape ``(2,)``.
+        proj: The sightline's projected direction, shape ``(2,)``.
+        grain: The marked grain's projected position, shape ``(2,)``.
+        radius: The arc's radius.
+        solar_lon_deg: The longitude difference [deg].
+
+    Returns:
+        ``(direction, distance, ha, va)``: the label's direction and
+        distance from the vertex and its text alignment.
+    """
+    sun_side = np.array([-1.0, 0.0])
+    if solar_lon_deg <= 60.0:
+        turn = np.radians(-30.0)
+        c, s = np.cos(turn), np.sin(turn)
+        direction = np.array([c * proj[0] - s * proj[1], s * proj[0] + c * proj[1]])
+        return direction, 1.25 * radius, "left", "bottom"
+    direction = sun_side + proj / np.linalg.norm(proj)
+    direction = direction / np.linalg.norm(direction)
+    # Distance along ``direction`` from the vertex to the Sun-grain chord:
+    # observer + t * direction = u * grain for some u.
+    system = np.column_stack([direction, -grain])
+    distance = 0.0
+    if abs(np.linalg.det(system)) > 1e-12:
+        distance, _ = np.linalg.solve(system, -observer)
+    return direction, max(1.25 * radius, distance + 0.3 * radius), "right", "bottom"
 
 
 def _default_inset(view, ecliptic_lat_deg, solar_lon_deg):
@@ -460,7 +512,10 @@ def plot_local_zodi_geometry(
             position of the look-angle label about the arc's vertex (the
             observer), the angle counterclockwise from the panel's ``+x``.
             The label is aligned to grow away from the vertex, and stays
-            there under ``update``. None places it automatically.
+            there under ``update``. None places it automatically: in the
+            top view above the Sun line, clear of the sightline, the arc
+            and the marked grain's sunlight ray; in the side view centered
+            beyond the arc's middle.
         show: The parts to draw, for a figure that builds the view up
             part by part; None draws them all. Part names (each takes its
             own labels with it): ``"orbit"`` (the observer's orbit in the

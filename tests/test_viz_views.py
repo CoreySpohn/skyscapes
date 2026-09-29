@@ -1242,3 +1242,51 @@ def test_degree_signs_sit_tight_against_their_numbers(name):
     for text in angles:
         assert "^\\circ" not in text, text
         assert re.search(r"\d\$\\degree\$", text), text
+
+
+def _segment_enters(ax, start, end, box):
+    """Whether the data-space segment passes through a display-space box."""
+    points = np.linspace(np.asarray(start, float), np.asarray(end, float), 200)
+    x, y = ax.transData.transform(points).T
+    x0, y0, x1, y1 = box
+    return bool(np.any((x > x0) & (x < x1) & (y > y0) & (y < y1)))
+
+
+@pytest.mark.parametrize("font", ["Inter", "DejaVu Sans"])
+def test_zodi_top_look_label_clears_the_rays(font):
+    """The longitude label's box crosses no ray, line or arc of the top view.
+
+    Checked over looks from narrow to wide, in the house font and in DejaVu
+    Sans, the wider fallback used where the house font is not installed (as
+    on CI runners), with a few points of margin, the backing box a label
+    carries in a figure that boxes its text.
+    """
+    import hwostyle
+
+    with hwostyle.light():
+        plt.rcParams["font.family"] = [font]
+        fig, ax = plt.subplots(figsize=(5.5, 4.5), layout="constrained")
+        result = viz.plot_local_zodi_geometry(30.0, 135.0, ax=ax)
+        gids = by_gid(result)
+        label = gids["look_angle/label"]
+        pad = 3.0 * fig.dpi / 72.0
+        for beta in (-30.0, 0.0, 30.0):
+            for dlon in (20.0, 45.0, 60.0, 75.0, 90.0, 120.0, 135.0, 160.0, 180.0):
+                result.update(beta, dlon)
+                fig.canvas.draw()
+                bb = label.get_window_extent()
+                box = (bb.x0 - pad, bb.y0 - pad, bb.x1 + pad, bb.y1 + pad)
+                segments = {"sunlight": (gids["incident"].xyann, gids["incident"].xy)}
+                for name in ("sightline", "look_angle", "to_sun"):
+                    xy = gids[name].get_xydata()
+                    for k in range(len(xy) - 1):
+                        segments[f"{name}/{k}"] = (xy[k], xy[k + 1])
+                crossed = [
+                    name
+                    for name, (a, b) in segments.items()
+                    if _segment_enters(ax, a, b, box)
+                ]
+                assert not crossed, (beta, dlon, crossed)
+                frame = ax.get_window_extent()
+                assert frame.x0 <= bb.x0 and bb.x1 <= frame.x1, (beta, dlon)
+                assert frame.y0 <= bb.y0 and bb.y1 <= frame.y1, (beta, dlon)
