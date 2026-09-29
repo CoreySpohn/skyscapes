@@ -739,3 +739,30 @@ def test_every_view_accepts_zero_to_180_and_refuses_beyond():
             viz.plot_disk_image(
                 np.ones((8, 8)), pixel_scale_arcsec=0.1, incl_deg=incl, pa_deg=0.0
             )
+
+
+# --------------------------------------------------------------------------
+# Labels stay inside the figure
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("figsize", [(6.4, 4.8), (10.0, 4.5)])
+def test_zodi_side_view_axis_label_fits_the_figure(figsize):
+    """The side view's x label is not cut off at the figure edge.
+
+    The wide case puts the side view in the right half of a two-panel
+    figure, beside the top view, where the label used to run off the edge.
+    Both are drawn in the house style, whose type is wider than the
+    matplotlib default.
+    """
+    import hwostyle
+
+    with hwostyle.light():
+        fig, axes = plt.subplots(1, 2, figsize=figsize, layout="constrained")
+        viz.plot_local_zodi_geometry(30.0, 135.0, ax=axes[0])
+        viz.plot_local_zodi_geometry(30.0, 135.0, view="side", ax=axes[1])
+        fig.canvas.draw()
+    box = axes[1].xaxis.label.get_window_extent()
+    fig_box = fig.bbox
+    assert box.x0 >= fig_box.x0 and box.x1 <= fig_box.x1
+    assert box.y0 >= fig_box.y0
