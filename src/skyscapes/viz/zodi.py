@@ -15,10 +15,30 @@ from __future__ import annotations
 import numpy as np
 
 from skyscapes.viz import _geometry, _style
-from skyscapes.viz._draw import AngleArc, Arrow, GrainInset, halo, scattering_plane
+from skyscapes.viz._draw import (
+    AngleArc,
+    Arrow,
+    GrainInset,
+    halo,
+    hide,
+    resolve_show,
+    scattering_plane,
+)
 from skyscapes.viz._require import eyepiece
 
 _VIEWS = ("top", "side")
+PARTS = (
+    "orbit",
+    "sun",
+    "observer",
+    "sightline",
+    "grain",
+    "incident",
+    "scattered",
+    "look_angle",
+    "readout",
+    "inset",
+)
 
 
 def _check(ecliptic_lat_deg, solar_lon_deg):
@@ -34,12 +54,13 @@ def _check(ecliptic_lat_deg, solar_lon_deg):
 class _ZodiPanel:
     """The artists of a local-zodi geometry panel, placed for one look."""
 
-    def __init__(self, ax, view, R, ray_length, grain_distance, labels, inset):
+    def __init__(self, ax, view, R, ray_length, grain_distances, labels, inset):
         self.ax = ax
         self.view = view
         self.R = R
         self.ray_length = ray_length
-        self.grain_distance = grain_distance
+        self.grain_distances = grain_distances
+        n_grains = len(grain_distances)
         zodi = _style.local_zodi()
         star = _style.role("star")
         scenery = _style.neutral(0.45)
@@ -51,6 +72,7 @@ class _ZodiPanel:
             (orbit,) = ax.plot(R * np.cos(t), R * np.sin(t), color=scenery)
             orbit.set(lw=0.8, ls=":", gid="observer_orbit")
             self.lines.append(orbit)
+            self.orbit = orbit
             self.sun_xy = np.zeros(2)
             self.observer_xy = np.array([R, 0.0])
         else:
@@ -58,6 +80,7 @@ class _ZodiPanel:
             ecliptic.set_gid("ecliptic")
             self.lines.append(ecliptic)
             self.ecliptic = ecliptic
+            self.orbit = ecliptic
             self.observer_xy = np.zeros(2)
         (self.to_sun,) = ax.plot([], [], color=scenery, lw=0.8, ls="--")
         self.to_sun.set_gid("to_sun")
@@ -80,21 +103,33 @@ class _ZodiPanel:
         )
         self.observer.set_gid("observer")
         self.grain = ax.scatter(
-            [0.0], [0.0], s=40, color=zodi, zorder=6, edgecolors="none"
+            np.zeros(n_grains),
+            np.zeros(n_grains),
+            s=40,
+            color=zodi,
+            zorder=6,
+            edgecolors="none",
         )
         self.grain.set_gid("grain")
         self.scatters += [self.sun, self.observer, self.grain]
 
-        self.incident = None
-        self.scattered = None
+        # One incident and one scattered ray per grain; the first grain's
+        # keep the plain gids, the others add their index.
+        self.incident, self.scattered = [], []
         if view == "top":
-            self.incident = Arrow(ax, (0, 0), (0, 0), color=star, gid="incident")
-            self.scattered = Arrow(ax, (0, 0), (0, 0), color=zodi, gid="scattered")
+            for k in range(n_grains):
+                tag = "" if k == 0 else f"/{k}"
+                self.incident.append(
+                    Arrow(ax, (0, 0), (0, 0), color=star, gid="incident" + tag)
+                )
+                self.scattered.append(
+                    Arrow(ax, (0, 0), (0, 0), color=zodi, gid="scattered" + tag)
+                )
         self.angle = AngleArc(ax, color=_style.neutral(0.8), gid="look_angle")
         self.texts.append(self.angle.text)
         self.lines.append(self.angle.line)
-        if self.incident is not None:
-            self.texts += [self.incident.artist, self.scattered.artist]
+        for incident, scattered in zip(self.incident, self.scattered, strict=True):
+            self.texts += [incident.artist, scattered.artist]
         self.ray_label = None
         if labels:
             self.ray_label = halo(
@@ -115,7 +150,7 @@ class _ZodiPanel:
         )
         self.readout.set_gid("label/angles")
         self.texts.append(self.readout)
-        self.sun_label = None
+        self.sun_label = self.observer_label = None
         if labels:
             # Top view: below right, clear of the sightline (which leaves
             # toward +y). Side view: above left, clear of the latitude arc.
@@ -131,6 +166,7 @@ class _ZodiPanel:
             )
             observer_label.set_gid("label/observer")
             halo(observer_label)
+            self.observer_label = observer_label
             self.sun_label = ax.annotate(
                 "Sun" if view == "top" else "Sun, projected",
                 (0.0, 0.0),
@@ -147,33 +183,55 @@ class _ZodiPanel:
         if inset is not None:
             self.inset = GrainInset(ax, inset, grain_color=zodi)
 
+    def parts(self):
+        """The panel's artists grouped by ``show`` part name."""
+        return {
+            "orbit": [self.orbit],
+            "sun": [self.sun, self.sun_label, self.to_sun],
+            "observer": [self.observer, self.observer_label],
+            "sightline": [self.ray, self.ray_label],
+            "grain": [self.grain],
+            "incident": [a.artist for a in self.incident],
+            "scattered": [a.artist for a in self.scattered],
+            "look_angle": [self.angle.line, self.angle.text],
+            "readout": [self.readout],
+            "inset": [None if self.inset is None else self.inset.ax],
+        }
+
     def place(self, ecliptic_lat_deg, solar_lon_deg):
         """Put every look-dependent artist where the two angles put it."""
         R = self.R
         look = _geometry.zodi_sightline(ecliptic_lat_deg, solar_lon_deg)
         observer3 = np.array([R, 0.0, 0.0])
-        grain3 = observer3 + self.grain_distance * look
+        grains3 = observer3 + np.outer(self.grain_distances, look)
+        grain3 = grains3[0]
         sun_dir = np.array([-1.0, 0.0, 0.0])
         elongation = float(np.degrees(np.arccos(np.clip(look @ sun_dir, -1.0, 1.0))))
 
         if self.view == "top":
             proj = look[:2]
             obs = self.observer_xy
-            grain = grain3[:2]
             end = obs + self.ray_length * proj
             self.ray.set_data([obs[0], end[0]], [obs[1], end[1]])
             self.to_sun.set_data([obs[0], 0.0], [obs[1], 0.0])
-            self.grain.set_offsets([grain])
+            self.grain.set_offsets(grains3[:, :2])
+            for g3, incident, scattered in zip(
+                grains3, self.incident, self.scattered, strict=True
+            ):
+                grain = g3[:2]
+                k_in = grain / np.linalg.norm(grain)
+                incident.set(0.1 * R * k_in, grain - 0.04 * R * k_in)
+                back = obs - grain
+                back_len = np.linalg.norm(back)
+                if back_len > 0.0:
+                    scattered.set(
+                        grain, grain + 0.45 * min(back_len, R) * back / back_len
+                    )
+                else:  # looking at the pole: the scattered ray is out of the page
+                    scattered.set(grain, grain)
+            grain = grain3[:2]
             k_in = grain / np.linalg.norm(grain)
-            self.incident.set(0.1 * R * k_in, grain - 0.04 * R * k_in)
             back = obs - grain
-            back_len = np.linalg.norm(back)
-            if back_len > 0.0:
-                self.scattered.set(
-                    grain, grain + 0.45 * min(back_len, R) * back / back_len
-                )
-            else:  # looking at the pole: the scattered ray is out of the page
-                self.scattered.set(grain, grain)
             if np.linalg.norm(proj) > 1e-9:
                 # A narrow angle leaves no room between the Sun line and the
                 # sightline, which the incident ray also crosses, so its
@@ -211,8 +269,7 @@ class _ZodiPanel:
             self.to_sun.set_data([0.0, sun_along], [0.0, 0.0])
             reach = max(abs(sun_along), self.ray_length) * 1.1
             self.ecliptic.set_data([-reach, reach], [0.0, 0.0])
-            grain = self.grain_distance * direction
-            self.grain.set_offsets([grain])
+            self.grain.set_offsets(np.outer(self.grain_distances, direction))
             self.angle.set(
                 (0.0, 0.0),
                 np.array([1.0, 0.0]),
@@ -282,6 +339,7 @@ def plot_local_zodi_geometry(
     inset=True,
     inset_bounds=None,
     labels=True,
+    show=None,
     ax=None,
 ):
     """Draw the geometry behind a local zodiacal-light lookup.
@@ -320,7 +378,11 @@ def plot_local_zodi_geometry(
         view: ``"top"`` or ``"side"``.
         observer_distance_AU: Observer's distance from the Sun [AU].
         grain_distance_AU: Distance of the marked grain along the
-            sightline [AU]. None takes half the observer distance.
+            sightline [AU], or a sequence of distances for several grains
+            on it. Each grain gets its own incident and (top view)
+            scattered ray, lit from the Sun at its own distance; the first
+            is the marked grain whose angles the inset draws. None takes
+            half the observer distance.
         ray_length_AU: Drawn length of the sightline [AU]. None takes
             1.6 times the observer distance.
         inset: Whether to draw the grain inset, in the grain's scattering
@@ -332,6 +394,17 @@ def plot_local_zodi_geometry(
             and the side away from the projected Sun. The corner stays put
             under ``update``.
         labels: Whether to add direct text labels.
+        show: The parts to draw, for a figure that builds the view up
+            part by part; None draws them all. Part names (each takes its
+            own labels with it): ``"orbit"`` (the observer's orbit in the
+            top view, the ecliptic in the side view), ``"sun"`` (with the
+            observer-to-Sun line), ``"observer"``, ``"sightline"``,
+            ``"grain"``, ``"incident"`` and ``"scattered"`` (the rays, top
+            view only), ``"look_angle"`` (the arc and its label),
+            ``"readout"`` (the printed angles) and ``"inset"``. A part left
+            out is created hidden (``set_visible(False)``), still in the
+            result and still moved by ``update``, so the view keeps one set
+            of gids however it is shown.
         ax: Axes to draw into. None creates a new figure and axes.
 
     Returns:
@@ -340,7 +413,9 @@ def plot_local_zodi_geometry(
         annotations). The inset's artists are appended to the same lists
         but live on the inset, a child axes of ``result.ax`` whose gid is
         ``inset`` (``artist.axes`` reaches it); their gids start with
-        ``inset/``. Every artist carries a ``gid``.
+        ``inset/``. Every artist carries a ``gid``; with several grains,
+        ``grain`` holds them all in order, and the rays of grain ``k > 0``
+        are ``incident/k`` and ``scattered/k``.
         ``update(ecliptic_lat_deg, solar_lon_deg)`` moves the sightline,
         grain, rays, arcs and readout, leaving the observer, the
         observer's orbit and the fixed labels untouched, for a sweep over
@@ -348,7 +423,9 @@ def plot_local_zodi_geometry(
         difference to draw, and its arc is emptied.
 
     Raises:
-        ValueError: If ``view`` is unknown or an angle is out of range.
+        ValueError: If ``view`` is unknown, an angle is out of range, a
+            ``show`` part is unknown, or ``grain_distance_AU`` is an empty
+            or nested sequence.
     """
     ep = eyepiece()
     import matplotlib.pyplot as plt
@@ -356,8 +433,15 @@ def plot_local_zodi_geometry(
     if view not in _VIEWS:
         raise ValueError(f"view must be one of {_VIEWS}, got {view!r}")
     _check(ecliptic_lat_deg, solar_lon_deg)
+    shown = resolve_show(show, PARTS)
     R = float(observer_distance_AU)
     grain_distance = 0.5 * R if grain_distance_AU is None else grain_distance_AU
+    grain_distances = np.atleast_1d(np.asarray(grain_distance, dtype=float))
+    if grain_distances.ndim != 1 or grain_distances.size == 0:
+        raise ValueError(
+            "grain_distance_AU must be a number or a flat, nonempty sequence, "
+            f"got {grain_distance_AU!r}"
+        )
     ray_length = 1.6 * R if ray_length_AU is None else ray_length_AU
 
     if inset_bounds is None:
@@ -370,11 +454,12 @@ def plot_local_zodi_geometry(
         view,
         R,
         float(ray_length),
-        float(grain_distance),
+        tuple(float(d) for d in grain_distances),
         labels,
         inset_bounds if inset else None,
     )
     panel.place(float(ecliptic_lat_deg), float(solar_lon_deg))
+    hide(panel.parts(), shown)
 
     reach = R + ray_length
     if view == "top":

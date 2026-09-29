@@ -851,6 +851,175 @@ def test_scattering_angle_refuses_bad_directions(k_in, k_out):
 
 
 # --------------------------------------------------------------------------
+# show: drawing a subset of a geometry view
+# --------------------------------------------------------------------------
+
+# Each part and the gids it owns, written out here rather than read from
+# the views, so the tests pin the documented names.
+ZODI_TOP_PARTS = {
+    "orbit": ["observer_orbit"],
+    "sun": ["sun", "label/sun", "to_sun"],
+    "observer": ["observer", "label/observer"],
+    "sightline": ["sightline", "label/sightline"],
+    "grain": ["grain"],
+    "incident": ["incident"],
+    "scattered": ["scattered"],
+    "look_angle": ["look_angle", "look_angle/label"],
+    "readout": ["label/angles"],
+    "inset": [],
+}
+ZODI_SIDE_PARTS = {
+    **{k: v for k, v in ZODI_TOP_PARTS.items() if k not in ("incident", "scattered")},
+    "orbit": ["ecliptic"],
+    "incident": [],
+    "scattered": [],
+}
+DISK_PARTS = {
+    "star": ["star"],
+    "sky_plane": ["sky_plane", "label/sky_plane"],
+    "disk": ["disk/near", "disk/far", "label/near_side", "label/far_side"],
+    "layer": ["disk/layer_near", "disk/layer_far"],
+    "sightline": ["sightline"],
+    "grain": ["grain"],
+    "incident": ["incident"],
+    "scattered": ["scattered"],
+    "scattering_angle": ["forward", "scattering_angle", "scattering_angle/label"],
+    "inclination": ["inclination", "inclination/label"],
+    "observer": ["observer", "label/observer"],
+    "inset": [],
+}
+SHOW_VIEWS = {
+    "zodi_top": (
+        lambda show: viz.plot_local_zodi_geometry(30.0, 135.0, show=show),
+        ZODI_TOP_PARTS,
+    ),
+    "zodi_side": (
+        lambda show: viz.plot_local_zodi_geometry(30.0, 135.0, view="side", show=show),
+        ZODI_SIDE_PARTS,
+    ),
+    "disk": (
+        lambda show: viz.plot_disk_geometry(
+            make_system(60.0, 0.0), thickness_AU=0.5, show=show
+        ),
+        DISK_PARTS,
+    ),
+}
+
+
+def _visible(result):
+    """Visibility of every gid-carrying artist, plus the inset axes."""
+    out = {gid: a.get_visible() for gid, a in by_gid(result).items()}
+    for child in result.ax.child_axes:
+        out[child.get_gid()] = child.get_visible()
+    return out
+
+
+@pytest.mark.parametrize("name", sorted(SHOW_VIEWS))
+def test_show_none_draws_every_part(name):
+    """The default draws every artist, as before ``show`` existed."""
+    make, _ = SHOW_VIEWS[name]
+    assert all(_visible(make(None)).values())
+
+
+@pytest.mark.parametrize("name", sorted(SHOW_VIEWS))
+def test_show_leaves_out_exactly_the_named_part(name):
+    """Dropping one part hides its artists (and labels) and nothing else."""
+    make, parts = SHOW_VIEWS[name]
+    for part, gids in parts.items():
+        visible = _visible(make([p for p in parts if p != part]))
+        hidden = set(gids) | ({"inset"} if part == "inset" else set())
+        if part in ("sightline", "layer") and "sightline/path" in visible:
+            hidden.add("sightline/path")
+        for gid, shown in visible.items():
+            assert shown == (gid not in hidden), (part, gid)
+
+
+@pytest.mark.parametrize("name", sorted(SHOW_VIEWS))
+def test_show_draws_the_same_pixels_as_the_default_when_complete(name):
+    """Naming every part renders byte for byte what the default renders."""
+    import io
+
+    make, parts = SHOW_VIEWS[name]
+    renders = []
+    for show in (None, list(parts)):
+        result = make(show)
+        buf = io.BytesIO()
+        result.fig.savefig(buf, format="png")
+        renders.append(buf.getvalue())
+    assert renders[0] == renders[1]
+
+
+def test_show_hidden_parts_still_move_with_update():
+    """A hidden part keeps its gid and follows ``update``, ready to reveal."""
+    result = viz.plot_disk_geometry(make_system(60.0, 0.0), show=("star", "disk"))
+    before = state(by_gid(result)["grain"])
+    result.update(30.0)
+    grain = by_gid(result)["grain"]
+    assert not grain.get_visible()
+    assert not same(before, state(grain))
+
+
+def test_show_accepts_one_name_and_refuses_unknown_parts():
+    """A single part name is a one-part show; an unknown name is refused."""
+    visible = _visible(viz.plot_local_zodi_geometry(30.0, 135.0, show="grain"))
+    assert visible["grain"]
+    assert not visible["sightline"]
+    with pytest.raises(ValueError, match="look_arc"):
+        viz.plot_local_zodi_geometry(30.0, 135.0, show=("grain", "look_arc"))
+    with pytest.raises(ValueError, match="cloud"):
+        viz.plot_disk_geometry(make_system(), show=("cloud",))
+
+
+# --------------------------------------------------------------------------
+# Several grains on the local-zodi sightline
+# --------------------------------------------------------------------------
+
+
+def test_zodi_grains_each_lit_from_the_sun_at_their_own_distance():
+    """Every grain sits on the sightline and gets its own sunlight ray.
+
+    The first grain is the marked one: the inset prints its angles, the
+    in-ecliptic 135 degrees of a grain 1 AU out at a 90 degree look.
+    """
+    distances = [1.0, 0.5, 1.5]
+    result = viz.plot_local_zodi_geometry(0.0, 90.0, grain_distance_AU=distances)
+    gids = by_gid(result)
+    grains = gids["grain"].get_offsets()
+    observer = np.array([1.0, 0.0])
+    np.testing.assert_allclose(
+        grains, observer + np.outer(distances, [0.0, 1.0]), atol=1e-12
+    )
+    for k, grain in enumerate(grains):
+        tag = "" if k == 0 else f"/{k}"
+        assert angle_between(arrow_vector(gids["incident" + tag]), grain) == (
+            pytest.approx(0.0, abs=1e-4)
+        )
+        assert angle_between(
+            arrow_vector(gids["scattered" + tag]), observer - grain
+        ) == pytest.approx(0.0, abs=1e-4)
+    assert "135" in gids["inset/scattering_angle/value"].get_text()
+
+    before = state(gids["incident/2"])
+    result.update(20.0, 60.0)
+    assert not same(before, state(gids["incident/2"]))
+
+    side = by_gid(
+        viz.plot_local_zodi_geometry(
+            30.0, 90.0, view="side", grain_distance_AU=distances
+        )
+    )
+    radial = np.linalg.norm(side["grain"].get_offsets(), axis=1)
+    np.testing.assert_allclose(radial, distances, atol=1e-12)
+
+
+@pytest.mark.parametrize("bad", [[], [[1.0, 2.0]]])
+def test_zodi_refuses_empty_or_nested_grain_distances(bad):
+    """A grain distance is a number or a flat, nonempty sequence."""
+    with pytest.raises(ValueError, match="grain_distance_AU"):
+        viz.plot_local_zodi_geometry(30.0, 135.0, grain_distance_AU=bad)
+
+
+# --------------------------------------------------------------------------
 # Labels stay inside the figure
 # --------------------------------------------------------------------------
 

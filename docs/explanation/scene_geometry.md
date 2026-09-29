@@ -164,6 +164,28 @@ and sets the scattering angle beside the illumination angle, the
 quantity a planetary phase function takes; passing one where the other is
 expected exchanges forward and back scattering.
 
+## Drawing part of a view
+
+`plot_disk_geometry` and `plot_local_zodi_geometry` take `show=`, the
+parts to draw, so a figure can build a view up one idea at a time with a
+single constructor. The parts left out are created hidden and keep their
+gids, so a later figure that shows them draws them from the same numbers.
+
+```{code-cell} ipython3
+fig, axes = plt.subplots(1, 2, figsize=(10, 4.6), layout="constrained")
+viz.plot_disk_geometry(
+    system,
+    grain_radius_AU=3.0,
+    thickness_AU=0.6,
+    show=("star", "sky_plane", "disk", "layer", "inclination", "observer"),
+    ax=axes[0],
+)
+viz.plot_disk_geometry(system, grain_radius_AU=3.0, thickness_AU=0.6, ax=axes[1]);
+```
+
+The left panel is the tilted disk alone; the right adds the sightline, the
+grain, its rays and the inset. Each view's docstring lists its part names.
+
 ## Sweeping the inclination
 
 Each view returns an `update`. The geometry panel's `update(incl_deg)`

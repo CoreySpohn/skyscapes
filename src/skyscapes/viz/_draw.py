@@ -127,6 +127,41 @@ def unit(v):
     return v / np.linalg.norm(v)
 
 
+def resolve_show(show, parts):
+    """The set of parts to draw, from a view's ``show`` argument.
+
+    Args:
+        show: None (every part), one part name, or an iterable of names.
+        parts: Every part name the view knows, in documentation order.
+
+    Returns:
+        A ``frozenset`` of part names.
+
+    Raises:
+        ValueError: If a name is not one of ``parts``.
+    """
+    if show is None:
+        return frozenset(parts)
+    names = (show,) if isinstance(show, str) else tuple(show)
+    unknown = [n for n in names if n not in parts]
+    if unknown:
+        raise ValueError(f"unknown show part(s) {unknown}; choose from {parts}")
+    return frozenset(names)
+
+
+def hide(artists_by_part, shown):
+    """Hide every artist of a part that is not in ``shown``.
+
+    A hidden artist is still created and still moved by ``update``; a
+    caller can reveal it later with ``set_visible(True)``.
+    """
+    for part, artists in artists_by_part.items():
+        if part not in shown:
+            for artist in artists:
+                if artist is not None:
+                    artist.set_visible(False)
+
+
 def _anchor(direction):
     """Text alignment that puts a label beyond a point, along ``direction``."""
     dx, dy = direction

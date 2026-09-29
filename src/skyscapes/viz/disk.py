@@ -17,13 +17,27 @@ from hwoutils.conversions import au_to_arcsec
 
 from skyscapes.disk import AbstractDisk
 from skyscapes.viz import _geometry, _style
-from skyscapes.viz._draw import AngleArc, Arrow, GrainInset, halo
+from skyscapes.viz._draw import AngleArc, Arrow, GrainInset, halo, hide, resolve_show
 from skyscapes.viz._require import eyepiece
 
 _SKY_LABELS = ("RA offset [arcsec]", "Dec offset [arcsec]")
 # Below this sin(i) (about 6 degrees from face-on) no half of the disk is
 # meaningfully nearer the observer, and the near/far labels are left off.
 _MIN_SIN_FOR_NEAR = 0.1
+GEOMETRY_PARTS = (
+    "star",
+    "sky_plane",
+    "disk",
+    "layer",
+    "sightline",
+    "grain",
+    "incident",
+    "scattered",
+    "scattering_angle",
+    "inclination",
+    "observer",
+    "inset",
+)
 _SIDE_LABELS = (
     r"$z$, toward the observer [AU]",
     "offset along the projected minor axis [AU]",
@@ -309,6 +323,7 @@ class _GeometryPanel:
         self.texts = [self.observer.artist, self.incident.artist]
         self.texts += [self.scattered.artist, self.theta.text, self.incl_arc.text]
         self.near_label = self.far_label = None
+        self.observer_label = self.sky_label = None
         if labels:
             common = {"fontsize": "small", "ha": "center", "va": "center"}
             self.near_label = ax.text(0, 0, "near side", color=disk_color, **common)
@@ -336,11 +351,38 @@ class _GeometryPanel:
             )
             sky.set_gid("label/sky_plane")
             self.texts += [self.near_label, self.far_label, observer, sky]
+            self.observer_label, self.sky_label = observer, sky
             for text in self.texts[-4:]:
                 halo(text)
         self.inset = None
         if inset is not None:
             self.inset = GrainInset(ax, inset, grain_color=disk_color)
+
+    def parts(self, shown):
+        """The panel's artists grouped by ``show`` part name.
+
+        The sightline's chord through the layer belongs to both
+        ``sightline`` and ``layer``: it is drawn only when both are.
+        """
+        parts = {
+            "star": [self.star],
+            "sky_plane": [self.plane, self.sky_label],
+            "disk": [self.near, self.far, self.near_label, self.far_label],
+            "layer": list(self.layers),
+            "sightline": [self.sightline],
+            "grain": [self.grain],
+            "incident": [self.incident.artist],
+            "scattered": [self.scattered.artist],
+            "scattering_angle": [self.forward, self.theta.line, self.theta.text],
+            "inclination": [self.incl_arc.line, self.incl_arc.text],
+            "observer": [self.observer.artist, self.observer_label],
+            "inset": [None if self.inset is None else self.inset.ax],
+        }
+        for part in ("sightline", "layer"):
+            if part not in shown:
+                parts[part].append(self.path)
+                break
+        return parts
 
     def side(self, points):
         """Side-view ``(z, u)`` pairs of sky-frame points."""
@@ -458,6 +500,7 @@ def plot_disk_geometry(
     inset=True,
     inset_bounds=None,
     labels=True,
+    show=None,
     ax=None,
 ):
     """Draw a disk edge-on to the reader: midplane, observer and one sightline.
@@ -505,6 +548,20 @@ def plot_disk_geometry(
             the disk and the sightline leave empty: lower right for a
             near-side grain, upper left for a far-side one.
         labels: Whether to add direct text labels.
+        show: The parts to draw, for a figure that builds the view up
+            part by part; None draws them all. Part names (each takes its
+            own labels with it): ``"star"``, ``"sky_plane"``, ``"disk"``
+            (the midplane halves and their near and far labels),
+            ``"layer"`` (the schematic layer bands), ``"sightline"``,
+            ``"grain"``, ``"incident"``, ``"scattered"``,
+            ``"scattering_angle"`` (the forward continuation and the
+            arc), ``"inclination"`` (the arc), ``"observer"`` (the arrow
+            and its label) and ``"inset"``. The sightline's chord through
+            the layer is drawn only when both ``"sightline"`` and
+            ``"layer"`` are. A part left out is created hidden
+            (``set_visible(False)``), still in the result and still moved
+            by ``update``, so the view keeps one set of gids however it is
+            shown.
         ax: Axes to draw into. None creates a new figure and axes.
 
     Returns:
@@ -526,12 +583,13 @@ def plot_disk_geometry(
         untouched, for an inclination sweep.
 
     Raises:
-        ValueError: If no radii are available or the inclination is
-            outside ``[0, 180]``.
+        ValueError: If no radii are available, the inclination is
+            outside ``[0, 180]``, or a ``show`` part is unknown.
     """
     ep = eyepiece()
     import matplotlib.pyplot as plt
 
+    shown = resolve_show(show, GEOMETRY_PARTS)
     disk, incl, pa, _ = _resolve_disk(system_or_disk, incl_deg, pa_deg, 0.0)
     if incl is None:
         raise ValueError("incl_deg is required for a bare disk")
@@ -568,6 +626,7 @@ def plot_disk_geometry(
 
     _check_incl(incl)
     panel.place(float(incl))
+    hide(panel.parts(shown), shown)
     R = radii[1]
     ax.set_xlim(-1.2 * R, 1.45 * R)
     ax.set_ylim(-1.2 * R, 1.2 * R)
