@@ -68,8 +68,20 @@ class Planet(eqx.Module):
         return jnp.rad2deg(M)
 
     def propagate(self, trig_solver, t_jd: Array, *, star: AbstractStar):
-        """Delegate to ``orbit.propagate``; returns ``(r_AU, phase_rad, dist_AU)``."""
-        return self.orbit.propagate(trig_solver, t_jd, Ms_kg=star.Ms_kg)
+        """Propagate the orbit; returns ``(r_AU, phase_angle_rad, dist_AU)``.
+
+        ``phase_angle_rad`` is the standard star-planet-observer phase angle:
+        0 at full phase (superior conjunction, planet behind the star),
+        ``pi / 2`` at quadrature and ``pi`` at new phase (inferior
+        conjunction). orbix reports the angle between the position vector
+        and the ``+z`` observer axis, which is ``pi`` minus this; the
+        conversion happens here, once, so every physical model receives
+        the standard angle.
+        """
+        r_AU, beta_rad, dist_AU = self.orbit.propagate(
+            trig_solver, t_jd, Ms_kg=star.Ms_kg
+        )
+        return r_AU, jnp.pi - beta_rad, dist_AU
 
     def position_arcsec(
         self,

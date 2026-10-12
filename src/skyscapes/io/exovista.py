@@ -80,10 +80,11 @@ def _load_single_planet(
     did) double-applies the system inclination and PA and tilts every
     planetary system off its disk.
 
-    The contrast grid is indexed by phase angle beta = arccos(r_z / |r|),
-    computed at load time with the same ``trig_solver`` the runtime
-    ``System`` uses; this stays self-consistent with rendering because the
-    grid is keyed by the same ``orbit.propagate`` beta used at render time.
+    The contrast grid is indexed by the standard phase angle
+    arccos(-r_z / |r|) (0 = full phase), computed at load time with the same
+    ``trig_solver`` the runtime ``System`` uses; this stays self-consistent
+    with rendering because the grid is keyed by the same phase angle
+    ``Planet.propagate`` returns at render time.
     """
     obj_data = hdul[5 + idx].data
     obj_header = hdul[5 + idx].header
@@ -122,9 +123,10 @@ def _load_single_planet(
     )
 
     # beta(t_i) per FITS input time, using the same solver the runtime uses.
-    _r_AU, phase_angle_rad, _dist_AU = orbit.propagate(
-        trig_solver, times_jd, Ms_kg=star.Ms_kg
-    )
+    _r_AU, beta_rad, _dist_AU = orbit.propagate(trig_solver, times_jd, Ms_kg=star.Ms_kg)
+    # orbix measures from the +z observer axis; the standard phase angle
+    # (0 = full phase) is pi minus that, as in Planet.propagate.
+    phase_angle_rad = jnp.pi - beta_rad
     beta_deg = jnp.rad2deg(phase_angle_rad[0])  # (T,), already in [0, 180]
 
     # Sort by beta. Duplicates are fine for interpolation (axisymmetric

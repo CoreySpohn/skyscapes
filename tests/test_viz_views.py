@@ -4,7 +4,7 @@ The geometry checks are independent of the plotting code path: projected
 ring shapes are compared with the analytic ``|cos i|`` and with the
 second moments of the disk that the line-of-sight kernel renders, the
 near side with the kernel's forward-scattering asymmetry, and the observer
-side with orbix's phase angle (measured from the ``+z`` observer axis).
+side with the planet phase angle (0 = full phase, planet behind the star).
 """
 
 from __future__ import annotations
@@ -367,8 +367,8 @@ def test_near_side_is_where_the_kernel_scatters_forward(pa):
 def test_side_view_observer_is_orbix_plus_z():
     """The observer arrow points to +z, and a planet in front is drawn there.
 
-    orbix measures its phase angle from the +z observer axis, so a planet
-    with phase angle below 90 degrees lies between the star and observer.
+    A planet with phase angle above 90 degrees (crescent) lies between the
+    star and observer.
     """
     system = make_system()
     t = jnp.array([0.0, 200.0, 400.0])
@@ -380,7 +380,7 @@ def test_side_view_observer_is_orbix_plus_z():
         _, phase, _ = system.planets[0].propagate(
             SOLVER, jnp.array([t_now]), star=system.star
         )
-        in_front = np.cos(np.asarray(phase)[:, 0]) > 0.0
+        in_front = np.cos(np.asarray(phase)[:, 0]) < 0.0
         side = by_gid(viz.plot_system(system, float(t_now), view="side"))
         for k, name in enumerate(["b", "c"]):
             z = side[f"planet/{name}"].get_offsets()[0, 0]

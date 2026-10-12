@@ -70,8 +70,10 @@ def test_planet_alpha_dMag_matches_orbix():
     Ag = jnp.array([0.3])
     Rp_AU = jnp.array([1.0]) * Rearth2AU
 
-    _, beta, dist_AU = orbit.propagate(SOLVER, t_jd, Ms_kg=Ms_kg)
-    phase = lambert_phase_exact(jnp.cos(beta), jnp.sin(beta))
+    r_AU, _, dist_AU = orbit.propagate(SOLVER, t_jd, Ms_kg=Ms_kg)
+    # Independent phase angle: cos(alpha) = -z / r with +z toward the observer.
+    cos_a = -r_AU[:, 2, :] / dist_AU
+    phase = lambert_phase_exact(cos_a, jnp.sqrt(1.0 - cos_a**2))
     log_arg = Ag[:, None] * (Rp_AU[:, None] / dist_AU) ** 2 * phase
     dMag_ref = -2.5 * jnp.log10(log_arg + jnp.finfo(log_arg.dtype).tiny)
     alpha_ref = orbit.separation_arcsec(SOLVER, t_jd, Ms_kg=Ms_kg, dist_pc=dist_pc)
@@ -110,3 +112,70 @@ def test_planet_mean_anomaly_range():
     assert M.shape == (1, 3)
     assert jnp.all(M >= 0.0)
     assert jnp.all(M < 360.0)
+
+
+def _circular_planet(i_rad, M0_rad=0.0):
+    orbit = KeplerianOrbit(
+        a_AU=jnp.array([1.0]),
+        e=jnp.array([0.0]),
+        W_rad=jnp.array([0.0]),
+        i_rad=jnp.array([i_rad]),
+        w_rad=jnp.array([0.0]),
+        M0_rad=jnp.array([M0_rad]),
+        t0_d=jnp.array([0.0]),
+    )
+    return Planet(
+        Rp_Rearth=jnp.array([1.0]),
+        Mp_Mearth=jnp.array([1.0]),
+        orbit=orbit,
+        physical_model=LambertianPhysicalModel(Ag=jnp.array([0.3])),
+    )
+
+
+_STAR = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
+
+
+def _sample_orbit(planet, n=361):
+    """Positions, phase angle and dMag over one period (K=1)."""
+    t_jd = jnp.linspace(0.0, 365.25, n)
+    r_AU, alpha, _ = planet.propagate(SOLVER, t_jd, star=_STAR)
+    _, dMag = planet.alpha_dMag(SOLVER, t_jd, star=_STAR)
+    return r_AU[0], alpha[0], dMag[0]
+
+
+def test_phase_angle_is_arccos_minus_z_over_r():
+    """Phase angle is star-planet-observer: cos(alpha) = -z / r, +z to observer."""
+    p = _circular_planet(jnp.deg2rad(60.0), 0.7)
+    r, alpha, _ = _sample_orbit(p)
+    cos_ref = -r[2] / jnp.linalg.norm(r, axis=0)
+    assert jnp.allclose(jnp.cos(alpha), cos_ref, atol=1e-5)
+
+
+def test_edge_on_superior_conjunction_is_brightest():
+    """Full phase (planet behind the star, z < 0) is brightest, new phase faintest."""
+    p = _circular_planet(jnp.deg2rad(89.0))
+    r, alpha, dMag = _sample_orbit(p)
+    z = r[2]
+    sup, inf = jnp.argmin(z), jnp.argmax(z)
+    assert alpha[sup] < 0.05 and alpha[inf] > jnp.pi - 0.05
+    assert dMag[sup] == jnp.nanmin(dMag)
+    assert dMag[sup] < 23.5  # near-full Lambert phase at 1 AU, 10 pc, Ag 0.3
+    assert not (dMag[inf] <= dMag[sup])  # faintest (or NaN) at inferior conjunction
+    assert jnp.nanmax(dMag) > dMag[sup] + 1.0
+
+
+def test_quadrature_phase_angle_is_half_pi():
+    """With the planet on the sky plane (z = 0) the phase angle is pi / 2."""
+    p = _circular_planet(jnp.deg2rad(89.0))
+    r, alpha, dMag = _sample_orbit(p)
+    k = int(jnp.argmin(jnp.abs(r[2])))
+    assert abs(float(alpha[k]) - jnp.pi / 2) < 0.03
+    assert abs(float(dMag[k]) - 24.40) < 0.05
+
+
+def test_inclined_phase_angle_range():
+    """For i = 60 deg the phase angle spans [90 - i, 90 + i] = [30, 150] deg."""
+    p = _circular_planet(jnp.deg2rad(60.0))
+    _, alpha, _ = _sample_orbit(p, n=1461)
+    assert abs(float(jnp.rad2deg(alpha.min())) - 30.0) < 0.2
+    assert abs(float(jnp.rad2deg(alpha.max())) - 150.0) < 0.2

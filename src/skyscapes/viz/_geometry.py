@@ -5,8 +5,7 @@ than a second derivation of them:
 
 - The sky frame is ``(x, y, z)``: ``x`` the RA offset, ``y`` the Dec
   offset, ``+z`` from the star toward the observer. ``Planet`` positions
-  (through orbix, whose phase angle is measured from the ``+z`` observer
-  axis) and the parametric disk kernels both use it.
+  (through orbix) and the parametric disk kernels both use it.
 - The disk midplane is placed in the sky frame by
   ``skyscapes.io._frames.rotate_to_sky_coords``, the rotation the ExoVista
   loader applies. Its first two output rows are the images of the disk's

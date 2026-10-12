@@ -88,7 +88,7 @@ system = System(
 
 | Quantity | Convention |
 |---|---|
-| Sky frame | `(x, y, z)`, star-centered. `x` is the RA offset, `y` the Dec offset, and `+z` points from the star toward the observer. `Planet.position_arcsec` returns `(x, y)` in arcsec, and orbix measures its phase angle from the `+z` axis. |
+| Sky frame | `(x, y, z)`, star-centered. `x` is the RA offset, `y` the Dec offset, and `+z` points from the star toward the observer. `Planet.position_arcsec` returns `(x, y)` in arcsec, and `Planet.propagate` returns the standard phase angle, 0 at full phase (planet behind the star) and pi at new phase; orbix itself reports the angle from the `+z` axis, which is pi minus that. |
 | Sky images | Pixel `(row, col)` lies at `(y, x)`; the RA offset is drawn increasing to the left. |
 | Disk orientation | Set once, on the system, by `System.midplane_inc_deg` and `System.midplane_pa_deg`. Every disk component renders at that orientation; the planets' orbits carry their own elements and need not be coplanar with it. |
 | Inclination | The angle between the midplane normal and the line of sight, in `[0, 180]`, 0 for a face-on disk. The projected axis ratio is `abs(cos(i))`, and `i` at `pa` is the same midplane as `180 - i` at `pa + 180`. The parametric disks render the same nonnegative map for both; above 90 degrees the near, forward-scattering half lies on the opposite side of the line of nodes from its position at `180 - i` and the same `pa`. |
