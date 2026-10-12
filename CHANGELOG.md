@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/CoreySpohn/skyscapes/compare/v1.6.0...v1.6.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* **scene:** convert orbix's observer-axis angle to the standard phase angle ([65f7a01](https://github.com/CoreySpohn/skyscapes/commit/65f7a010426325f21975e089374a64597408440d))
+
 ## [1.6.0](https://github.com/CoreySpohn/skyscapes/compare/v1.5.0...v1.6.0) (2026-09-29)
 
 
