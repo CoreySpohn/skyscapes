@@ -146,11 +146,13 @@ $$F_\nu = \frac{F_\lambda^{\rm stored}}{0.91091}
 \left(\frac{R_\star}{d}\right)^2 \frac{\lambda^2}{c},$$
 
 using the header's `RSTAR` and `DIST`, with no factor of $\pi$ because
-PHOENIX tabulates flux rather than intensity. When the header carries
-`VMAG`, the converted spectrum near 550 nm must lie within a factor of
-three of that magnitude's flux, or the import fails rather than guess the
-units. Legacy-layout files are read as Jy, and an explicitly different
-`SPECUNIT` is rejected.
+PHOENIX tabulates flux rather than intensity. Both must be finite numbers,
+or the import fails. When the header carries a numeric `VMAG` and a
+channel lies within 60 nm of 550 nm, the converted spectrum there must lie
+within a factor of three of that magnitude's flux, or the import fails
+rather than guess the units. Without either, the spectrum is converted
+with a warning that it could not be checked. Legacy-layout files are read
+as Jy, and an explicitly different `SPECUNIT` is rejected.
 
 The `planet_spectra` argument determines the planet contrast model:
 

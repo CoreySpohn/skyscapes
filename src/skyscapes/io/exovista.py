@@ -9,6 +9,7 @@ the v2.5 and v2.6 writers store to observer flux density in Jy.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 from numbers import Integral
 from typing import Literal
@@ -51,9 +52,21 @@ EXOVISTA_LD_MASK_AREA = 0.9109100
 # Observer flux at the V band (Vega magnitude, read here on the AB scale) that
 # a converted spectrum must match to within this factor, which leaves room for
 # spot dimming, the model atmosphere and the Vega-AB offset but not for a unit
-# error.
+# error. The check uses the channel nearest 550 nm, and only when that channel
+# lies within the tolerance below; a grid that does not reach V is not checked.
 _V_BAND_UM = 0.55
+_V_BAND_TOLERANCE_UM = 0.06
 _V_BAND_FACTOR = 3.0
+
+
+def _finite_header_number(header, key):
+    """Return a numeric, finite header value, or None if it is not one."""
+    value = header.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not np.isfinite(value):
+        return None
+    return float(value)
 
 
 def _phoenix_surface_to_observer_jy(stored, wavelengths_um, header) -> np.ndarray:
@@ -75,17 +88,24 @@ def _phoenix_surface_to_observer_jy(stored, wavelengths_um, header) -> np.ndarra
         Observer flux density in Jy, the shape of ``stored``.
 
     Raises:
-        ValueError: ``RSTAR`` or ``DIST`` is missing, or the converted
-            spectrum disagrees with the header's ``VMAG`` by more than a
-            factor of three.
+        ValueError: ``RSTAR`` or ``DIST`` is missing or not a finite number,
+            or the converted spectrum disagrees with the header's ``VMAG`` by
+            more than a factor of three.
+
+    Warns:
+        RuntimeWarning: The conversion could not be checked against ``VMAG``,
+            because the header has no finite numeric ``VMAG`` or no channel
+            lies near 550 nm.
     """
-    if "RSTAR" not in header or "DIST" not in header:
+    rstar = _finite_header_number(header, "RSTAR")
+    dist = _finite_header_number(header, "DIST")
+    if rstar is None or dist is None:
         raise ValueError(
-            "Converting an unmarked ExoVista v2.5+ spectrum needs RSTAR and DIST."
+            "Converting an unmarked ExoVista v2.5+ spectrum needs finite numeric "
+            f"RSTAR and DIST; got RSTAR={header.get('RSTAR')!r}, "
+            f"DIST={header.get('DIST')!r}."
         )
-    dilution = float(
-        ((header["RSTAR"] * R_sun) / (header["DIST"] * u.pc)).decompose() ** 2
-    )
+    dilution = float(((rstar * R_sun) / (dist * u.pc)).decompose() ** 2)
     surface = np.asarray(stored, dtype=np.float64) / EXOVISTA_LD_MASK_AREA
     observer_jy = (
         (surface * dilution * u.erg / u.s / u.cm**2 / u.cm)
@@ -93,17 +113,28 @@ def _phoenix_surface_to_observer_jy(stored, wavelengths_um, header) -> np.ndarra
         .value
     )
 
-    vmag = header.get("VMAG")
-    if isinstance(vmag, (int, float)) and np.isfinite(vmag):
-        k = int(np.argmin(np.abs(np.asarray(wavelengths_um) - _V_BAND_UM)))
-        ratio = float(np.median(observer_jy[:, k])) / float(mag_to_flux_jy(vmag))
-        if not 1.0 / _V_BAND_FACTOR < ratio < _V_BAND_FACTOR:
-            raise ValueError(
-                "An unmarked ExoVista v2.5+ stellar spectrum, read as PHOENIX "
-                f"surface flux, is {ratio:.3g} times the flux of its VMAG; its "
-                "units are unknown. Mark the stellar extension with "
-                "SPECUNIT='Jy' if the spectrum is already observer flux density."
-            )
+    vmag = _finite_header_number(header, "VMAG")
+    offsets_um = np.abs(np.asarray(wavelengths_um, dtype=np.float64) - _V_BAND_UM)
+    k = int(np.argmin(offsets_um))
+    if vmag is None or offsets_um[k] > _V_BAND_TOLERANCE_UM:
+        warnings.warn(
+            "Converted an unmarked ExoVista v2.5+ stellar spectrum from PHOENIX "
+            "surface flux to observer Jy without checking it: the header has no "
+            "numeric VMAG or no channel lies near 550 nm. Mark the stellar "
+            "extension with SPECUNIT='Jy' if the spectrum is already observer "
+            "flux density.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        return observer_jy
+    ratio = float(np.median(observer_jy[:, k])) / float(mag_to_flux_jy(vmag))
+    if not 1.0 / _V_BAND_FACTOR < ratio < _V_BAND_FACTOR:
+        raise ValueError(
+            "An unmarked ExoVista v2.5+ stellar spectrum, read as PHOENIX "
+            f"surface flux, is {ratio:.3g} times the flux of its VMAG; its "
+            "units are unknown. Mark the stellar extension with "
+            "SPECUNIT='Jy' if the spectrum is already observer flux density."
+        )
     return observer_jy
 
 
