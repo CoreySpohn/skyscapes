@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/CoreySpohn/skyscapes/compare/v1.6.1...v2.0.0) (2026-10-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **io:** from_exovista raises ValueError unless jax_enable_x64 is set, and planet_spectra="auto" loads ExoVista 2.5+ scenes with time-indexed contrasts that return NaN outside the recorded epochs.
+
+### Features
+
+* **io:** time-series planet contrast, star spot records and ExoVista 2.5+ layouts ([946312a](https://github.com/CoreySpohn/skyscapes/commit/946312a8b06a8a0735fdd6f92511f7a1569f3e62))
+
 ## [1.6.1](https://github.com/CoreySpohn/skyscapes/compare/v1.6.0...v1.6.1) (2026-10-12)
 
 
