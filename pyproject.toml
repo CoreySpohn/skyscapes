@@ -57,6 +57,7 @@ test = [
     "nox",
     "pytest",
     "hypothesis",
+    "ineedvalidation",
     "pytest-cov",
     "orbix",
     "exoverses",

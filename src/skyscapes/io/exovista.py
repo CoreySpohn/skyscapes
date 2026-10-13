@@ -1,36 +1,94 @@
 """ExoVista FITS loader -- builds a ``skyscapes.scene.System`` directly.
 
-Mirrors the legacy ``skyscapes._legacy.loaders.from_exovista`` semantics
-for Star and Disk, but rebuilds each planet as a 1-planet
-``KeplerianOrbit`` + ``GridAtmosphere`` pair stored in the
-``System.planets`` tuple. No ghost padding -- variadic tuples make that
-unnecessary.
+Supports legacy and spotted-star layouts. Each planet has a Keplerian
+orbit and either a time-indexed contrast table or a phase-indexed model.
+New layouts preserve recorded activity-dependent spectra by default.
 """
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
+from numbers import Integral
+from typing import Literal
 
 import interpax
+import jax
 import jax.numpy as jnp
 import numpy as np
 from astropy.io import fits
 from hwoutils.constants import (
+    J2000_JD,
     AU2m,
     G_si,
     Mearth2kg,
     Msun2kg,
+    cm22m2,
+    d2s,
     mas2arcsec,
     um2nm,
+    yr2s,
 )
-from hwoutils.conversions import au_per_yr_to_m_per_s, decimal_year_to_jd
+from hwoutils.conversions import au_per_yr_to_m_per_s
 from orbix.equations.orbit import state_vector_to_keplerian
 from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.orbit import KeplerianOrbit
 
 from ..disk import ExovistaDisk
-from ..physical_model import GridPhysicalModel
-from ..scene import Planet, Star, System
+from ..physical_model import GridPhysicalModel, TimeSeriesPhysicalModel
+from ..scene import Planet, Star, StarSpots, System
+
+
+def _simulation_times_jd(elapsed_years) -> jnp.ndarray:
+    """Assign the arbitrary simulation origin to J2000, using Julian years."""
+    return J2000_JD + jnp.asarray(elapsed_years.astype(np.float64)) * (yr2s / d2s)
+
+
+def _star_extension(hdul: fits.HDUList) -> int:
+    """Locate the star by its header, including files with stale N_EXT cards."""
+    candidates = [
+        i
+        for i, hdu in enumerate(hdul)
+        if all(key in hdu.header for key in ("ANGDIAM", "MASS", "DIST"))
+    ]
+    if len(candidates) != 1 or candidates[0] not in (4, 5):
+        raise ValueError("Expected one ExoVista star in extension 4 or 5.")
+    return candidates[0]
+
+
+def _body_extensions(hdul: fits.HDUList, star_ext: int) -> list[int]:
+    """Identify planets after the stellar extension by their physical headers."""
+    return [
+        i
+        for i in range(star_ext + 1, len(hdul))
+        if all(key in hdul[i].header for key in ("A", "E", "M", "R"))
+    ]
+
+
+def _load_spots(hdul: fits.HDUList, star_ext: int, times_jd) -> StarSpots | None:
+    """Preserve the optional v2.5+ spot extension without inventing evolution."""
+    if star_ext == 4:
+        return None
+    data = hdul[4].data
+    if data is None:
+        data = np.empty((len(times_jd), 0, 4))
+    data = np.asarray(data, dtype=np.float64)
+    if data.ndim != 3 or data.shape[0] != len(times_jd) or data.shape[2] != 4:
+        raise ValueError("ExoVista spots must have shape (n_times, n_spots, 4).")
+    if not np.all(np.isfinite(data)) or np.any(data[..., 2] < 0):
+        raise ValueError("ExoVista spot records must be finite with nonnegative areas.")
+    if np.any(data[..., 3] < 1):
+        raise ValueError("ExoVista total-spot/umbra area ratios must be at least one.")
+    header = {key.upper(): value for key, value in hdul[star_ext].header.items()}
+    return StarSpots(
+        times_jd=times_jd,
+        latitude_deg=jnp.asarray(data[..., 0]),
+        longitude_deg=jnp.asarray(data[..., 1]),
+        area_m2=jnp.asarray(data[..., 2] * cm22m2),
+        area_ratio=jnp.asarray(data[..., 3]),
+        umbra_temperature_k=header.get("TEFFUMBRA"),
+        penumbra_temperature_k=header.get("TEFFPENUMBRA"),
+    )
 
 
 def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
@@ -39,9 +97,20 @@ def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
     obj_header = hdul[fits_ext].header
     wavelengths_um = hdul[0].data
 
+    spectral_unit = obj_header.get("SPECUNIT")
+    if spectral_unit is not None and spectral_unit.strip().lower() != "jy":
+        raise ValueError("ExoVista stellar SPECUNIT must be Jy.")
+    if fits_ext == 5 and spectral_unit is None:
+        warnings.warn(
+            "This spotted-star ExoVista file has no SPECUNIT='Jy' marker. "
+            "Uncorrected v2.5/v2.6 PHOENIX writers stored surface flux instead "
+            "of observer Jy; regenerate those scenes with the corrected writer.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
     wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
-    times_year = jnp.asarray(2000.0 + obj_data[:, 0])
-    times_jd = decimal_year_to_jd(times_year)
+    times_jd = _simulation_times_jd(obj_data[:, 0])
     flux_density_jy = jnp.asarray(obj_data[:, 16:].T.astype(np.float32))
 
     diameter_arcsec = obj_header["ANGDIAM"] * mas2arcsec
@@ -61,15 +130,24 @@ def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
         wavelengths_nm=wavelengths_nm,
         times_jd=times_jd,
         flux_density_jy=flux_density_jy,
+        interpolation_method="linear",
+        spots=_load_spots(hdul, fits_ext, times_jd),
+        metadata={
+            key.upper(): value
+            for key, value in obj_header.items()
+            if key and key not in ("COMMENT", "HISTORY")
+        },
     )
 
 
 def _load_single_planet(
     hdul: fits.HDUList,
-    idx: int,
+    fits_ext: int,
     star: Star,
     wavelengths_nm: jnp.ndarray,
     trig_solver,
+    *,
+    planet_spectra: Literal["time", "phase"],
 ) -> tuple[Planet, float]:
     """Load one planet and return ``(Planet, t0_d)``.
 
@@ -80,17 +158,18 @@ def _load_single_planet(
     did) double-applies the system inclination and PA and tilts every
     planetary system off its disk.
 
-    The contrast grid is indexed by the standard phase angle
-    arccos(-r_z / |r|) (0 = full phase), computed at load time with the same
-    ``trig_solver`` the runtime ``System`` uses; this stays self-consistent
-    with rendering because the grid is keyed by the same phase angle
-    ``Planet.propagate`` returns at render time.
+    With ``planet_spectra="time"`` the contrasts stay indexed by the FITS
+    epochs, which preserves the stellar-activity history. With
+    ``planet_spectra="phase"`` they are regridded onto the standard phase
+    angle arccos(-r_z / |r|) (0 = full phase), computed at load time with the
+    same ``trig_solver`` the runtime ``System`` uses; this stays
+    self-consistent with rendering because the grid is keyed by the same
+    phase angle ``Planet.propagate`` returns at render time.
     """
-    obj_data = hdul[5 + idx].data
-    obj_header = hdul[5 + idx].header
+    obj_data = hdul[fits_ext].data
+    obj_header = hdul[fits_ext].header
 
-    times_year = jnp.asarray(2000.0 + obj_data[:, 0])
-    times_jd = decimal_year_to_jd(times_year)
+    times_jd = _simulation_times_jd(obj_data[:, 0])
     t0 = float(times_jd[0])
 
     contrast_data = jnp.asarray(obj_data[:, 16:].T.astype(np.float32))
@@ -121,6 +200,19 @@ def _load_single_planet(
         M0_rad=jnp.array([float(M_rad)]),
         t0_d=jnp.array([t0]),
     )
+
+    if planet_spectra == "time":
+        physical_model = TimeSeriesPhysicalModel(
+            wavelengths_nm=wavelengths_nm,
+            times_jd=times_jd,
+            contrast_grid=contrast_data[None, ...],
+        )
+        return Planet(
+            Rp_Rearth=jnp.array([float(obj_header["R"])]),
+            Mp_Mearth=jnp.array([float(obj_header["M"])]),
+            orbit=orbit,
+            physical_model=physical_model,
+        ), t0
 
     # beta(t_i) per FITS input time, using the same solver the runtime uses.
     _r_AU, beta_rad, _dist_AU = orbit.propagate(trig_solver, times_jd, Ms_kg=star.Ms_kg)
@@ -197,13 +289,13 @@ def _load_disk(hdul: fits.HDUList, fits_ext: int) -> ExovistaDisk:
 
 def _earth_like_planet_indices_from_hdul(hdul: fits.HDUList) -> list[int]:
     """Earth-filter logic operating on an already-open HDUList."""
-    n_ext = hdul[0].header["N_EXT"]
-    n_planets_total = n_ext - 4
-    star_luminosity_lsun = hdul[4].header.get("LSTAR", 1.0)
+    star_ext = _star_extension(hdul)
+    planet_extensions = _body_extensions(hdul, star_ext)
+    star_luminosity_lsun = hdul[star_ext].header.get("LSTAR", 1.0)
 
     earth_indices: list[int] = []
-    for i in range(n_planets_total):
-        planet_header = hdul[5 + i].header
+    for i, ext in enumerate(planet_extensions):
+        planet_header = hdul[ext].header
         a_au = planet_header.get("A", 1.0)
         radius_rearth = planet_header.get("R", 1.0)
         a_scaled = a_au / np.sqrt(star_luminosity_lsun)
@@ -229,15 +321,16 @@ def from_exovista(
     planet_indices: Sequence[int] | None = None,
     only_earths: bool = False,
     load_disk: bool = True,
+    *,
+    planet_spectra: Literal["auto", "time", "phase"] = "auto",
 ) -> System:
     """Load an ExoVista FITS file into a ``scene.System``.
 
-    The system's midplane inclination and position angle (FITS star
-    header keys ``I`` and ``PA``) are applied at load time as a frame
-    rotation of each planet's state vector before its Keplerian
-    elements are computed. The same angles are stored as
-    ``System.midplane_inc_deg`` and ``System.midplane_pa_deg`` for
-    downstream diagnostic use.
+    State vectors are already in the on-sky frame. Midplane inclination
+    and position angle are retained for diagnostics without rotating the
+    states again. Elapsed simulation years become Julian Dates relative
+    to J2000, with exactly 365.25 days per year. Enable ``jax_enable_x64``
+    before loading to preserve this time coordinate.
 
     Args:
         fits_file: Path to ExoVista FITS file.
@@ -247,32 +340,64 @@ def from_exovista(
             ``System.disk`` to ``None``. Useful when the downstream
             pipeline cannot render a disk (e.g. a coronagraph without a
             PSF datacube).
+        planet_spectra: ``auto`` preserves time-dependent contrasts in
+            v2.5+ scenes and the existing phase model for older scenes.
+            ``time`` preserves the recorded spectra at their epochs, with
+            no extrapolation beyond a multi-epoch baseline. A single epoch
+            is a constant snapshot. ``phase`` explicitly assumes contrast
+            is a function of phase alone, discarding activity history.
 
     Returns:
         ``scene.System`` with star, planets (tuple), disk, and midplane metadata.
+
+    Raises:
+        ValueError: JAX float64 is disabled, the FITS layout or spot records
+            are invalid, or a planet selection or spectra mode is invalid.
     """
+    if not jax.config.x64_enabled:
+        raise ValueError(
+            "ExoVista import requires jax_enable_x64 for Julian Date precision. "
+            'Set jax.config.update("jax_enable_x64", True) before loading.'
+        )
     disk_ext = 2
 
     with fits.open(fits_file, memmap=False) as hdul:
-        n_ext = hdul[0].header["N_EXT"]
-        n_planets_total = n_ext - 4
+        star_ext = _star_extension(hdul)
+        planet_extensions = _body_extensions(hdul, star_ext)
+        n_planets_total = len(planet_extensions)
+        if planet_spectra not in ("auto", "time", "phase"):
+            raise ValueError("planet_spectra must be auto, time, or phase.")
+        if planet_spectra == "auto":
+            planet_spectra = "time" if star_ext == 5 else "phase"
 
         if planet_indices is None:
             if only_earths:
                 planet_indices = _earth_like_planet_indices_from_hdul(hdul)
             else:
                 planet_indices = list(range(n_planets_total))
+        if any(
+            not isinstance(i, Integral) or not 0 <= i < n_planets_total
+            for i in planet_indices
+        ):
+            raise ValueError("planet_indices must address existing planets (0-based).")
 
         wavelengths_um = hdul[0].data
         wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
-        star_header = hdul[4].header
+        star_header = hdul[star_ext].header
         midplane_inc_deg = float(star_header.get("I", 0.0))
         midplane_pa_deg = float(star_header.get("PA", 0.0))
 
-        star = _load_star(hdul, fits_ext=4)
+        star = _load_star(hdul, fits_ext=star_ext)
         solver = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
         planets = tuple(
-            _load_single_planet(hdul, i, star, wavelengths_nm, solver)[0]
+            _load_single_planet(
+                hdul,
+                planet_extensions[i],
+                star,
+                wavelengths_nm,
+                solver,
+                planet_spectra=planet_spectra,
+            )[0]
             for i in planet_indices
         )
         disk = _load_disk(hdul, disk_ext) if load_disk else None

@@ -2,7 +2,8 @@
 
 `skyscapes.physical_model` provides the **planet-to-star contrast**
 model attached to every `Planet`. A physical model returns, given a
-phase angle, star-planet distance, wavelength, and planet radius, the
+phase angle, star-planet distance, wavelength, planet radius, and when
+needed the physical observation time, the
 dimensionless contrast $f_p / f_*$ that scales the host star's
 spectrum into the planet's emitted flux. The submodule covers
 atmospheric reflection, surface reflection, thermal emission, and
@@ -15,24 +16,29 @@ flowchart TB
     APM[AbstractPhysicalModel]
     LPM[LambertianPhysicalModel]
     GPM[GridPhysicalModel]
+    TPM[TimeSeriesPhysicalModel]
     EXO[ExoJaxPhysicalModel]
     PPM[PrecomputedPhysicalModel]
 
     APM --> LPM
     APM --> GPM
+    APM --> TPM
     APM --> EXO
     APM --> PPM
 ```
 
-All concrete classes implement a common `contrast` method that
-returns the per-planet flux-ratio contrast at the given phase angle,
-distance, wavelength, and planet radius (shape `(K, T)` for `K`
-planets and `T` time steps). The differences are in physics fidelity
-and computational cost.
+`Planet.contrast` and `Planet.alpha_dMag` call
+`physical_model.contrast_at_time(phase_angle_rad, dist_AU,
+wavelength_nm, Rp_Rearth, time_jd=...)`. This returns per-planet
+flux-ratio contrast, shape `(K, T)` for `K` planets and `T` epochs.
+The default `AbstractPhysicalModel.contrast_at_time` ignores the time
+argument and forwards the other arguments to `contrast`, so existing
+phase-dependent models retain their behavior. Time-dependent models
+override the hook to use the physical epochs directly.
 
 Each physical model carries per-planet state as JAX arrays of length
-`K`. Planet radius and mass are passed in at call time from the host
-`Planet`; the model does not store them. Heterogeneous planets
+`K`. Planet radius is passed in at call time from the host `Planet`;
+the model does not store it. Heterogeneous planets
 (different physical-model classes) compose into a `System.planets`
 tuple, with one `Planet` per physical-model type.
 
@@ -57,7 +63,9 @@ closed-form sanity checks. Most-used variant in early-stage work.
 
 Wraps an externally computed contrast cube as a 2-D `interpax` spline
 over `(wavelength, phase_angle)` per planet. Differentiable through
-the interpolation. This is the model `from_exovista` populates.
+the interpolation. `from_exovista` uses this model for legacy files
+under `planet_spectra="auto"`, or for any supported layout when
+`planet_spectra="phase"` is explicitly selected.
 
 ```python
 import jax.numpy as jnp
@@ -71,9 +79,65 @@ model = GridPhysicalModel(
 ```
 
 **Use for**: tabulated atmospheres from grid-based RT codes;
-ExoVista-loaded systems; comparison studies; when you have a
+phase-only ExoVista approximations; comparison studies; when you have a
 `(wl, phase) -> contrast` LUT and want it integrated with the rest of
 the pipeline.
+
+### `TimeSeriesPhysicalModel`
+
+Preserves an externally computed contrast history on a
+`(wavelength, Julian Date)` grid for each planet. Linear interpolation
+uses the recorded physical times, including unevenly spaced epochs.
+Two epochs with the same orbital phase can retain different contrasts.
+Phase angle, distance, and radius are accepted for interface
+compatibility but are ignored: their effects are already encoded in
+the tabulated planet-to-star flux ratios.
+
+```python
+import jax
+
+jax.config.update("jax_enable_x64", True)
+
+import jax.numpy as jnp
+from skyscapes.physical_model import TimeSeriesPhysicalModel
+
+model = TimeSeriesPhysicalModel(
+    wavelengths_nm=jnp.array([500.0, 600.0]),
+    times_jd=jnp.array([2451545.0, 2451546.0]),
+    contrast_grid=jnp.array([[[1e-10, 2e-10], [3e-10, 4e-10]]]),
+    # contrast_grid shape: (K=1, W=2, T=2)
+)
+contrast = model.contrast_at_time(
+    phase_angle_rad=jnp.array([[0.4, 0.4]]),
+    dist_AU=jnp.ones((1, 2)),
+    wavelength_nm=550.0,
+    Rp_Rearth=jnp.ones(1),
+    time_jd=jnp.array([2451545.0, 2451546.0]),
+)
+# contrast: [[2e-10, 3e-10]], despite the identical phase angles
+```
+
+Both grids must be finite, nonempty, and strictly increasing. The
+contrast cube must have shape `(K, W, T)` and contain finite,
+nonnegative values. Linear interpolation preserves nonnegativity
+within the table. Float32 contrast storage is retained; query
+arithmetic promotes the inputs to a common dtype. Use float64 Julian
+Dates to retain subday resolution.
+
+With multiple epochs, queries outside the recorded time range return
+NaN. A single epoch represents a static snapshot and is valid at any
+finite time. Wavelength support is always bounded; a single
+wavelength is valid only at that wavelength. Calling `contrast`
+without time raises `ValueError` and directs the caller to
+`contrast_at_time`.
+
+**Use for**: recorded variability or other contrast histories that are
+not single-valued functions of orbital phase. `from_exovista` selects
+this model automatically for the newer FITS layout with a starspot
+extension, including v2.6, and supports `planet_spectra="time"` for
+older files. This retains the supplied history without inventing
+evolution beyond its time range. The `"phase"` option remains an
+explicit phase-only approximation.
 
 ### `ExoJaxPhysicalModel`
 
@@ -198,21 +262,23 @@ all subsequent calls.
 
 ## Wavelength dependence
 
-`contrast` accepts a scalar `wavelength_nm` or a 1-D array of
-wavelengths. For an IFS-style spectral cube, pass the wavelength axis
-directly:
+Use a scalar wavelength per call for the common `(K, T)` interface.
+For an IFS-style spectral cube, map over wavelengths to obtain shape
+`(W, K, T)`. The time-aware hook works with both phase-dependent and
+time-series models:
 
 ```python
 import jax
 import jax.numpy as jnp
 
-wavelengths = jnp.linspace(400, 1000, 100)
+wavelengths = jnp.linspace(500, 600, 100)
+times_jd = jnp.array([2451545.0])
 phase = jnp.array([[jnp.pi / 3]])    # (K=1, T=1)
 dist  = jnp.array([[1.0]])           # (K=1, T=1)
 Rp    = jnp.array([1.0])             # (K=1,)
 
 contrast_spectrum = jax.vmap(
-    lambda wl: model.contrast(phase, dist, wl, Rp),
+    lambda wl: model.contrast_at_time(phase, dist, wl, Rp, time_jd=times_jd),
 )(wavelengths)
 ```
 

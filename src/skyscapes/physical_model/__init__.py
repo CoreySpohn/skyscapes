@@ -7,6 +7,7 @@ from .cached import PrecomputedPhysicalModel
 from .exojax import ExoJaxPhysicalModel
 from .grid import GridPhysicalModel
 from .lambertian import LambertianPhysicalModel
+from .time_series import TimeSeriesPhysicalModel
 
 __all__ = [
     "AbstractPhysicalModel",
@@ -14,4 +15,5 @@ __all__ = [
     "GridPhysicalModel",
     "LambertianPhysicalModel",
     "PrecomputedPhysicalModel",
+    "TimeSeriesPhysicalModel",
 ]

@@ -70,14 +70,16 @@ A `Scene` composes a `System` (star + planets + optional disk) with an
 optional `Zodi` background:
 
 - **Stars** — `Star` (wavelength- and time-dependent spectrum, ExoVista-
-  backed) and `FlatStar` (constant-flux sandbox).
+  backed) and `FlatStar` (constant-flux sandbox). Imported stars retain
+  FITS metadata and optional `StarSpots` geometry and temperatures.
 - **Planets** — `Planet` owns intrinsic params (`Rp_Rearth`,
   `Mp_Mearth`) and composes an `AbstractOrbit` (from orbix) with an
   `AbstractPhysicalModel`.
 - **Physical models** — `LambertianPhysicalModel`,
-  `GridPhysicalModel` (interpolated contrast cubes, used by ExoVista
-  loader), `PrecomputedPhysicalModel` (cached reflectivity for hot
-  loops), and `ExoJaxPhysicalModel` (full 2-stream RT via ExoJAX).
+  `GridPhysicalModel` (wavelength/phase contrast tables),
+  `TimeSeriesPhysicalModel` (wavelength/Julian-Date contrast tables),
+  `PrecomputedPhysicalModel` (cached reflectivity for hot loops), and
+  `ExoJaxPhysicalModel` (full 2-stream RT via ExoJAX).
 - **Disks** — `ExovistaDisk`, `ExovistaParametricDisk`, `GraterDisk`,
   `CompositeDisk`.
 - **Backgrounds** — `AYOZodi` (AYO-convention defaults), `LeinertZodi`
@@ -92,10 +94,42 @@ Every leaf is an `eqx.Module` PyTree, so JAX transforms (`jit`, `vmap`,
 The easiest path is loading an ExoVista FITS file:
 
 ```python
-from skyscapes import from_exovista
+import jax
 
-scene = from_exovista("path/to/exovista_system.fits")
+jax.config.update("jax_enable_x64", True)
+
+from skyscapes import Scene, from_exovista
+
+system = from_exovista("path/to/exovista_system.fits", planet_spectra="auto")
+scene = Scene(system=system)
 ```
+
+The importer requires JAX x64 to preserve orbital states and epoch
+precision. ExoVista's elapsed years map to Julian Dates as
+`2451545.0 + 365.25 * elapsed_years`. The importer assigns simulation
+time zero to J2000.0; this origin is not a measured observation date.
+
+`from_exovista` identifies the stellar and planetary extensions from
+their FITS headers, supporting both the legacy layout and the newer
+layout with a starspot extension. `planet_spectra="auto"` keeps the
+legacy phase-based model for older files and uses physical-time
+contrast tables for newer files. Select `"time"` explicitly to retain
+the sampled history in an older file, or `"phase"` to request a
+phase-only approximation that discards activity history.
+
+Imported stellar spectra use linear interpolation to preserve
+nonnegative tabulated flux (`Star(interpolation_method="linear")`).
+Multi-epoch stellar and time-series planet models return NaN outside
+their recorded time range; a single epoch is
+a static snapshot. Spectral queries remain bounded by the supplied
+wavelength grid. Directly constructed `Star` objects retain cubic
+interpolation by default.
+
+`Star.spots` and `Star.metadata` preserve source records. Loading spot
+geometry does not yet provide resolved stellar-surface propagation or
+asymmetric stellar leakage through a coronagraph. Planet methods call
+`contrast_at_time(..., time_jd=...)`; existing physical models inherit
+a default hook that delegates to their phase-dependent `contrast`.
 
 Building one from scratch:
 

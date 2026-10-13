@@ -50,10 +50,14 @@ Two concrete `AbstractStar` implementations:
 
 | Class | When to use |
 |---|---|
-| `Star` | Canonical case: time- and wavelength-dependent stellar flux backed by an `interpax` 2-D spline. ExoVista-loaded systems use this. |
+| `Star` | Tabulated stellar spectral flux, interpolated over wavelength and time with `interpax`. A single epoch is a static spectrum. ExoVista-loaded systems use this. |
 | `FlatStar` | Simplification: constant flux independent of wavelength or time. Sandbox / testing / closed-form sanity checks. |
 
 ```python
+import jax
+
+jax.config.update("jax_enable_x64", True)
+
 from skyscapes.scene import Star, FlatStar
 import jax.numpy as jnp
 
@@ -82,6 +86,73 @@ print(flat.spec_flux_density(wavelength_nm=550.0, time_jd=2_460_365.0))
 ExoVista-style time- and wavelength-dependent flux tables. `FlatStar`
 is the sandbox stand-in when you only need a single constant flux
 value.
+
+`flux_density_jy` is the observer's disk-integrated spectral flux
+density, shape `(n_wl, n_time)`. `spec_flux_density` returns
+photons/s/m^2/nm. Direct construction uses cubic interpolation by
+default; stars imported with `from_exovista` use linear interpolation
+(`interpolation_method="linear"`) to avoid overshooting nonnegative
+samples. Multi-epoch tables return NaN outside their time range.
+A single-epoch table is static at any
+time, while the wavelength range remains bounded.
+
+### Imported starspots and metadata
+
+`Star.spots` is either `None` or a `StarSpots` object imported from the
+optional ExoVista spot extension. It stores `times_jd` and geometry
+arrays with shape `(n_times, n_spots)`:
+
+| Field | Meaning |
+|---|---|
+| `latitude_deg`, `longitude_deg` | Recorded positions in the source's stellar coordinate convention |
+| `area_m2` | Total spot area, including the umbra, converted from the FITS area units |
+| `area_ratio` | Total spot area divided by umbra area |
+| `umbra_temperature_k`, `penumbra_temperature_k` | Component temperatures from the stellar header, or `None` when absent |
+
+`Star.metadata` retains the stellar FITS header values under uppercase
+keys, excluding blank, `COMMENT`, and `HISTORY` cards. These records
+preserve the source information; they do not supply spot evolution or
+an evaluator for spatially resolved stellar intensity. A downstream
+diameter-only coronagraph response does not acquire asymmetric
+starspot leakage merely by loading `Star.spots`. That calculation
+requires a surface-brightness model and an optical response evaluated
+across the stellar disk.
+
+### ExoVista layouts and time conventions
+
+Enable `jax_enable_x64` before calling `from_exovista`; the importer
+requires it to preserve epoch and orbital-state precision and raises
+`ValueError` when x64 is disabled. ExoVista stores elapsed simulation
+years. The importer assigns simulation time zero to J2000.0 and
+converts Julian years using
+`time_jd = 2451545.0 + 365.25 * elapsed_years`. This assigned origin is
+not a measured observation date, and the year values are not calendar
+decimal years.
+
+The importer locates the star and planets using their FITS headers.
+It supports the legacy stellar extension and the newer layout with a
+spot extension before the star, including ExoVista v2.6, without
+relying on an extension-count header alone.
+
+The local corrected ExoVista writer labels its stellar spectral columns
+with `SPECUNIT='Jy'`. Uncorrected v2.5/v2.6 PHOENIX output can contain
+surface flux where observer Jy is required; those scenes need to be
+regenerated. The importer warns when a newer-layout file lacks this
+marker and rejects an explicitly incompatible spectral unit. It does
+not infer or repair the calibration from the version number.
+
+The `planet_spectra` argument determines the planet contrast model:
+
+| Mode | Behavior |
+|---|---|
+| `"auto"` (default) | Legacy layout uses `GridPhysicalModel`; newer layout uses `TimeSeriesPhysicalModel`. |
+| `"time"` | Retains contrast at recorded physical epochs in either layout. |
+| `"phase"` | Converts the record to a phase-only `GridPhysicalModel`, discarding time-dependent activity history. |
+
+The time-series model returns NaN outside a multi-epoch record and
+treats a single epoch as a constant snapshot. Its spectral queries
+remain bounded by the wavelength grid. See
+[physical models](physical_models) for the time-aware contrast API.
 
 ## Planets
 
@@ -238,7 +309,11 @@ use it everywhere:
 from skyscapes import Scene, System, from_exovista
 
 # From ExoVista
-scene = from_exovista("system.fits")
+import jax
+
+jax.config.update("jax_enable_x64", True)
+system = from_exovista("system.fits", planet_spectra="auto")
+scene = Scene(system=system)
 
 # Or programmatically
 scene = Scene(

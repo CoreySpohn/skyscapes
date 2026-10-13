@@ -7,7 +7,7 @@ Submodels receive them as method arguments when needed:
     are the orbit's parameterization, not the planet's identity.
   - ``physical_model`` owns spectral physics (albedo, contrast grid,
     ExoJax composition). Planet radius is passed to
-    ``physical_model.contrast(..., Rp_Rearth=self.Rp_Rearth)`` rather
+    ``physical_model.contrast_at_time(..., Rp_Rearth=self.Rp_Rearth)`` rather
     than duplicated as a field.
 
 Stellar context (``Ms_kg``, ``dist_pc``) is supplied keyword-only at
@@ -119,11 +119,12 @@ class Planet(eqx.Module):
         dist_pc_AU = star.dist_pc * pc2AU
         alpha = s_AU * (rad2arcsec / dist_pc_AU)
 
-        contrast = self.physical_model.contrast(
+        contrast = self.physical_model.contrast_at_time(
             phase_angle_rad=phase_angle_rad,
             dist_AU=dist_AU,
             wavelength_nm=jnp.asarray(wavelength_nm),
             Rp_Rearth=self.Rp_Rearth,
+            time_jd=t_jd,
         )
         eps = jnp.finfo(contrast.dtype).tiny
         dMag = -2.5 * jnp.log10(contrast + eps)
@@ -139,11 +140,12 @@ class Planet(eqx.Module):
     ) -> Array:
         """Planet-to-star contrast at (wavelength, time), shape ``(K, T)``."""
         _, phase_angle_rad, dist_AU = self.propagate(trig_solver, t_jd, star=star)
-        return self.physical_model.contrast(
+        return self.physical_model.contrast_at_time(
             phase_angle_rad=phase_angle_rad,
             dist_AU=dist_AU,
             wavelength_nm=wavelength_nm,
             Rp_Rearth=self.Rp_Rearth,
+            time_jd=t_jd,
         )
 
     def spec_flux_density(
