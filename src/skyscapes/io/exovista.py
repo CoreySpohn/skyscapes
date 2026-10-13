@@ -30,6 +30,8 @@ from hwoutils.constants import (
     cm22m2,
     d2s,
     mas2arcsec,
+    pc2m,
+    rad2arcsec,
     um2nm,
     yr2s,
 )
@@ -138,6 +140,24 @@ def _phoenix_surface_to_observer_jy(stored, wavelengths_um, header) -> np.ndarra
     return observer_jy
 
 
+def _angular_diameter_arcsec(header) -> float:
+    """Stellar angular diameter, ``2 R / d``, from the star header.
+
+    ExoVista writes the same stellar header for its two inputs, but ANGDIAM
+    differs between them: a hand-written system file stores the angular
+    radius (0.465 mas per solar radius at 10 pc), while a catalog target
+    stores the Boyajian et al. (2014) angular diameter and derives RSTAR from
+    it. RSTAR (solar radii) and DIST (pc) mean the same on both paths, so the
+    diameter comes from them. ANGDIAM, read as a diameter, is used only when
+    RSTAR or DIST is not a finite number, or DIST is not positive.
+    """
+    rstar = _finite_header_number(header, "RSTAR")
+    dist = _finite_header_number(header, "DIST")
+    if rstar is None or dist is None or dist <= 0:
+        return header["ANGDIAM"] * mas2arcsec
+    return 2 * rstar * R_sun.to_value(u.m) / (dist * pc2m) * rad2arcsec
+
+
 def _simulation_times_jd(elapsed_years) -> jnp.ndarray:
     """Assign the arbitrary simulation origin to J2000, using Julian years."""
     return J2000_JD + jnp.asarray(elapsed_years.astype(np.float64)) * (yr2s / d2s)
@@ -207,7 +227,7 @@ def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
         spectra = _phoenix_surface_to_observer_jy(spectra, wavelengths_um, obj_header)
     flux_density_jy = jnp.asarray(np.asarray(spectra).T.astype(np.float32))
 
-    diameter_arcsec = obj_header["ANGDIAM"] * mas2arcsec
+    diameter_arcsec = _angular_diameter_arcsec(obj_header)
     Ms_kg = obj_header.get("MASS") * Msun2kg
     dist_pc = obj_header.get("DIST")
     ra_deg = obj_header.get("RA", 0.0)
