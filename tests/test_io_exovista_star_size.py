@@ -56,7 +56,7 @@ def test_system_file_star_has_full_angular_diameter(tmp_path, rstar, dist):
     scene = from_exovista(_write_scene(tmp_path / "s.fits", header), load_disk=False)
     expected = _expected_diameter_arcsec(rstar, dist)
     np.testing.assert_allclose(scene.star.diameter_arcsec, expected, rtol=1e-6)
-    # Twice the stored ANGDIAM, to the precision of ExoVista's 0.465 mas.
+    # Twice the stored ANGDIAM; the tolerance covers ExoVista's rounded 0.465 mas.
     np.testing.assert_allclose(
         scene.star.diameter_arcsec, 2 * header["ANGDIAM"] / 1e3, rtol=1e-3
     )
@@ -69,9 +69,20 @@ def test_sun_at_ten_parsecs_spans_0p93_mas(tmp_path):
     assert float(scene.star.diameter_arcsec) == pytest.approx(9.3009e-4, rel=1e-4)
 
 
+def test_system_file_star_without_a_radius_is_a_point(tmp_path):
+    """ExoVista's default system-file RSTAR is 0, with ANGDIAM 0 to match."""
+    header = {"RSTAR": 0.0, "DIST": 10.0, "ANGDIAM": 0.0}
+    scene = from_exovista(_write_scene(tmp_path / "p.fits", header), load_disk=False)
+    assert float(scene.star.diameter_arcsec) == 0.0
+
+
 @pytest.mark.parametrize(("theta_mas", "dist"), [(0.93, 10.0), (2.4, 3.6)])
 def test_catalog_star_keeps_its_angular_diameter(tmp_path, theta_mas, dist):
-    """A catalog ANGDIAM is a diameter and RSTAR is derived from it."""
+    """A catalog ANGDIAM is a diameter and RSTAR is derived from it.
+
+    The 1e-6 tolerance covers the 5.9e-7 offset between ExoVista's solar
+    radius in AU and astropy's.
+    """
     rstar = dist * theta_mas / 1000.0 / _EXOVISTA_RSUN_AU / 2.0
     header = {"RSTAR": rstar, "DIST": dist, "ANGDIAM": theta_mas}
     scene = from_exovista(_write_scene(tmp_path / "c.fits", header), load_disk=False)

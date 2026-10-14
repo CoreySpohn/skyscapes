@@ -149,7 +149,7 @@ def _angular_diameter_arcsec(header) -> float:
     stores the Boyajian et al. (2014) angular diameter and derives RSTAR from
     it. ANGDIAM alone cannot say which it holds, so the diameter comes from
     RSTAR (solar radii) and DIST (pc), which mean the same on both paths and
-    which every ExoVista writer records.
+    which every ExoVista version this loader reads records.
 
     Raises:
         ValueError: RSTAR is not a finite number at least zero, or DIST is
@@ -476,9 +476,9 @@ def from_exovista(
 
     Raises:
         ValueError: JAX float64 is disabled, the FITS layout or spot records
-            are invalid, the stellar header lacks a finite ``RSTAR`` or a
-            positive ``DIST``, or a planet selection or spectra mode is
-            invalid.
+            are invalid, the stellar header lacks a finite ``RSTAR >= 0`` or
+            a finite positive ``DIST``, or a planet selection or spectra mode
+            is invalid.
     """
     if not jax.config.x64_enabled:
         raise ValueError(

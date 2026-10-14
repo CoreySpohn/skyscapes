@@ -139,8 +139,8 @@ header's `RSTAR` (solar radii) and `DIST` (pc). ExoVista's `ANGDIAM`
 card is not used for it, because its meaning depends on the input: a
 scene built from a system file stores the angular radius there, while a
 scene built from the target catalog stores the angular diameter and
-derives `RSTAR` from it. Every ExoVista writer records `RSTAR` and
-`DIST`; a stellar header without a finite `RSTAR` of at least zero and a
+derives `RSTAR` from it. Every ExoVista version this importer reads
+records `RSTAR` and `DIST`; a stellar header without a finite `RSTAR` of at least zero and a
 finite positive `DIST` is rejected rather than read from `ANGDIAM` at a
 possibly halved size.
 
