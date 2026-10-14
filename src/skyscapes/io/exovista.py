@@ -3,6 +3,8 @@
 Supports legacy and spotted-star layouts. Each planet has a Keplerian
 orbit and either a time-indexed contrast table or a phase-indexed model.
 New layouts preserve recorded activity-dependent spectra by default.
+Unmarked spotted-star spectra are converted from the PHOENIX surface flux
+the v2.5 and v2.6 writers store to observer flux density in Jy.
 """
 
 from __future__ import annotations
@@ -12,10 +14,12 @@ from collections.abc import Sequence
 from numbers import Integral
 from typing import Literal
 
+import astropy.units as u
 import interpax
 import jax
 import jax.numpy as jnp
 import numpy as np
+from astropy.constants import R_sun
 from astropy.io import fits
 from hwoutils.constants import (
     J2000_JD,
@@ -29,7 +33,7 @@ from hwoutils.constants import (
     um2nm,
     yr2s,
 )
-from hwoutils.conversions import au_per_yr_to_m_per_s
+from hwoutils.conversions import au_per_yr_to_m_per_s, mag_to_flux_jy
 from orbix.equations.orbit import state_vector_to_keplerian
 from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.orbit import KeplerianOrbit
@@ -37,6 +41,101 @@ from orbix.orbit import KeplerianOrbit
 from ..disk import ExovistaDisk
 from ..physical_model import GridPhysicalModel, TimeSeriesPhysicalModel
 from ..scene import Planet, Star, StarSpots, System
+
+# Area of the quiet-disk limb-darkening mask that the ExoVista v2.5 and v2.6
+# writers multiply into every stellar spectrum, in units of the geometric disk:
+# the sum of the writer's mask (solar quadratic coefficients u1 = 0.0473,
+# u2 = 0.0841, hard-coded there) times 4 / (pi * mapsize^2). It changes by less
+# than 1e-5 between mapsize 512 and 3600 (default 1800).
+EXOVISTA_LD_MASK_AREA = 0.9109100
+
+# Observer flux at the V band (Vega magnitude, read here on the AB scale) that
+# a converted spectrum must match to within this factor, which leaves room for
+# spot dimming, the model atmosphere and the Vega-AB offset but not for a unit
+# error. The check uses the channel nearest 550 nm, and only when that channel
+# lies within the tolerance below; a grid that does not reach V is not checked.
+_V_BAND_UM = 0.55
+_V_BAND_TOLERANCE_UM = 0.06
+_V_BAND_FACTOR = 3.0
+
+
+def _finite_header_number(header, key):
+    """Return a numeric, finite header value, or None if it is not one."""
+    value = header.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not np.isfinite(value):
+        return None
+    return float(value)
+
+
+def _phoenix_surface_to_observer_jy(stored, wavelengths_um, header) -> np.ndarray:
+    """Convert a v2.5/v2.6 stellar spectrum to observer flux density in Jy.
+
+    Those writers store the PHOENIX emergent surface flux density
+    ``F_lambda`` in erg s^-1 cm^-2 cm^-1, weighted by the area of their
+    limb-darkening mask, in columns documented as observer Jy. The observer
+    flux density is the surface flux diluted by ``(R_star / d)^2``, with no
+    further factor of pi because PHOENIX tabulates flux rather than intensity.
+
+    Args:
+        stored: Stellar spectra as written, shape ``(n_times, n_wavelengths)``.
+        wavelengths_um: Channel wavelengths in microns.
+        header: The stellar extension header, which must carry ``RSTAR``
+            (solar radii) and ``DIST`` (pc).
+
+    Returns:
+        Observer flux density in Jy, the shape of ``stored``.
+
+    Raises:
+        ValueError: ``RSTAR`` or ``DIST`` is missing or not a finite number,
+            or the converted spectrum disagrees with the header's ``VMAG`` by
+            more than a factor of three.
+
+    Warns:
+        RuntimeWarning: The conversion could not be checked against ``VMAG``,
+            because the header has no finite numeric ``VMAG`` or no channel
+            lies near 550 nm.
+    """
+    rstar = _finite_header_number(header, "RSTAR")
+    dist = _finite_header_number(header, "DIST")
+    if rstar is None or dist is None:
+        raise ValueError(
+            "Converting an unmarked ExoVista v2.5+ spectrum needs finite numeric "
+            f"RSTAR and DIST; got RSTAR={header.get('RSTAR')!r}, "
+            f"DIST={header.get('DIST')!r}."
+        )
+    dilution = float(((rstar * R_sun) / (dist * u.pc)).decompose() ** 2)
+    surface = np.asarray(stored, dtype=np.float64) / EXOVISTA_LD_MASK_AREA
+    observer_jy = (
+        (surface * dilution * u.erg / u.s / u.cm**2 / u.cm)
+        .to(u.Jy, equivalencies=u.spectral_density(wavelengths_um * u.um))
+        .value
+    )
+
+    vmag = _finite_header_number(header, "VMAG")
+    offsets_um = np.abs(np.asarray(wavelengths_um, dtype=np.float64) - _V_BAND_UM)
+    k = int(np.argmin(offsets_um))
+    if vmag is None or offsets_um[k] > _V_BAND_TOLERANCE_UM:
+        warnings.warn(
+            "Converted an unmarked ExoVista v2.5+ stellar spectrum from PHOENIX "
+            "surface flux to observer Jy without checking it: the header has no "
+            "numeric VMAG or no channel lies near 550 nm. Mark the stellar "
+            "extension with SPECUNIT='Jy' if the spectrum is already observer "
+            "flux density.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        return observer_jy
+    ratio = float(np.median(observer_jy[:, k])) / float(mag_to_flux_jy(vmag))
+    if not 1.0 / _V_BAND_FACTOR < ratio < _V_BAND_FACTOR:
+        raise ValueError(
+            "An unmarked ExoVista v2.5+ stellar spectrum, read as PHOENIX "
+            f"surface flux, is {ratio:.3g} times the flux of its VMAG; its "
+            "units are unknown. Mark the stellar extension with "
+            "SPECUNIT='Jy' if the spectrum is already observer flux density."
+        )
+    return observer_jy
 
 
 def _simulation_times_jd(elapsed_years) -> jnp.ndarray:
@@ -100,18 +199,13 @@ def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
     spectral_unit = obj_header.get("SPECUNIT")
     if spectral_unit is not None and spectral_unit.strip().lower() != "jy":
         raise ValueError("ExoVista stellar SPECUNIT must be Jy.")
-    if fits_ext == 5 and spectral_unit is None:
-        warnings.warn(
-            "This spotted-star ExoVista file has no SPECUNIT='Jy' marker. "
-            "Uncorrected v2.5/v2.6 PHOENIX writers stored surface flux instead "
-            "of observer Jy; regenerate those scenes with the corrected writer.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
 
     wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
     times_jd = _simulation_times_jd(obj_data[:, 0])
-    flux_density_jy = jnp.asarray(obj_data[:, 16:].T.astype(np.float32))
+    spectra = obj_data[:, 16:]
+    if fits_ext == 5 and spectral_unit is None:
+        spectra = _phoenix_surface_to_observer_jy(spectra, wavelengths_um, obj_header)
+    flux_density_jy = jnp.asarray(np.asarray(spectra).T.astype(np.float32))
 
     diameter_arcsec = obj_header["ANGDIAM"] * mas2arcsec
     Ms_kg = obj_header.get("MASS") * Msun2kg

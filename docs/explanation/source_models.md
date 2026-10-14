@@ -134,12 +134,25 @@ It supports the legacy stellar extension and the newer layout with a
 spot extension before the star, including ExoVista v2.6, without
 relying on an extension-count header alone.
 
-The local corrected ExoVista writer labels its stellar spectral columns
-with `SPECUNIT='Jy'`. Uncorrected v2.5/v2.6 PHOENIX output can contain
-surface flux where observer Jy is required; those scenes need to be
-regenerated. The importer warns when a newer-layout file lacks this
-marker and rejects an explicitly incompatible spectral unit. It does
-not infer or repair the calibration from the version number.
+ExoVista documents the stellar spectral columns as observer flux
+density in Jy, but the v2.5 and v2.6 writers store the PHOENIX emergent
+surface flux density $F_\lambda$ in erg s$^{-1}$ cm$^{-2}$ cm$^{-1}$,
+multiplied by the area of their limb-darkening mask (0.91091 of the
+geometric disk for the solar coefficients they hard-code). A stellar
+extension marked `SPECUNIT='Jy'` is read as Jy. A newer-layout file
+without the marker is converted to the observer flux density
+
+$$F_\nu = \frac{F_\lambda^{\rm stored}}{0.91091}
+\left(\frac{R_\star}{d}\right)^2 \frac{\lambda^2}{c},$$
+
+using the header's `RSTAR` and `DIST`, with no factor of $\pi$ because
+PHOENIX tabulates flux rather than intensity. Both must be finite numbers,
+or the import fails. When the header carries a numeric `VMAG` and a
+channel lies within 60 nm of 550 nm, the converted spectrum there must lie
+within a factor of three of that magnitude's flux, or the import fails
+rather than guess the units. Without either, the spectrum is converted
+with a warning that it could not be checked. Legacy-layout files are read
+as Jy, and an explicitly different `SPECUNIT` is rejected.
 
 The `planet_spectra` argument determines the planet contrast model:
 
