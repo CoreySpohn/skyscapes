@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.0.1](https://github.com/CoreySpohn/skyscapes/compare/v2.0.0...v2.0.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* **io:** check PHOENIX conversion inputs and warn when VMAG is unusable ([b251d62](https://github.com/CoreySpohn/skyscapes/commit/b251d62f1e6a945508d84c30bac38ddc6e4ac1ab))
+* **io:** convert unmarked ExoVista 2.5+ stellar spectra from PHOENIX surface flux to observer Jy ([abd038c](https://github.com/CoreySpohn/skyscapes/commit/abd038cabb9b45b10afd8b45d4467eff08372047))
+* **io:** derive the ExoVista stellar diameter from RSTAR and DIST, since system files store ANGDIAM as a radius ([3a29ec8](https://github.com/CoreySpohn/skyscapes/commit/3a29ec88a86fbc31490450df951b9a76f690283c))
+* **io:** require RSTAR and DIST for the ExoVista stellar diameter ([02e36c0](https://github.com/CoreySpohn/skyscapes/commit/02e36c06503cf4f7a2f1431d805a4ba2a24d3f44))
+
 ## [2.0.0](https://github.com/CoreySpohn/skyscapes/compare/v1.6.1...v2.0.0) (2026-10-13)
 
 
