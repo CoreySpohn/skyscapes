@@ -30,6 +30,8 @@ from hwoutils.constants import (
     cm22m2,
     d2s,
     mas2arcsec,
+    pc2m,
+    rad2arcsec,
     um2nm,
     yr2s,
 )
@@ -138,6 +140,34 @@ def _phoenix_surface_to_observer_jy(stored, wavelengths_um, header) -> np.ndarra
     return observer_jy
 
 
+def _angular_diameter_arcsec(header) -> float:
+    """Stellar angular diameter, ``2 R / d``, from RSTAR and DIST.
+
+    ExoVista writes the same stellar header for its two inputs, but ANGDIAM
+    differs between them: a hand-written system file stores the angular
+    radius (0.465 mas per solar radius at 10 pc), while a catalog target
+    stores the Boyajian et al. (2014) angular diameter and derives RSTAR from
+    it. ANGDIAM alone cannot say which it holds, so the diameter comes from
+    RSTAR (solar radii) and DIST (pc), which mean the same on both paths and
+    which every ExoVista version this loader reads records.
+
+    Raises:
+        ValueError: RSTAR is not a finite number at least zero, or DIST is
+            not a finite positive number.
+    """
+    rstar = _finite_header_number(header, "RSTAR")
+    dist = _finite_header_number(header, "DIST")
+    if rstar is None or rstar < 0 or dist is None or dist <= 0:
+        raise ValueError(
+            "The stellar angular diameter needs a finite RSTAR >= 0 and a "
+            f"finite DIST > 0; got RSTAR={header.get('RSTAR')!r}, "
+            f"DIST={header.get('DIST')!r}. ANGDIAM cannot stand in: ExoVista "
+            "system files store the angular radius there, catalog targets the "
+            "diameter."
+        )
+    return 2 * rstar * R_sun.to_value(u.m) / (dist * pc2m) * rad2arcsec
+
+
 def _simulation_times_jd(elapsed_years) -> jnp.ndarray:
     """Assign the arbitrary simulation origin to J2000, using Julian years."""
     return J2000_JD + jnp.asarray(elapsed_years.astype(np.float64)) * (yr2s / d2s)
@@ -207,7 +237,7 @@ def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
         spectra = _phoenix_surface_to_observer_jy(spectra, wavelengths_um, obj_header)
     flux_density_jy = jnp.asarray(np.asarray(spectra).T.astype(np.float32))
 
-    diameter_arcsec = obj_header["ANGDIAM"] * mas2arcsec
+    diameter_arcsec = _angular_diameter_arcsec(obj_header)
     Ms_kg = obj_header.get("MASS") * Msun2kg
     dist_pc = obj_header.get("DIST")
     ra_deg = obj_header.get("RA", 0.0)
@@ -446,7 +476,9 @@ def from_exovista(
 
     Raises:
         ValueError: JAX float64 is disabled, the FITS layout or spot records
-            are invalid, or a planet selection or spectra mode is invalid.
+            are invalid, the stellar header lacks a finite ``RSTAR >= 0`` or
+            a finite positive ``DIST``, or a planet selection or spectra mode
+            is invalid.
     """
     if not jax.config.x64_enabled:
         raise ValueError(
