@@ -141,20 +141,30 @@ def _phoenix_surface_to_observer_jy(stored, wavelengths_um, header) -> np.ndarra
 
 
 def _angular_diameter_arcsec(header) -> float:
-    """Stellar angular diameter, ``2 R / d``, from the star header.
+    """Stellar angular diameter, ``2 R / d``, from RSTAR and DIST.
 
     ExoVista writes the same stellar header for its two inputs, but ANGDIAM
     differs between them: a hand-written system file stores the angular
     radius (0.465 mas per solar radius at 10 pc), while a catalog target
     stores the Boyajian et al. (2014) angular diameter and derives RSTAR from
-    it. RSTAR (solar radii) and DIST (pc) mean the same on both paths, so the
-    diameter comes from them. ANGDIAM, read as a diameter, is used only when
-    RSTAR or DIST is not a finite number, or DIST is not positive.
+    it. ANGDIAM alone cannot say which it holds, so the diameter comes from
+    RSTAR (solar radii) and DIST (pc), which mean the same on both paths and
+    which every ExoVista writer records.
+
+    Raises:
+        ValueError: RSTAR is not a finite number at least zero, or DIST is
+            not a finite positive number.
     """
     rstar = _finite_header_number(header, "RSTAR")
     dist = _finite_header_number(header, "DIST")
-    if rstar is None or dist is None or dist <= 0:
-        return header["ANGDIAM"] * mas2arcsec
+    if rstar is None or rstar < 0 or dist is None or dist <= 0:
+        raise ValueError(
+            "The stellar angular diameter needs a finite RSTAR >= 0 and a "
+            f"finite DIST > 0; got RSTAR={header.get('RSTAR')!r}, "
+            f"DIST={header.get('DIST')!r}. ANGDIAM cannot stand in: ExoVista "
+            "system files store the angular radius there, catalog targets the "
+            "diameter."
+        )
     return 2 * rstar * R_sun.to_value(u.m) / (dist * pc2m) * rad2arcsec
 
 
@@ -466,7 +476,9 @@ def from_exovista(
 
     Raises:
         ValueError: JAX float64 is disabled, the FITS layout or spot records
-            are invalid, or a planet selection or spectra mode is invalid.
+            are invalid, the stellar header lacks a finite ``RSTAR`` or a
+            positive ``DIST``, or a planet selection or spectra mode is
+            invalid.
     """
     if not jax.config.x64_enabled:
         raise ValueError(

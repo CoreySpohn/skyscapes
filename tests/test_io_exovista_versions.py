@@ -52,6 +52,8 @@ def scene_file(tmp_path):
             "MASS": 1.0,
             "DIST": 10.0,
             "ANGDIAM": 0.9,
+            # A catalog target's radius, derived from its 0.9 mas diameter.
+            "RSTAR": 10.0 * 0.9e-3 / 0.00465047 / 2.0,
             "LSTAR": 1.0,
             "I": 0.0,
             "PA": 0.0,

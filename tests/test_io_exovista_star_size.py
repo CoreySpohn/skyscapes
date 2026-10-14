@@ -4,7 +4,8 @@ ExoVista writes the same stellar header for both of its inputs, but the
 ANGDIAM card means different things: a hand-written system file stores the
 angular radius (0.465 mas per solar radius at 10 pc), while a catalog target
 stores the angular diameter from the Boyajian et al. (2014) color relation and
-derives RSTAR from it. RSTAR and DIST mean the same thing on both paths.
+derives RSTAR from it. RSTAR and DIST mean the same thing on both paths, so
+the diameter comes from them, and a header without them is rejected.
 """
 
 import astropy.units as u
@@ -55,6 +56,17 @@ def test_system_file_star_has_full_angular_diameter(tmp_path, rstar, dist):
     scene = from_exovista(_write_scene(tmp_path / "s.fits", header), load_disk=False)
     expected = _expected_diameter_arcsec(rstar, dist)
     np.testing.assert_allclose(scene.star.diameter_arcsec, expected, rtol=1e-6)
+    # Twice the stored ANGDIAM, to the precision of ExoVista's 0.465 mas.
+    np.testing.assert_allclose(
+        scene.star.diameter_arcsec, 2 * header["ANGDIAM"] / 1e3, rtol=1e-3
+    )
+
+
+def test_sun_at_ten_parsecs_spans_0p93_mas(tmp_path):
+    """The Sun at 10 pc from a system file, whose ANGDIAM card reads 0.465."""
+    header = {"RSTAR": 1.0, "DIST": 10.0, "ANGDIAM": 0.465}
+    scene = from_exovista(_write_scene(tmp_path / "s.fits", header), load_disk=False)
+    assert float(scene.star.diameter_arcsec) == pytest.approx(9.3009e-4, rel=1e-4)
 
 
 @pytest.mark.parametrize(("theta_mas", "dist"), [(0.93, 10.0), (2.4, 3.6)])
@@ -68,11 +80,25 @@ def test_catalog_star_keeps_its_angular_diameter(tmp_path, theta_mas, dist):
     np.testing.assert_allclose(scene.star.diameter_arcsec, theta_mas / 1e3, rtol=1e-6)
 
 
-@pytest.mark.parametrize("rstar", [None, "NaN"])
-def test_angdiam_is_read_as_a_diameter_without_a_usable_radius(tmp_path, rstar):
-    """Without a numeric RSTAR, ANGDIAM keeps its documented diameter meaning."""
-    header = {"DIST": 10.0, "ANGDIAM": 0.9}
-    if rstar is not None:
-        header["RSTAR"] = rstar
-    scene = from_exovista(_write_scene(tmp_path / "f.fits", header), load_disk=False)
-    np.testing.assert_allclose(scene.star.diameter_arcsec, 0.0009, rtol=1e-12)
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"RSTAR": None},
+        {"RSTAR": "NaN"},
+        {"RSTAR": "Invalid tag"},
+        {"RSTAR": -1.0},
+        {"DIST": "NaN"},
+        {"DIST": 0.0},
+    ],
+)
+def test_star_without_a_usable_radius_or_distance_is_rejected(tmp_path, updates):
+    """ANGDIAM is a radius or a diameter by writer path, so it is no fallback."""
+    header = {"RSTAR": 1.0, "DIST": 10.0, "ANGDIAM": 0.465}
+    for key, value in updates.items():
+        if value is None:
+            del header[key]
+        else:
+            header[key] = value
+    path = _write_scene(tmp_path / "f.fits", header)
+    with pytest.raises(ValueError, match="RSTAR"):
+        from_exovista(path, load_disk=False)
