@@ -3,9 +3,9 @@
 Every direction here comes from the library's own frame conventions rather
 than a second derivation of them:
 
-- The sky frame is ``(x, y, z)``: ``x`` the RA offset, ``y`` the Dec
+- The sky frame is ``(x, y, z)``: ``x`` the east (Delta alpha*) offset, ``y`` the Dec
   offset, ``+z`` from the star toward the observer. ``Planet`` positions
-  (through orbix) and the parametric disk kernels both use it.
+  (converted from orbix at propagation) and the parametric disk kernels both use it.
 - The disk midplane is placed in the sky frame by
   ``skyscapes.io._frames.rotate_to_sky_coords``, the rotation the ExoVista
   loader applies. Its first two output rows are the images of the disk's

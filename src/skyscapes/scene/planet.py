@@ -70,18 +70,22 @@ class Planet(eqx.Module):
     def propagate(self, trig_solver, t_jd: Array, *, star: AbstractStar):
         """Propagate the orbit; returns ``(r_AU, phase_angle_rad, dist_AU)``.
 
+        ``r_AU`` has shape ``(K, 3, T)`` in the sky chart (east, north,
+        toward the observer). orbix's raw (north, east, away) positions
+        are converted here once (Green 1985, Spherical Astronomy, ch. 17;
+        Brandt et al. 2021, AJ 162, 186).
+
         ``phase_angle_rad`` is the standard star-planet-observer phase angle:
         0 at full phase (superior conjunction, planet behind the star),
         ``pi / 2`` at quadrature and ``pi`` at new phase (inferior
-        conjunction). orbix reports the angle between the position vector
-        and the ``+z`` observer axis, which is ``pi`` minus this; the
-        conversion happens here, once, so every physical model receives
-        the standard angle.
+        conjunction). orbix returns this angle directly; it is unchanged.
+        In this sky chart, ``cos(phase_angle_rad) = -r_AU[:, 2, :] / dist_AU``.
         """
-        r_AU, beta_rad, dist_AU = self.orbit.propagate(
+        r_AU, phase_angle_rad, dist_AU = self.orbit.propagate(
             trig_solver, t_jd, Ms_kg=star.Ms_kg
         )
-        return r_AU, jnp.pi - beta_rad, dist_AU
+        r_sky_AU = jnp.stack([r_AU[:, 1, :], r_AU[:, 0, :], -r_AU[:, 2, :]], axis=1)
+        return r_sky_AU, phase_angle_rad, dist_AU
 
     def position_arcsec(
         self,
@@ -90,7 +94,11 @@ class Planet(eqx.Module):
         *,
         star: AbstractStar,
     ) -> Array:
-        """On-sky position, shape ``(2, K, T)`` -- (dRA, dDec) in arcsec."""
+        """On-sky (east, north) offsets in arcsec, shape ``(2, K, T)``.
+
+        ``(dRA, dDec) = (Delta alpha*, Delta Dec)``, where the east offset
+        ``Delta alpha* = Delta RA cos Dec`` includes the declination factor.
+        """
         r_AU, _, _ = self.propagate(trig_solver, t_jd, star=star)
         dist_AU = star.dist_pc * pc2AU
         scale = rad2arcsec / dist_AU

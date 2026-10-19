@@ -7,9 +7,10 @@ this package imports no plotting stack, and the eyepiece requirement is
 checked only when a plot function is first touched.
 
 Every view draws in the library's own frames. The sky frame is
-``(x, y, z)`` with ``x`` the RA offset (drawn increasing to the left), ``y``
-the Dec offset and ``+z`` pointing from the star toward the observer, the
-frame ``Planet.position_arcsec`` and the parametric disk kernels share. The
+``(x, y, z)`` with ``x`` the east offset (Delta RA cos Dec, drawn increasing
+to the left), ``y`` the north (Dec) offset and ``+z`` pointing from the star
+toward the observer. ``Planet.propagate`` converts orbix positions into this
+frame, shared by ``Planet.position_arcsec`` and the parametric disk kernels. The
 disk midplane is placed in that frame by ``System.midplane_inc_deg`` and
 ``System.midplane_pa_deg`` through the same rotation the ExoVista loader
 uses, so a drawn outline and a rendered surface-brightness map agree.

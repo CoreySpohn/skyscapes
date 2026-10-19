@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+* **scene:** `Planet.position_arcsec` now returns (Delta alpha*, Delta Dec) =
+  (east, north), where Delta alpha* = Delta RA cos Dec. `Planet.propagate`
+  returns positions in the documented sky chart (east, north, toward the
+  observer) with the standard star-planet-observer phase angle. Earlier
+  releases returned the sky axes swapped (a reflection) and, for planets
+  built from standard orbital elements, inverted phases (crescent and
+  gibbous exchanged), which changed `alpha_dMag`, `contrast` and
+  `spec_flux_density`. ExoVista phase grids now use the same standard angle
+  at construction and evaluation, preserving imported fluxes.
+
 ## [2.0.0](https://github.com/CoreySpohn/skyscapes/compare/v1.6.1...v2.0.0) (2026-10-13)
 
 

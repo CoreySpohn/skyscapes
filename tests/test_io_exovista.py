@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import jax.numpy as jnp
+import numpy as np
+import pytest
 
 from skyscapes.disk import ExovistaDisk
 from skyscapes.io import from_exovista, get_earth_like_planet_indices
@@ -89,3 +91,80 @@ def test_from_exovista_positions_runnable(fits_fixture):
     pos = sys_obj.positions(jnp.atleast_1d(t0))
     assert pos.shape[0] == 2
     assert pos.shape[2] == 1
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_contrast", "expected_flux"),
+    [
+        (
+            "phase",
+            [
+                [2.391542186575391e-10, 2.551953553505837e-10, 1.9899835878033283e-10],
+                [
+                    5.7055238101954234e-12,
+                    1.5411660919578203e-10,
+                    1.3773027899622595e-10,
+                ],
+                [5.021626132487974e-10, 3.311569064324461e-10, 1.938082775394434e-10],
+            ],
+            [
+                [0.00019278727977209453, 0.0002057183797328809, 0.00016041679082110674],
+                [4.599343558382247e-06, 0.0001242366621058857, 0.00011102729434999663],
+                [
+                    0.00040480391587869723,
+                    0.00026695259455269797,
+                    0.00015623295643238516,
+                ],
+            ],
+        ),
+        (
+            "time",
+            [
+                [2.356564187987321e-10, 2.56341309788488e-10, 1.8167898333894579e-10],
+                [5.670880637443406e-12, 1.5466097976366512e-10, 1.3689403177376184e-10],
+                [5.45207491898194e-10, 3.7782533688573034e-10, 2.0653046850982173e-10],
+            ],
+            [
+                [0.00018996762923968123, 0.00020664215787096466, 0.0001464552755384602],
+                [4.571416963254523e-06, 0.00012467549074775237, 0.0001103531777563576],
+                [
+                    0.00043950330403718193,
+                    0.00030457300454933436,
+                    0.00016648858396715383,
+                ],
+            ],
+        ),
+    ],
+)
+def test_exovista_flux_preserved_with_standard_phase(
+    fits_fixture, mode, expected_contrast, expected_flux
+):
+    """Preserve imported spectra while exposing the standard phase angle.
+
+    The 600 nm contrasts and photon fluxes are pre-conversion outputs for
+    demo planets 0, 2, 4 at FITS epochs 0, 10, 25. Phase-mode regridding
+    smooths the FITS spectra, so this pins the existing evaluated values.
+    The tolerance allows float32 solver tables on any backend; an inverted
+    phase grid changes these values at order unity.
+    Time mode pins the unchanged time-indexed spectra too.
+
+    Green (1985), Spherical Astronomy, ch. 17; Brandt et al. (2021),
+    AJ 162, 186: raw z points away. Brown (2005), ApJ 624, 1010, Eq. 4
+    uses the standard star-planet-observer phase angle.
+    """
+    system = from_exovista(
+        fits_fixture, planet_indices=[0, 2, 4], load_disk=False, planet_spectra=mode
+    )
+    times = jnp.array([2451545.0, 2451645.0, 2451795.0])
+    np.testing.assert_allclose(
+        system.contrasts(600.0, times), expected_contrast, rtol=1e-6, atol=0
+    )
+    np.testing.assert_allclose(
+        system.planet_flux_densities(600.0, times), expected_flux, rtol=1e-6, atol=0
+    )
+    for planet in system.planets:
+        raw, _, dist = planet.orbit.propagate(
+            system.trig_solver, times, Ms_kg=system.star.Ms_kg
+        )
+        _, phase, _ = planet.propagate(system.trig_solver, times, star=system.star)
+        np.testing.assert_allclose(jnp.cos(phase), raw[:, 2, :] / dist, atol=1e-6)

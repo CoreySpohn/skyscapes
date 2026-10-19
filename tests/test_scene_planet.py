@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import jax.numpy as jnp
-from hwoutils.constants import Rearth2AU
+import numpy as np
+import pytest
+from hwoutils.constants import G, Rearth2AU
+from orbix.equations.orbit import mean_motion, period_n
 from orbix.equations.phase import lambert_phase_exact
 from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.orbit import KeplerianOrbit
 
 from skyscapes.physical_model import LambertianPhysicalModel
-from skyscapes.scene import FlatStar, Planet
+from skyscapes.scene import FlatStar, Planet, System
 
 SOLVER = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
 
@@ -49,7 +52,12 @@ def test_planet_position_shape():
 
 
 def test_planet_alpha_dMag_matches_orbix():
-    """Planet.alpha_dMag reproduces the exact Lambert dMag formula."""
+    """Pin Lambert dMag to the raw away-axis phase, across orbital epochs.
+
+    Green (1985), Spherical Astronomy, ch. 17; Brandt et al. (2021),
+    AJ 162, 186: raw z is away. Brown (2005), ApJ 624, 1010, Eq. 4:
+    the Lambert law uses the standard star-planet-observer angle.
+    """
     star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     p = _single_planet()
     t_jd = jnp.array([0.0, 100.0, 200.0])
@@ -71,8 +79,8 @@ def test_planet_alpha_dMag_matches_orbix():
     Rp_AU = jnp.array([1.0]) * Rearth2AU
 
     r_AU, _, dist_AU = orbit.propagate(SOLVER, t_jd, Ms_kg=Ms_kg)
-    # Independent phase angle: cos(alpha) = -z / r with +z toward the observer.
-    cos_a = -r_AU[:, 2, :] / dist_AU
+    # Raw orbix z points away: cos(alpha) = z / r.
+    cos_a = r_AU[:, 2, :] / dist_AU
     phase = lambert_phase_exact(cos_a, jnp.sqrt(1.0 - cos_a**2))
     log_arg = Ag[:, None] * (Rp_AU[:, None] / dist_AU) ** 2 * phase
     dMag_ref = -2.5 * jnp.log10(log_arg + jnp.finfo(log_arg.dtype).tiny)
@@ -114,11 +122,11 @@ def test_planet_mean_anomaly_range():
     assert jnp.all(M < 360.0)
 
 
-def _circular_planet(i_rad, M0_rad=0.0):
+def _circular_planet(i_rad, M0_rad=0.0, W_rad=0.0):
     orbit = KeplerianOrbit(
         a_AU=jnp.array([1.0]),
         e=jnp.array([0.0]),
-        W_rad=jnp.array([0.0]),
+        W_rad=jnp.array([W_rad]),
         i_rad=jnp.array([i_rad]),
         w_rad=jnp.array([0.0]),
         M0_rad=jnp.array([M0_rad]),
@@ -143,25 +151,93 @@ def _sample_orbit(planet, n=361):
     return r_AU[0], alpha[0], dMag[0]
 
 
-def test_phase_angle_is_arccos_minus_z_over_r():
-    """Phase angle is star-planet-observer: cos(alpha) = -z / r, +z to observer."""
-    p = _circular_planet(jnp.deg2rad(60.0), 0.7)
-    r, alpha, _ = _sample_orbit(p)
-    cos_ref = -r[2] / jnp.linalg.norm(r, axis=0)
-    assert jnp.allclose(jnp.cos(alpha), cos_ref, atol=1e-5)
+def _quarter_period_times(planet):
+    """Epochs with M = 90 and 270 deg for a circular orbit starting at M = 0."""
+    period = period_n(mean_motion(planet.orbit.a_AU, G * _STAR.Ms_kg))[0]
+    return period * jnp.array([0.25, 0.75])
+
+
+def test_phase_angle_and_sky_position_at_known_anomalies():
+    """Pin the toward-axis sign and standard phase at M = 90 and 270 deg.
+
+    Green (1985), Spherical Astronomy, ch. 17, and Brandt et al. (2021),
+    AJ 162, 186 give (north, east, away); the sky chart is (east, north,
+    toward). Brown (2005), ApJ 624, 1010, Eq. 4 uses zero at full phase.
+    """
+    p = _circular_planet(jnp.deg2rad(60.0))
+    r, alpha, dist = p.propagate(SOLVER, _quarter_period_times(p), star=_STAR)
+    np.testing.assert_allclose(jnp.rad2deg(alpha[0]), [30.0, 150.0], atol=1e-6)
+    np.testing.assert_allclose(
+        r[0],
+        [[0.5, -0.5], [0.0, 0.0], [-np.sqrt(3) / 2, np.sqrt(3) / 2]],
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(dist, 1.0, atol=1e-8)
+    np.testing.assert_allclose(jnp.cos(alpha), -r[:, 2, :] / dist, atol=1e-8)
+
+
+@pytest.mark.parametrize("observable", ["contrast", "dMag", "flux"])
+def test_lambert_brightness_at_mean_anomaly_90(observable):
+    """Pin gibbous brightness, including every public photometric consumer.
+
+    Sobolev (1975), Light Scattering in Planetary Atmospheres; Brown (2005),
+    ApJ 624, 1010, Eq. 4: Phi(30 deg) = 0.88084278 for a Lambert sphere.
+    """
+    p = _circular_planet(jnp.deg2rad(60.0))
+    times = _quarter_period_times(p)[:1]
+    alpha = np.pi / 6
+    phase_factor = (np.sin(alpha) + (np.pi - alpha) * np.cos(alpha)) / np.pi
+    assert phase_factor == pytest.approx(0.88084278, abs=1e-8)
+    expected_contrast = 0.3 * Rearth2AU**2 * phase_factor
+    if observable == "contrast":
+        actual = p.contrast(SOLVER, jnp.array(600.0), times, star=_STAR)
+        expected = expected_contrast
+    elif observable == "dMag":
+        _, actual = p.alpha_dMag(SOLVER, times, star=_STAR)
+        expected = -2.5 * np.log10(expected_contrast)
+    else:
+        actual = p.spec_flux_density(SOLVER, jnp.array(600.0), times, star=_STAR)
+        expected = expected_contrast * 1e9
+    np.testing.assert_allclose(actual, expected, rtol=1e-7, atol=0)
+
+
+@pytest.mark.parametrize(
+    ("node_deg", "mean_anomaly_deg", "east_north_AU"),
+    [(0.0, 90.0, [0.5, 0.0]), (0.0, 0.0, [0.0, 1.0]), (90.0, 0.0, [1.0, 0.0])],
+)
+def test_position_arcsec_is_east_then_north(node_deg, mean_anomaly_deg, east_north_AU):
+    """Pin Delta alpha* = Delta RA cos Dec, then Delta Dec, including nodes.
+
+    Green (1985), Spherical Astronomy, ch. 17; Brandt et al. (2021),
+    AJ 162, 186: Omega is measured north through east.
+    """
+    p = _circular_planet(jnp.deg2rad(60.0), W_rad=jnp.deg2rad(node_deg))
+    times = _quarter_period_times(p)[:1] * (mean_anomaly_deg / 90.0)
+    expected = np.asarray(east_north_AU) / float(_STAR.dist_pc)
+    np.testing.assert_allclose(
+        p.position_arcsec(SOLVER, times, star=_STAR)[:, 0, 0],
+        expected,
+        atol=1e-8,
+    )
+    system = System(star=_STAR, planets=(p,), trig_solver=SOLVER)
+    np.testing.assert_allclose(system.positions(times)[:, 0, 0], expected, atol=1e-8)
 
 
 def test_edge_on_superior_conjunction_is_brightest():
-    """Full phase (planet behind the star, z < 0) is brightest, new phase faintest."""
+    """Pin superior conjunction to M = 90 deg, behind the star in the sky chart.
+
+    Green (1985), Spherical Astronomy, ch. 17; Brandt et al. (2021),
+    AJ 162, 186: positive raw away-z at M = 90 deg for Omega = omega = 0.
+    Brown (2005), ApJ 624, 1010, Eq. 4: full phase is brightest.
+    """
     p = _circular_planet(jnp.deg2rad(89.0))
-    r, alpha, dMag = _sample_orbit(p)
-    z = r[2]
-    sup, inf = jnp.argmin(z), jnp.argmax(z)
-    assert alpha[sup] < 0.05 and alpha[inf] > jnp.pi - 0.05
-    assert dMag[sup] == jnp.nanmin(dMag)
-    assert dMag[sup] < 23.5  # near-full Lambert phase at 1 AU, 10 pc, Ag 0.3
-    assert not (dMag[inf] <= dMag[sup])  # faintest (or NaN) at inferior conjunction
-    assert jnp.nanmax(dMag) > dMag[sup] + 1.0
+    times = _quarter_period_times(p)
+    r, alpha, _ = p.propagate(SOLVER, times, star=_STAR)
+    _, dMag = p.alpha_dMag(SOLVER, times, star=_STAR)
+    np.testing.assert_allclose(jnp.rad2deg(alpha[0]), [1.0, 179.0], atol=1e-6)
+    assert r[0, 2, 0] < 0 < r[0, 2, 1]
+    assert dMag[0, 0] < 23.5
+    assert dMag[0, 1] > dMag[0, 0] + 1.0
 
 
 def test_quadrature_phase_angle_is_half_pi():
