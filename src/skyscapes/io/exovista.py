@@ -399,6 +399,19 @@ def _load_single_planet(
     )
 
 
+def _midplane_to_east_north(inc_deg: float, pa_deg: float) -> tuple[float, float]:
+    """Convert ExoVista header (I, PA) to the east/north midplane chart.
+
+    ExoVista's ``src/exovista/generate_scene.py`` ``generate_scene``
+    docstring defines +x west, +y north, +z toward the observer. Mirroring
+    x maps the node vector to minus the node vector at -PA, and the near
+    in-plane vector to the near vector at -PA, with I unchanged. This
+    preserves both the plane and its near side below and above I = 90;
+    180 - PA would preserve only the projected major-axis line.
+    """
+    return inc_deg, (-pa_deg) % 360.0
+
+
 def _load_disk(hdul: fits.HDUList, fits_ext: int) -> ExovistaDisk:
     """Load the ExoVista disk extension into an ExovistaDisk.
 
@@ -409,10 +422,10 @@ def _load_disk(hdul: fits.HDUList, fits_ext: int) -> ExovistaDisk:
     matching planets and parametric disks. The image center remains
     ``((nx - 1) / 2, (ny - 1) / 2)`` for even and odd dimensions.
 
-    The system midplane angles (I, PA) live on
-    ``System.midplane_inc_deg`` / ``System.midplane_pa_deg`` (populated
-    by ``from_exovista`` from the same FITS star header), not on the
-    disk itself.
+    ``from_exovista`` converts the FITS star header's (I, PA) to
+    (I, -PA modulo 360) on ``System.midplane_inc_deg`` /
+    ``System.midplane_pa_deg``. These east/north angles orient parametric
+    disks and outlines; this loaded cube already has its geometry.
     """
     obj_data = hdul[fits_ext].data
     header = hdul[fits_ext].header
@@ -471,9 +484,11 @@ def from_exovista(
     """Load an ExoVista FITS file into a ``scene.System``.
 
     State vectors are already on-sky; their (west, north, toward) axes
-    are converted to orbix's (north, east, away) axes. Midplane inclination
-    and position angle are retained for diagnostics without applying them
-    again. Elapsed simulation years become Julian Dates relative
+    are converted to orbix's (north, east, away) axes. The FITS star
+    header's midplane (I, PA) becomes (I, -PA modulo 360) in the east/north
+    chart on ``System.midplane_*``, used by parametric disks and outlines.
+    These angles are not applied again to the states or loaded image.
+    Elapsed simulation years become Julian Dates relative
     to J2000, with exactly 365.25 days per year. Enable ``jax_enable_x64``
     before loading to preserve this time coordinate.
 
@@ -531,8 +546,9 @@ def from_exovista(
         wavelengths_um = hdul[0].data
         wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
         star_header = hdul[star_ext].header
-        midplane_inc_deg = float(star_header.get("I", 0.0))
-        midplane_pa_deg = float(star_header.get("PA", 0.0))
+        midplane_inc_deg, midplane_pa_deg = _midplane_to_east_north(
+            float(star_header.get("I", 0.0)), float(star_header.get("PA", 0.0))
+        )
 
         star = _load_star(hdul, fits_ext=star_ext)
         solver = get_grid_solver(level="scalar", E=False, trig=True, jit=True)

@@ -4,10 +4,13 @@
 
 ### Bug Fixes
 
-* **io:** ExoVista disk cubes are now mirrored at load so +column is east,
-  matching planets and parametric disks; +row remains north. Reading
-  `contrast_cube` directly now gives a mirrored image relative to earlier
-  versions, whose disk orientation was mirrored against the planets.
+* **io:** ExoVista scenes now match the true sky. Planet RA offsets were
+  labelled east but were west-positive; they now change sign. Disk cube
+  columns are mirrored, and `System.midplane_pa_deg` becomes (-PA) mod 360,
+  so parametric disks and outlines built from `System.midplane_*` match the
+  loaded image. Released versions' planets and disks agreed with each other
+  but were both mirrored east-west. Code placing planets or disks with the
+  old sign must be re-derived.
 
 * **io:** ExoVista planet states are now made star-relative before conversion
   to orbital elements. Earlier releases used barycentric states, which biased
@@ -17,17 +20,18 @@
   ExoVista's (west, north, toward) axes to the orbital-element convention
   (north, east, away) at load. Earlier releases kept ExoVista's axes, so
   loaded elements (Omega, i, omega) followed a different convention, though
-  sky positions round-tripped. Imported contrast light curves are preserved.
+  the raw FITS state values round-tripped. Imported contrast light curves
+  are preserved.
 
 * **scene:** `Planet.position_arcsec` now returns (Delta alpha*, Delta Dec) =
   (east, north), where Delta alpha* = Delta RA cos Dec. `Planet.propagate`
   returns positions in the documented sky chart (east, north, toward the
   observer) with the standard star-planet-observer phase angle. Earlier
-  releases returned the sky axes swapped (a reflection) and, for planets
-  built from standard orbital elements, inverted phases (crescent and
-  gibbous exchanged), which changed `alpha_dMag`, `contrast` and
-  `spec_flux_density`. ExoVista phase grids now use the same standard angle
-  at construction and evaluation, preserving imported fluxes.
+  releases swapped sky axes for planets built from orbital elements;
+  ExoVista planets instead had west-positive offsets. Element-built planets
+  also had inverted phases (crescent and gibbous exchanged), changing
+  `alpha_dMag`, `contrast` and `spec_flux_density`. ExoVista phase grids use
+  the same standard angle at construction and evaluation, preserving imported fluxes.
 
 ## [2.0.0](https://github.com/CoreySpohn/skyscapes/compare/v1.6.1...v2.0.0) (2026-10-13)
 

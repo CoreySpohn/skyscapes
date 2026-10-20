@@ -92,7 +92,7 @@ def test_exovista_sky_positions_round_trip(known_orbit_file):
 
 
 def test_exovista_recovers_known_elements(known_orbit_file):
-    """Both state vectors must use the orbital-element axes on import."""
+    """Preserve header a/e and recover i, Omega, omega, M from both states."""
     path, expected = known_orbit_file
     orbit = from_exovista(path, load_disk=False).planets[0].orbit
     actual = np.array(
@@ -115,7 +115,10 @@ def test_exovista_recovers_known_elements(known_orbit_file):
 def test_exovista_recovers_known_elements_with_stellar_reflex(
     known_orbit_file, version
 ):
-    """Barycentric float32 states recover the star-relative orbit in both layouts."""
+    """Preserve header a/e; recover star-relative i, Omega, omega, M from states.
+
+    Both layouts store float32 barycentric positions and velocities.
+    """
     path, expected = known_orbit_file
     a, e, inc, node, peri, anomaly = expected
     mass_earth = 317.8

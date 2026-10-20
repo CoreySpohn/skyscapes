@@ -111,8 +111,11 @@ arrays with shape `(n_times, n_spots)`:
 
 `Star.metadata` retains the stellar FITS header values under uppercase
 keys, excluding blank, `COMMENT`, and `HISTORY` cards. These records
-preserve the source information; they do not supply spot evolution or
-an evaluator for spatially resolved stellar intensity. A downstream
+preserve the source information, including the original west-based `PA`.
+The system's disk orientation instead uses `System.midplane_inc_deg = I`
+and `System.midplane_pa_deg = (-PA) % 360` in the east/north chart, for
+parametric disks and visualization outlines. The metadata do not supply
+spot evolution or an evaluator for spatially resolved stellar intensity. A downstream
 diameter-only coronagraph response does not acquire asymmetric
 starspot leakage merely by loading `Star.spots`. That calculation
 requires a surface-brightness model and an optical response evaluated
