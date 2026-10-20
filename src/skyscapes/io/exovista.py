@@ -264,6 +264,16 @@ def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
     )
 
 
+def _exovista_to_orbix(vector: jnp.ndarray) -> jnp.ndarray:
+    """Convert (west, north, toward) to orbix's (north, east, away).
+
+    ExoVista's ``src/exovista/generate_scene.py`` ``generate_scene``
+    docstring defines +x as west, +y as north and +z toward the observer.
+    For either a position or velocity vector, the conversion is (y, -x, -z).
+    """
+    return jnp.stack([vector[1], -vector[0], -vector[2]])
+
+
 def _load_single_planet(
     hdul: fits.HDUList,
     fits_ext: int,
@@ -277,10 +287,9 @@ def _load_single_planet(
 
     ExoVista stores the planet ``(r, v)`` state vectors already in the
     on-sky ("bary-sky") frame -- the same frame the disk cube is rendered
-    in -- so they are converted to Keplerian elements directly, with NO
-    additional sky rotation. Rotating them again (as an earlier version
-    did) double-applies the system inclination and PA and tilts every
-    planetary system off its disk.
+    in. Their (west, north, toward) axes are converted to orbix's
+    (north, east, away) axes before deriving Keplerian elements. The
+    system inclination and PA are already applied by the writer.
 
     With ``planet_spectra="time"`` the contrasts stay indexed by the FITS
     epochs, which preserves the stellar-activity history. With
@@ -298,11 +307,9 @@ def _load_single_planet(
 
     contrast_data = jnp.asarray(obj_data[:, 16:].T.astype(np.float32))
 
-    # ExoVista's state vectors are already in the on-sky ("bary-sky") frame;
-    # use them directly. FITS data is big-endian ('>f8'); convert to native
-    # float64 before passing to JAX.
-    r_sky_au = jnp.asarray(obj_data[0, 9:12].astype(np.float64))  # (3,)
-    v_sky_au_yr = jnp.asarray(obj_data[0, 12:15].astype(np.float64))  # (3,)
+    # Convert big-endian FITS data to native float64, then change axes.
+    r_sky_au = _exovista_to_orbix(jnp.asarray(obj_data[0, 9:12].astype(np.float64)))
+    v_sky_au_yr = _exovista_to_orbix(jnp.asarray(obj_data[0, 12:15].astype(np.float64)))
 
     r_sky_m = r_sky_au * AU2m
     v_sky_m_s = jnp.array(au_per_yr_to_m_per_s(v_sky_au_yr))
@@ -449,9 +456,10 @@ def from_exovista(
 ) -> System:
     """Load an ExoVista FITS file into a ``scene.System``.
 
-    State vectors are already in the on-sky frame. Midplane inclination
-    and position angle are retained for diagnostics without rotating the
-    states again. Elapsed simulation years become Julian Dates relative
+    State vectors are already on-sky; their (west, north, toward) axes
+    are converted to orbix's (north, east, away) axes. Midplane inclination
+    and position angle are retained for diagnostics without applying them
+    again. Elapsed simulation years become Julian Dates relative
     to J2000, with exactly 365.25 days per year. Enable ``jax_enable_x64``
     before loading to preserve this time coordinate.
 

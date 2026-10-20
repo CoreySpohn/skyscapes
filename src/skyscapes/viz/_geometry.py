@@ -7,8 +7,10 @@ than a second derivation of them:
   offset, ``+z`` from the star toward the observer. ``Planet`` positions
   (converted from orbix at propagation) and the parametric disk kernels both use it.
 - The disk midplane is placed in the sky frame by
-  ``skyscapes.io._frames.rotate_to_sky_coords``, the rotation the ExoVista
-  loader applies. Its first two output rows are the images of the disk's
+  ``skyscapes.io._frames.rotate_to_sky_coords``. The ExoVista loader instead
+  converts already on-sky states from (west, north, toward) to orbix's
+  (north, east, away) axes; it does not apply the midplane rotation again.
+  The rotation's first two output rows are the images of the disk's
   in-plane axes: the line of nodes, at angle ``pa`` from ``+x`` toward
   ``+y``, and the in-plane axis whose ``+z`` component is ``sin(incl)``,
   which points at the near (forward-scattering) half of the disk. These

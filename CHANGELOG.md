@@ -4,6 +4,12 @@
 
 ### Bug Fixes
 
+* **io:** ExoVista planet positions and velocities are now converted from
+  ExoVista's (west, north, toward) axes to the orbital-element convention
+  (north, east, away) at load. Earlier releases kept ExoVista's axes, so
+  loaded elements (Omega, i, omega) followed a different convention, though
+  sky positions round-tripped. Imported contrast light curves are preserved.
+
 * **scene:** `Planet.position_arcsec` now returns (Delta alpha*, Delta Dec) =
   (east, north), where Delta alpha* = Delta RA cos Dec. `Planet.propagate`
   returns positions in the documented sky chart (east, north, toward the
