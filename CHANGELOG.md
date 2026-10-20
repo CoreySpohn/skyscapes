@@ -4,6 +4,11 @@
 
 ### Bug Fixes
 
+* **io:** ExoVista disk cubes are now mirrored at load so +column is east,
+  matching planets and parametric disks; +row remains north. Reading
+  `contrast_cube` directly now gives a mirrored image relative to earlier
+  versions, whose disk orientation was mirrored against the planets.
+
 * **io:** ExoVista planet states are now made star-relative before conversion
   to orbital elements. Earlier releases used barycentric states, which biased
   the elements of massive planets.

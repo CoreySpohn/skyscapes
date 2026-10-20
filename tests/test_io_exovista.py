@@ -5,6 +5,8 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from hwoutils.constants import G
+from orbix.equations.orbit import mean_motion, period_n
 
 from skyscapes.disk import ExovistaDisk
 from skyscapes.io import from_exovista, get_earth_like_planet_indices
@@ -56,6 +58,71 @@ def test_from_exovista_disk_is_exovista_disk(fits_fixture):
     """Loaded disk is an ExovistaDisk."""
     sys_obj = from_exovista(fits_fixture)
     assert isinstance(sys_obj.disk, ExovistaDisk)
+
+
+def test_exovista_disk_and_planet_share_east_north_chart(fits_fixture):
+    """Image and orbit second moments have the same projected major axis.
+
+    Angles run from +column (east) toward +row (north), modulo 180 deg.
+    The demo disk and outer orbit need not align exactly: the planets have
+    small mutual inclinations and the brightness weights disk structure.
+    The measured axes are 147.34 deg (disk) and 148.46 deg (outer orbit).
+    A 3 deg tolerance allows their 1.12 deg spread but rejects the original
+    mirrored image at 32.66 deg (64.20 deg from the orbit, modulo 180).
+    """
+    system = from_exovista(fits_fixture)
+    disk = system.disk
+    brightness = np.asarray(
+        disk.surface_brightness(
+            disk.wavelengths_nm[0],
+            jnp.asarray(2451545.0),
+            jnp.asarray(system.midplane_inc_deg),
+            jnp.asarray(system.midplane_pa_deg),
+        ),
+        dtype=float,
+    )
+    row, col = np.indices(brightness.shape, dtype=float)
+
+    def major_axis_angle(x, y, weights):
+        """Brightness-weighted central second-moment axis, modulo 180 deg."""
+        x = x - np.average(x, weights=weights)
+        y = y - np.average(y, weights=weights)
+        xx = np.average(x * x, weights=weights)
+        yy = np.average(y * y, weights=weights)
+        xy = np.average(x * y, weights=weights)
+        return np.degrees(0.5 * np.arctan2(2 * xy, xx - yy)) % 180
+
+    disk_angle = major_axis_angle(col, row, brightness)
+    planet = max(system.planets, key=lambda p: float(p.orbit.a_AU[0]))
+    period = period_n(mean_motion(planet.orbit.a_AU, G * system.star.Ms_kg))[0]
+    times = planet.orbit.t0_d[0] + period * jnp.linspace(0.0, 1.0, 1024, endpoint=False)
+    east, north = np.asarray(
+        planet.position_arcsec(system.trig_solver, times, star=system.star)
+    )[:, 0, :]
+    orbit_angle = major_axis_angle(east, north, np.ones_like(east))
+    difference = abs((disk_angle - orbit_angle + 90) % 180 - 90)
+    assert difference < 3.0, (
+        f"disk major axis {disk_angle:.2f} deg vs planet orbit "
+        f"{orbit_angle:.2f} deg: {difference:.2f} deg apart in the east/north chart"
+    )
+
+    # The axis angle is blind to a row-for-column mistake (both mirrors map
+    # theta to 180 - theta). The near, forward-scattering half of the disk
+    # lies on the side of the major axis where the orbit is toward the
+    # observer, which a row flip would move across the axis. Measured: the
+    # brightness centroid sits 10.6 px toward that side; a row flip gives
+    # -10.6 px.
+    r_sky, _, _ = planet.propagate(system.trig_solver, times, star=system.star)
+    r_sky = np.asarray(r_sky)[0]
+    near = r_sky[:2, r_sky[2] > 0].mean(axis=1)
+    near = near / np.hypot(*near)
+    centre = (np.array(brightness.shape, dtype=float) - 1) / 2
+    offset = np.average(
+        (col - centre[1]) * near[0] + (row - centre[0]) * near[1], weights=brightness
+    )
+    assert offset > 2.0, (
+        f"disk near side lies {offset:.2f} px from the orbit's near side"
+    )
 
 
 def test_from_exovista_load_disk_false_skips_disk(fits_fixture):

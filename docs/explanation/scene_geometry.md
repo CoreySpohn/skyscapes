@@ -89,16 +89,20 @@ system = System(
 | Quantity | Convention |
 |---|---|
 | Sky frame | `(x, y, z)`, star-centered. `x` is the RA offset, `y` the Dec offset, and `+z` points from the star toward the observer. `Planet.position_arcsec` returns `(x, y)` in arcsec, and `Planet.propagate` returns the standard phase angle, 0 at full phase (planet behind the star) and pi at new phase; orbix itself reports the angle from the `+z` axis, which is pi minus that. |
-| Sky images | Pixel `(row, col)` lies at `(y, x)`; the RA offset is drawn increasing to the left. |
+| Sky images | Pixel `(row, col)` lies at `(y, x)`; +column is the east offset (Delta alpha* = Delta RA cos Dec), +row is north. East is drawn increasing to the left. |
 | Disk orientation | Set once, on the system, by `System.midplane_inc_deg` and `System.midplane_pa_deg`. Every disk component renders at that orientation; the planets' orbits carry their own elements and need not be coplanar with it. |
 | Inclination | The angle between the midplane normal and the line of sight, in `[0, 180]`, 0 for a face-on disk. The projected axis ratio is `abs(cos(i))`, and `i` at `pa` is the same midplane as `180 - i` at `pa + 180`. The parametric disks render the same nonnegative map for both; above 90 degrees the near, forward-scattering half lies on the opposite side of the line of nodes from its position at `180 - i` and the same `pa`. |
 | Position angle | The projected major axis (the line of nodes) lies at `pa` from `+x` toward `+y`, so `pa = 0` puts it along the RA axis. This is **not** the astronomical position angle: with `+x` east, the major axis lies at astronomical PA (north through east) `90 - pa`, modulo 180. |
 | Near side | The half of the disk displaced toward `+z`. Its grains scatter forward, so a forward-scattering phase function brightens it. |
 | Scattering angle | The angle at a grain between the incident propagation direction (star to grain) and the direction toward the observer; 0 is forward scattering. The illumination angle is its supplement. |
 
-The views place the disk through the same rotation the ExoVista loader
-applies and the line-of-sight kernels integrate in, so an outline drawn by
-a view and a disk rendered by `surface_brightness` agree.
+ExoVista disk cubes are already projected on the sky, with +column west
+and +row north (`src/exovista/generate_scene.py` in ExoVista).
+`from_exovista` mirrors their columns at load so `ExovistaDisk` images
+share the planets' and parametric disks' east/north chart. The image center
+is `((nx - 1) / 2, (ny - 1) / 2)` for both even and odd sizes; the flip
+preserves it and the pixel scale. Parametric disks and their outlines use
+the system midplane angles; loaded cubes retain their rendered geometry.
 
 ## The system on the sky and side on
 

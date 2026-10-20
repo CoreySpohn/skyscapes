@@ -11,6 +11,12 @@ from .base import AbstractDisk
 class ExovistaDisk(AbstractDisk):
     """Wavelength-interpolated 3D contrast cube loaded from ExoVista FITS.
 
+    In both ``contrast_cube`` and ``surface_brightness``, +column is the
+    east offset (Delta alpha* = Delta RA cos Dec) and +row is north.
+    ExoVista's native cube has +column west; the loader mirrors columns
+    into this chart. The star lies at pixel coordinates
+    ``((nx - 1) / 2, (ny - 1) / 2)``, including half-pixels for even sizes.
+
     Attributes:
         pixel_scale_arcsec: Pixel scale [arcsec/pixel].
         wavelengths_nm: 1-D wavelength grid [nm], shape ``(n_wl,)``.
