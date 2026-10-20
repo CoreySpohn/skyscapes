@@ -4,6 +4,10 @@
 
 ### Bug Fixes
 
+* **io:** ExoVista planet states are now made star-relative before conversion
+  to orbital elements. Earlier releases used barycentric states, which biased
+  the elements of massive planets.
+
 * **io:** ExoVista planet positions and velocities are now converted from
   ExoVista's (west, north, toward) axes to the orbital-element convention
   (north, east, away) at load. Earlier releases kept ExoVista's axes, so

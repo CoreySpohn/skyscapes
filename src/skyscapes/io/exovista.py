@@ -287,9 +287,10 @@ def _load_single_planet(
 
     ExoVista stores the planet ``(r, v)`` state vectors already in the
     on-sky ("bary-sky") frame -- the same frame the disk cube is rendered
-    in. Their (west, north, toward) axes are converted to orbix's
-    (north, east, away) axes before deriving Keplerian elements. The
-    system inclination and PA are already applied by the writer.
+    in. Subtract the star's state at the same epoch to obtain star-relative
+    states, then convert their (west, north, toward) axes to orbix's
+    (north, east, away) axes before deriving Keplerian elements. The system
+    inclination and PA are already applied by the writer.
 
     With ``planet_spectra="time"`` the contrasts stay indexed by the FITS
     epochs, which preserves the stellar-activity history. With
@@ -307,9 +308,14 @@ def _load_single_planet(
 
     contrast_data = jnp.asarray(obj_data[:, 16:].T.astype(np.float32))
 
-    # Convert big-endian FITS data to native float64, then change axes.
-    r_sky_au = _exovista_to_orbix(jnp.asarray(obj_data[0, 9:12].astype(np.float64)))
-    v_sky_au_yr = _exovista_to_orbix(jnp.asarray(obj_data[0, 12:15].astype(np.float64)))
+    # Both layouts store barycentric body states in columns 9:15. Convert
+    # big-endian FITS data to native float64 before subtracting stellar reflex.
+    star_data = hdul[_star_extension(hdul)].data
+    relative_state = obj_data[0, 9:15].astype(np.float64) - star_data[0, 9:15].astype(
+        np.float64
+    )
+    r_sky_au = _exovista_to_orbix(jnp.asarray(relative_state[:3]))
+    v_sky_au_yr = _exovista_to_orbix(jnp.asarray(relative_state[3:]))
 
     r_sky_m = r_sky_au * AU2m
     v_sky_m_s = jnp.array(au_per_yr_to_m_per_s(v_sky_au_yr))

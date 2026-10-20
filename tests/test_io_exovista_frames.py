@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from astropy.io import fits
-from hwoutils.constants import J2000_JD, G, Msun2kg, d2s, yr2s
+from hwoutils.constants import J2000_JD, G, Mearth2kg, Msun2kg, d2s, yr2s
 from orbix.equations.orbit import AB_matrices, mean_motion
 from orbix.equations.propagation import single_r_v
 from orbix.kepler import markley_solve_trig, solve_trig
@@ -111,6 +111,53 @@ def test_exovista_recovers_known_elements(known_orbit_file):
     np.testing.assert_allclose(difference, 0.0, atol=2e-6)
 
 
+@pytest.mark.parametrize("version", [2.33, 2.5, 2.6])
+def test_exovista_recovers_known_elements_with_stellar_reflex(
+    known_orbit_file, version
+):
+    """Barycentric float32 states recover the star-relative orbit in both layouts."""
+    path, expected = known_orbit_file
+    a, e, inc, node, peri, anomaly = expected
+    mass_earth = 317.8
+    mass_ratio = mass_earth * Mearth2kg / Msun2kg
+    with fits.open(path, mode="update") as hdul:
+        star, planet = hdul[5].data, hdul[6].data
+        elapsed_days = jnp.asarray(planet[:, 0].astype(np.float64)) * (yr2s / d2s)
+        n = mean_motion(a, G * (Msun2kg + mass_earth * Mearth2kg))
+        sin_e, cos_e = solve_trig(anomaly + n * elapsed_days, e)
+        A, B = AB_matrices(a, e, inc, node, peri)
+        r, v = single_r_v(A, B, e, sin_e, cos_e, n)
+        # ExoVista's generate_scene.py writes barycentric west/north/toward
+        # states for both bodies, including the star's reflex motion.
+        relative_r = np.stack([-r[1], r[0], -r[2]], axis=-1)
+        relative_v = np.stack([-v[1], v[0], -v[2]], axis=-1) * (yr2s / d2s)
+        planet[:, 9:12] = relative_r / (1 + mass_ratio)
+        planet[:, 12:15] = relative_v / (1 + mass_ratio)
+        star[:, 9:12] = -mass_ratio * relative_r / (1 + mass_ratio)
+        star[:, 12:15] = -mass_ratio * relative_v / (1 + mass_ratio)
+        hdul[6].header["M"] = mass_earth
+        hdul[6].header["R"] = 11.2
+        hdul[0].header["VERSION"] = version
+        if version < 2.5:
+            del hdul[4]  # Legacy files have no starspot extension.
+
+    orbit = from_exovista(path, load_disk=False, planet_spectra="time").planets[0].orbit
+    actual = np.array(
+        [
+            orbit.a_AU[0],
+            orbit.e[0],
+            orbit.i_rad[0],
+            orbit.W_rad[0],
+            orbit.w_rad[0],
+            orbit.M0_rad[0],
+        ]
+    )
+    np.testing.assert_allclose(actual[:2], expected[:2], rtol=1e-7)
+    # Float32 state storage limits angle recovery; wrap atan2's signed angles.
+    difference = np.angle(np.exp(1j * (actual[2:] - expected[2:])))
+    np.testing.assert_allclose(difference, 0.0, rtol=0, atol=2e-6)
+
+
 def test_exovista_phase_matches_fits_observer_direction(known_orbit_file):
     """A planet toward the observer has a crescent, not a gibbous phase."""
     path, _ = known_orbit_file
@@ -123,3 +170,25 @@ def test_exovista_phase_matches_fits_observer_direction(known_orbit_file):
         system.trig_solver, times, star=system.star
     )
     np.testing.assert_allclose(np.cos(phase[0]), expected_cosine, atol=2e-6)
+
+
+def test_exovista_phase_model_preserves_analytic_light_curve(known_orbit_file):
+    """Phase regridding preserves a contrast linear in the observer phase angle."""
+    path, _ = known_orbit_file
+    with fits.open(path, mode="update") as hdul:
+        rows = hdul[6].data
+        relative = rows[:, 9:12].astype(np.float64) - hdul[5].data[:, 9:12]
+        beta = np.arccos(-relative[:, 2] / np.linalg.norm(relative, axis=1))
+        # A linear curve is exact under phase interpolation, independent of
+        # the fitted orbit or the placement of the loader's phase grid.
+        contrast = 1e-10 * (1 + beta / np.pi)
+        rows[:, 16:] = contrast[:, None] * np.array([1.0, 2.0, 3.0])
+        times = J2000_JD + rows[:, 0].astype(np.float64) * (yr2s / d2s)
+    system = from_exovista(path, load_disk=False, planet_spectra="phase")
+    np.testing.assert_allclose(
+        system.contrasts(600.0, times)[0], 2 * contrast, rtol=2e-6, atol=0
+    )
+    expected_flux = 2 * contrast * system.star.spec_flux_density(600.0, times)
+    np.testing.assert_allclose(
+        system.planet_flux_densities(600.0, times)[0], expected_flux, rtol=2e-6, atol=0
+    )
