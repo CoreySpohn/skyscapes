@@ -53,7 +53,7 @@ GEOMETRY_PARTS = (
 GEOMETRY_GROUPS = {"observer": ("observer_mark", "observer_label")}
 IMAGE_PARTS = ("star", "outline", "sightline")
 _SIDE_LABELS = (
-    r"$z$, toward the observer [AU]",
+    r"$z$, away from the observer [AU]",
     "offset along the projected minor axis [AU]",
 )
 
@@ -350,8 +350,8 @@ class _GeometryPanel:
         self.scattered = Arrow(ax, (0, 0), (0, 0), color=disk_color, gid="scattered")
         self.observer = Arrow(
             ax,
-            (1.05 * R, 0.95 * R),
-            (1.4 * R, 0.95 * R),
+            (-1.05 * R, 0.95 * R),
+            (-1.4 * R, 0.95 * R),
             color=_style.neutral(0.75),
             gid="observer",
         )
@@ -368,7 +368,7 @@ class _GeometryPanel:
             self.far_label = ax.text(0, 0, "far side", color=disk_color, **common)
             self.far_label.set_gid("label/far_side")
             observer = ax.text(
-                1.22 * R,
+                -1.22 * R,
                 1.0 * R,
                 observer_text,
                 color=_style.neutral(0.75),
@@ -449,7 +449,7 @@ class _GeometryPanel:
         grain3 = float(self.grain_radius) * near
         grain = self.side(grain3)
         self.grain.set_offsets([grain])
-        self.sightline.set_data([-1.2 * R, 1.42 * R], [grain[1], grain[1]])
+        self.sightline.set_data([-1.42 * R, 1.2 * R], [grain[1], grain[1]])
         if self.path is not None:
             # The sightline's chords through the dust support: the parts of
             # the horizontal line u = grain_u inside each layer rectangle
@@ -466,10 +466,10 @@ class _GeometryPanel:
         start = 0.12 * R * k_in
         self.incident.set(start, grain - 0.05 * R * k_in)
         self.scattered.set(
-            grain + np.array([0.04 * R, 0.0]), grain + np.array([0.42 * R, 0.0])
+            grain - np.array([0.04 * R, 0.0]), grain - np.array([0.42 * R, 0.0])
         )
         self.forward.set_data(*np.stack([grain, grain + 0.3 * R * k_in]).T)
-        self.theta.set(grain, k_in, np.array([1.0, 0.0]), 0.16 * R, r"$\Theta$", 1.9)
+        self.theta.set(grain, k_in, np.array([-1.0, 0.0]), 0.16 * R, r"$\Theta$", 1.9)
         self.incl_arc.set(
             (0.0, 0.0),
             np.array([0.0, 1.0]),
@@ -486,7 +486,7 @@ class _GeometryPanel:
             self.near_label.set_position(tuple(1.14 * r_out * d))
             self.far_label.set_position(tuple(-1.14 * r_out * d))
         if self.inset is not None:
-            self.inset.set(k_in, np.array([1.0, 0.0]))
+            self.inset.set(k_in, np.array([-1.0, 0.0]))
 
     def artists(self):
         """The panel's artists, grouped by artist-vocabulary key."""
@@ -548,7 +548,7 @@ def plot_disk_geometry(
     """Draw a disk edge-on to the reader: midplane, observer and one sightline.
 
     The panel is the plane holding the line of sight (horizontal, observer
-    to the right along ``+z``) and the disk's projected minor axis
+    to the left along ``-z``) and the disk's projected minor axis
     (vertical); the line of nodes points out of the page. The midplane is
     the line at the inclination from the sky plane, from the inner to the
     outer truncation radius on each side, with its near half on the
@@ -661,7 +661,7 @@ def plot_disk_geometry(
     if inset_bounds is None:
         near_grain = grain_radius_AU > 0.0
         inset_bounds = (
-            (0.62, 0.02, 0.36, 0.36) if near_grain else (0.02, 0.62, 0.36, 0.36)
+            (0.02, 0.02, 0.36, 0.36) if near_grain else (0.62, 0.62, 0.36, 0.36)
         )
 
     if ax is None:
@@ -687,7 +687,7 @@ def plot_disk_geometry(
     panel.place(float(incl))
     hide(panel.parts(shown), shown)
     R = radii[1]
-    ax.set_xlim(-1.2 * R, 1.45 * R)
+    ax.set_xlim(-1.45 * R, 1.2 * R)
     ax.set_ylim(-1.2 * R, 1.2 * R)
     ax.set_aspect("equal")
     ax.set_xlabel(_SIDE_LABELS[0])

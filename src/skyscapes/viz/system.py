@@ -3,7 +3,7 @@
 skyscapes supplies what eyepiece cannot know: where each planet is at an
 epoch (``System.positions`` and ``Planet.propagate``), where the disk's
 midplane sits (``System.midplane_inc_deg`` / ``midplane_pa_deg`` through
-the library's sky rotation), which way the observer is (``+z``), and that
+the library's sky rotation), which way the observer is (``-z``), and that
 RA offsets are drawn increasing to the left.
 """
 
@@ -20,7 +20,7 @@ from skyscapes.viz._require import eyepiece
 _VIEWS = ("sky", "side")
 _SKY_LABELS = ("RA offset [arcsec]", "Dec offset [arcsec]")
 _SIDE_LABELS = (
-    r"$z$, toward the observer [AU]",
+    r"$z$, away from the observer [AU]",
     "offset along the projected minor axis [AU]",
 )
 
@@ -85,11 +85,11 @@ def plot_system(
     ``System.positions``, optional orbit tracks over ``track_t_jd``, and the
     disk's inner and outer truncation rings projected at the system's
     midplane inclination and position angle, with the line of nodes. The
-    observer looks along ``-z``, into the page.
+    observer looks along ``+z``, into the page.
 
     ``view="side"`` turns the scene edge-on to the reader, in AU: the
-    horizontal axis is the line of sight with the observer to the right
-    (``+z``), the vertical axis the sky-plane offset along the disk's
+    horizontal axis is the line of sight with the observer to the left
+    (``-z``), the vertical axis the sky-plane offset along the disk's
     projected minor axis. The disk midplane appears as a line at the
     inclination from the sky plane, the near half on the observer's side,
     and each planet sits at its true distance toward or away from the
@@ -267,7 +267,7 @@ def plot_system(
         ax.set_ylabel(_SKY_LABELS[1])
     else:
         texts += _side_furniture(ax, half, lines, labels)
-        ax.set_xlim(-half, 1.3 * half)
+        ax.set_xlim(-1.3 * half, half)
         ax.set_ylim(-half, half)
         ax.set_xlabel(_SIDE_LABELS[0])
         ax.set_ylabel(_SIDE_LABELS[1])
@@ -309,15 +309,15 @@ def _side_furniture(ax, half, lines, labels):
     lines.append(plane)
     arrow = Arrow(
         ax,
-        (0.95 * half, 0.85 * half),
-        (1.25 * half, 0.85 * half),
+        (-0.95 * half, 0.85 * half),
+        (-1.25 * half, 0.85 * half),
         color=_style.neutral(0.75),
         gid="observer",
     )
     texts = [arrow.artist]
     if labels:
         text = ax.text(
-            1.1 * half,
+            -1.1 * half,
             0.93 * half,
             "to observer",
             color=_style.neutral(0.75),

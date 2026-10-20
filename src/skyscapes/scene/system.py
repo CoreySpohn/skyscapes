@@ -33,13 +33,13 @@ class System(eqx.Module):
         midplane_inc_deg: Disk midplane inclination [deg] in [0, 180],
             with 0 face-on (the default). Together with ``midplane_pa_deg``,
             orients parametric disks and visualization outlines in the
-            (east, north, toward observer) sky chart. ``io.from_exovista``
+            right-handed (east, north, away) sky frame. ``io.from_exovista``
             preserves the FITS star header's I. Planet orbits and loaded
             disk images already carry their own geometry.
         midplane_pa_deg: Disk line-of-nodes angle [deg], measured from east
             (+x) toward north (+y), default 0. This is not astronomical PA.
             ``io.from_exovista`` converts the FITS star header's west-based
-            PA to ``(-PA) % 360``, preserving the near half toward +z.
+            PA to ``(-PA) % 360``, preserving the near half toward the observer (-z).
     """
 
     star: AbstractStar

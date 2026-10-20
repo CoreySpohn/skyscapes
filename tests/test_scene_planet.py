@@ -158,22 +158,22 @@ def _quarter_period_times(planet):
 
 
 def test_phase_angle_and_sky_position_at_known_anomalies():
-    """Pin the toward-axis sign and standard phase at M = 90 and 270 deg.
+    """Pin the away-axis sign and standard phase at M = 90 and 270 deg.
 
     Green (1985), Spherical Astronomy, ch. 17, and Brandt et al. (2021),
-    AJ 162, 186 give (north, east, away); the sky chart is (east, north,
-    toward). Brown (2005), ApJ 624, 1010, Eq. 4 uses zero at full phase.
+    AJ 162, 186 give (north, east, away); the right-handed sky chart is (east, north,
+    away). Brown (2005), ApJ 624, 1010, Eq. 4 uses zero at full phase.
     """
     p = _circular_planet(jnp.deg2rad(60.0))
     r, alpha, dist = p.propagate(SOLVER, _quarter_period_times(p), star=_STAR)
     np.testing.assert_allclose(jnp.rad2deg(alpha[0]), [30.0, 150.0], atol=1e-6)
     np.testing.assert_allclose(
         r[0],
-        [[0.5, -0.5], [0.0, 0.0], [-np.sqrt(3) / 2, np.sqrt(3) / 2]],
+        [[0.5, -0.5], [0.0, 0.0], [np.sqrt(3) / 2, -np.sqrt(3) / 2]],
         atol=1e-6,
     )
     np.testing.assert_allclose(dist, 1.0, atol=1e-8)
-    np.testing.assert_allclose(jnp.cos(alpha), -r[:, 2, :] / dist, atol=1e-8)
+    np.testing.assert_allclose(jnp.cos(alpha), r[:, 2, :] / dist, atol=1e-8)
 
 
 @pytest.mark.parametrize("observable", ["contrast", "dMag", "flux"])
@@ -235,7 +235,8 @@ def test_edge_on_superior_conjunction_is_brightest():
     r, alpha, _ = p.propagate(SOLVER, times, star=_STAR)
     _, dMag = p.alpha_dMag(SOLVER, times, star=_STAR)
     np.testing.assert_allclose(jnp.rad2deg(alpha[0]), [1.0, 179.0], atol=1e-6)
-    assert r[0, 2, 0] < 0 < r[0, 2, 1]
+    # Positive z is behind the star in the away chart.
+    assert r[0, 2, 0] > 0 > r[0, 2, 1]
     assert dMag[0, 0] < 23.5
     assert dMag[0, 1] > dMag[0, 0] + 1.0
 
@@ -255,3 +256,13 @@ def test_inclined_phase_angle_range():
     _, alpha, _ = _sample_orbit(p, n=1461)
     assert abs(float(jnp.rad2deg(alpha.min())) - 30.0) < 0.2
     assert abs(float(jnp.rad2deg(alpha.max())) - 150.0) < 0.2
+
+
+def test_planet_propagate_passes_orbix_through_exactly():
+    """Positions, phase and distance share orbix's public frame unchanged."""
+    p = _single_planet()
+    times = jnp.array([0.0, 42.0, 200.0])
+    expected = p.orbit.propagate(SOLVER, times, Ms_kg=_STAR.Ms_kg)
+    actual = p.propagate(SOLVER, times, star=_STAR)
+    for got, want in zip(actual, expected, strict=True):
+        np.testing.assert_array_equal(got, want)

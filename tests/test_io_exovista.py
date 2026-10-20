@@ -114,7 +114,8 @@ def test_exovista_disk_and_planet_share_east_north_chart(fits_fixture):
     # -10.6 px.
     r_sky, _, _ = planet.propagate(system.trig_solver, times, star=system.star)
     r_sky = np.asarray(r_sky)[0]
-    near = r_sky[:2, r_sky[2] > 0].mean(axis=1)
+    # Toward the observer is negative z in the away chart.
+    near = r_sky[:2, r_sky[2] < 0].mean(axis=1)
     near = near / np.hypot(*near)
     centre = (np.array(brightness.shape, dtype=float) - 1) / 2
     offset = np.average(

@@ -10,6 +10,7 @@ from orbix.equations.propagation import single_r_v
 from orbix.kepler import markley_solve_trig, solve_trig
 
 from skyscapes.io import from_exovista
+from skyscapes.io.exovista import _exovista_to_orbix
 
 
 @pytest.fixture(params=[(38.0, 63.0, 41.0, 27.0), (127.0, 213.0, 302.0, 231.0)])
@@ -60,8 +61,9 @@ def known_orbit_file(tmp_path, request):
     )
     planet = np.zeros_like(star)
     planet[:, 0] = elapsed_years
-    planet[:, 9:12] = np.stack([-r[1], r[0], -r[2]], axis=-1)
-    planet[:, 12:15] = np.stack([-v[1], v[0], -v[2]], axis=-1) * (yr2s / d2s)
+    # Orbix rows are east/north/away; the FITS chart is west/north/toward.
+    planet[:, 9:12] = np.stack([-r[0], r[1], -r[2]], axis=-1)
+    planet[:, 12:15] = np.stack([-v[0], v[1], -v[2]], axis=-1) * (yr2s / d2s)
     planet[:, 16:] = 1e-10
     hdus.append(
         fits.ImageHDU(planet, header=fits.Header({"A": a, "E": e, "M": 0.0, "R": 1.0}))
@@ -132,8 +134,9 @@ def test_exovista_recovers_known_elements_with_stellar_reflex(
         r, v = single_r_v(A, B, e, sin_e, cos_e, n)
         # ExoVista's generate_scene.py writes barycentric west/north/toward
         # states for both bodies, including the star's reflex motion.
-        relative_r = np.stack([-r[1], r[0], -r[2]], axis=-1)
-        relative_v = np.stack([-v[1], v[0], -v[2]], axis=-1) * (yr2s / d2s)
+        relative_r = np.stack([-r[0], r[1], -r[2]], axis=-1)
+        relative_v = np.stack([-v[0], v[1], -v[2]], axis=-1) * (yr2s / d2s)
+        # Orbix rows are east/north/away; the FITS chart is west/north/toward.
         planet[:, 9:12] = relative_r / (1 + mass_ratio)
         planet[:, 12:15] = relative_v / (1 + mass_ratio)
         star[:, 9:12] = -mass_ratio * relative_r / (1 + mass_ratio)
@@ -195,3 +198,11 @@ def test_exovista_phase_model_preserves_analytic_light_curve(known_orbit_file):
     np.testing.assert_allclose(
         system.planet_flux_densities(600.0, times)[0], expected_flux, rtol=2e-6, atol=0
     )
+
+
+def test_exovista_frame_conversion_is_proper():
+    """West/north/toward to east/north/away is a proper half-turn about north."""
+    rotation = np.asarray(_exovista_to_orbix(jnp.eye(3)))
+    assert np.linalg.det(rotation) == pytest.approx(1.0, abs=1e-14)
+    np.testing.assert_array_equal(rotation, np.diag([-1.0, 1.0, -1.0]))
+    np.testing.assert_array_equal(rotation @ rotation.T, np.eye(3))

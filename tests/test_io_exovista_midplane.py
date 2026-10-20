@@ -131,24 +131,25 @@ def test_exovista_midplane_matches_image(midplane_measurements, measurement):
 
 @pytest.mark.parametrize("inc_deg", [30.0, 60.0, 120.0, 150.0])
 @pytest.mark.parametrize("pa_deg", [-30.0, 0.0, 30.0, 213.0, 390.0])
-def test_midplane_conversion_reflects_plane_and_near_side(inc_deg, pa_deg):
-    """Reflect ExoVista's basis across x, including inclinations above 90.
+def test_midplane_conversion_preserves_plane_and_near_side(inc_deg, pa_deg):
+    """Rotate ExoVista's basis by negating x and z, including inclinations above 90.
 
     The nodes may reverse along their line, but the near vector must match
     in all three coordinates. The supplementary-inclination representation
     must describe the same plane AND near half. Tolerance: float64 trig.
     """
     inc, pa = np.radians([inc_deg, pa_deg])
-    reflected_nodes = np.array([-np.cos(pa), np.sin(pa), 0.0])
-    reflected_near = np.array(
-        [np.cos(inc) * np.sin(pa), np.cos(inc) * np.cos(pa), np.sin(inc)]
+    converted_nodes = np.array([-np.cos(pa), np.sin(pa), 0.0])
+    # The same physical near half now has negative away-z.
+    converted_near = np.array(
+        [np.cos(inc) * np.sin(pa), np.cos(inc) * np.cos(pa), -np.sin(inc)]
     )
     converted_inc, converted_pa = _midplane_to_east_north(inc_deg, pa_deg)
     assert converted_inc == inc_deg
     assert 0.0 <= converted_pa < 360.0
     nodes, near, normal = disk_axes_sky(converted_inc, converted_pa)
-    np.testing.assert_allclose(-nodes, reflected_nodes, atol=1e-14)
-    np.testing.assert_allclose(near, reflected_near, atol=1e-14)
+    np.testing.assert_allclose(-nodes, converted_nodes, atol=1e-14)
+    np.testing.assert_allclose(near, converted_near, atol=1e-14)
     equivalent_nodes, equivalent_near, equivalent_normal = disk_axes_sky(
         180.0 - converted_inc, converted_pa + 180.0
     )

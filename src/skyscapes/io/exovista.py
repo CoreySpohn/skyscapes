@@ -265,13 +265,14 @@ def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
 
 
 def _exovista_to_orbix(vector: jnp.ndarray) -> jnp.ndarray:
-    """Convert (west, north, toward) to orbix's (north, east, away).
+    """Convert (west, north, toward) to orbix's (east, north, away).
 
     ExoVista's ``src/exovista/generate_scene.py`` ``generate_scene``
     docstring defines +x as west, +y as north and +z toward the observer.
-    For either a position or velocity vector, the conversion is (y, -x, -z).
+    For either a position or velocity vector, the conversion is (-x, y, -z),
+    a proper rotation (det +1).
     """
-    return jnp.stack([vector[1], -vector[0], -vector[2]])
+    return jnp.stack([-vector[0], vector[1], -vector[2]])
 
 
 def _load_single_planet(
@@ -289,7 +290,7 @@ def _load_single_planet(
     on-sky ("bary-sky") frame -- the same frame the disk cube is rendered
     in. Subtract the star's state at the same epoch to obtain star-relative
     states, then convert their (west, north, toward) axes to orbix's
-    (north, east, away) axes before deriving Keplerian elements. The system
+    (east, north, away) axes before deriving Keplerian elements. The system
     inclination and PA are already applied by the writer.
 
     With ``planet_spectra="time"`` the contrasts stay indexed by the FITS
@@ -403,10 +404,12 @@ def _midplane_to_east_north(inc_deg: float, pa_deg: float) -> tuple[float, float
     """Convert ExoVista header (I, PA) to the east/north midplane chart.
 
     ExoVista's ``src/exovista/generate_scene.py`` ``generate_scene``
-    docstring defines +x west, +y north, +z toward the observer. Mirroring
-    x maps the node vector to minus the node vector at -PA, and the near
-    in-plane vector to the near vector at -PA, with I unchanged. This
-    preserves both the plane and its near side below and above I = 90;
+    docstring defines +x west, +y north, +z toward the observer. Negating
+    x and z maps the node vector to minus the node vector at -PA, and the
+    near in-plane vector to the near vector at -PA in (east, north, away),
+    with I unchanged. The physical near half points toward the observer
+    (negative z). This preserves both the plane and its near side below
+    and above I = 90;
     180 - PA would preserve only the projected major-axis line.
     """
     return inc_deg, (-pa_deg) % 360.0
@@ -484,7 +487,7 @@ def from_exovista(
     """Load an ExoVista FITS file into a ``scene.System``.
 
     State vectors are already on-sky; their (west, north, toward) axes
-    are converted to orbix's (north, east, away) axes. The FITS star
+    are converted to orbix's (east, north, away) axes. The FITS star
     header's midplane (I, PA) becomes (I, -PA modulo 360) in the east/north
     chart on ``System.midplane_*``, used by parametric disks and outlines.
     These angles are not applied again to the states or loaded image.

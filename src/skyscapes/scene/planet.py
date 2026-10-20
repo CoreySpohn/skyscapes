@@ -70,22 +70,18 @@ class Planet(eqx.Module):
     def propagate(self, trig_solver, t_jd: Array, *, star: AbstractStar):
         """Propagate the orbit; returns ``(r_AU, phase_angle_rad, dist_AU)``.
 
-        ``r_AU`` has shape ``(K, 3, T)`` in the sky chart (east, north,
-        toward the observer). orbix's raw (north, east, away) positions
-        are converted here once (Green 1985, Spherical Astronomy, ch. 17;
-        Brandt et al. 2021, AJ 162, 186).
+        ``r_AU`` has shape ``(K, 3, T)`` in orbix's right-handed
+        (east, north, away) frame, passed through unchanged. Positive z
+        points away from the observer; dz/dt is positive when receding.
+        ``position_arcsec`` reads rows 0 and 1 as east and north.
 
         ``phase_angle_rad`` is the standard star-planet-observer phase angle:
         0 at full phase (superior conjunction, planet behind the star),
         ``pi / 2`` at quadrature and ``pi`` at new phase (inferior
         conjunction). orbix returns this angle directly; it is unchanged.
-        In this sky chart, ``cos(phase_angle_rad) = -r_AU[:, 2, :] / dist_AU``.
+        In this sky chart, ``cos(phase_angle_rad) = +r_AU[:, 2, :] / dist_AU``.
         """
-        r_AU, phase_angle_rad, dist_AU = self.orbit.propagate(
-            trig_solver, t_jd, Ms_kg=star.Ms_kg
-        )
-        r_sky_AU = jnp.stack([r_AU[:, 1, :], r_AU[:, 0, :], -r_AU[:, 2, :]], axis=1)
-        return r_sky_AU, phase_angle_rad, dist_AU
+        return self.orbit.propagate(trig_solver, t_jd, Ms_kg=star.Ms_kg)
 
     def position_arcsec(
         self,

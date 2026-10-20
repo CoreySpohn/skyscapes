@@ -63,7 +63,7 @@ def plot_scattering_angle(
     continuation of ``k_in`` (dashed) to ``k_out``, so ``Theta = 0`` is
     forward scattering; the illumination angle ``alpha = 180 - Theta`` is
     measured from the direction back toward the star to ``k_out``. For a
-    disk seen from far along ``+z``, ``cos(Theta) = k_in . k_out`` is the
+    disk seen from far along ``-z``, ``cos(Theta) = k_in . k_out`` is the
     angle the disk kernels evaluate their phase functions at.
 
     Two-element directions are drawn in the page plane as given. Three-

@@ -17,17 +17,19 @@
   the elements of massive planets.
 
 * **io:** ExoVista planet positions and velocities are now converted from
-  ExoVista's (west, north, toward) axes to the orbital-element convention
-  (north, east, away) at load. Earlier releases kept ExoVista's axes, so
+  ExoVista's (west, north, toward) axes to (east, north, away) at load
+  with the proper rotation (-x, y, -z). Earlier releases kept ExoVista's axes, so
   loaded elements (Omega, i, omega) followed a different convention, though
   the raw FITS state values round-tripped. Imported contrast light curves
   are preserved.
 
 * **scene:** `Planet.position_arcsec` now returns (Delta alpha*, Delta Dec) =
   (east, north), where Delta alpha* = Delta RA cos Dec. `Planet.propagate`
-  returns positions in the documented sky chart (east, north, toward the
-  observer) with the standard star-planet-observer phase angle. Earlier
-  releases swapped sky axes for planets built from orbital elements;
+  returns orbix's (east, north, away) positions unchanged: right-handed,
+  z positive away and dz/dt positive receding, with the standard phase
+  cos(beta) = z/r. This requires orbix>=3.0.0. Earlier releases returned
+  raw orbix rows (north, east, away) re-labelled as east/north, swapping
+  sky axes for planets built from orbital elements;
   ExoVista planets instead had west-positive offsets. Element-built planets
   also had inverted phases (crescent and gibbous exchanged), changing
   `alpha_dMag`, `contrast` and `spec_flux_density`. ExoVista phase grids use

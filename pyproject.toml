@@ -27,7 +27,7 @@ dependencies = [
     "jaxtyping",
     "numpy",
     "optixstuff",
-    "orbix",
+    "orbix>=3.0.0",
     "pooch",
     "scipy",
     # exojax -> radis 0.17 -> vaex-core. vaex-core 4.19 has Linux py3.12
@@ -59,7 +59,7 @@ test = [
     "hypothesis",
     "ineedvalidation",
     "pytest-cov",
-    "orbix",
+    "orbix>=3.0.0",
     "exoverses",
     "skyscapes[viz]",
 ]

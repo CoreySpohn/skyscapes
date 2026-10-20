@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from hwoutils.constants import G, Msun2kg
+from orbix.kepler import markley_solve_trig
 from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.orbit import KeplerianOrbit
 
@@ -361,12 +362,12 @@ def test_near_side_is_where_the_kernel_scatters_forward(pa):
 
     side = by_gid(viz.plot_system(system, 0.0, view="side"))
     z_near = side["disk/near"].get_xdata()
-    assert np.all(z_near > 0.0), "the near half must lie toward the observer"
+    assert np.all(z_near < 0.0), "the near half must lie toward the observer"
 
 
 @pytest.mark.parametrize("view", ["sky", "side"])
-def test_system_views_use_east_north_toward(view):
-    """Pin markers and tracks to known orbital positions, observer at sky +z.
+def test_system_views_use_east_north_away(view):
+    """Pin markers and tracks to known orbital positions, observer at sky -z.
 
     Green (1985), Spherical Astronomy, ch. 17; Brandt et al. (2021),
     AJ 162, 186: Omega = omega = 0 puts the ascending node north;
@@ -401,14 +402,14 @@ def test_system_views_use_east_north_toward(view):
     artists = by_gid(result)
 
     def chart(u):
-        # Circular orbit, node north: (east, north, toward) in AU at argument u.
+        # Circular orbit, node north: (east, north, away) in AU at argument u.
         inc = np.deg2rad(60.0)
         east, north = np.sin(u) * np.cos(inc), np.cos(u)
-        toward = -np.sin(u) * np.sin(inc)
+        away = np.sin(u) * np.sin(inc)
         # At PA = 90 deg, the side-view minor-axis offset is -east.
         if view == "sky":
             return [east / DIST_PC, north / DIST_PC]
-        return [toward, -east]
+        return [away, -east]
 
     u_late = np.pi / 2 + np.sqrt(G * Msun2kg) * track_days
     np.testing.assert_allclose(
@@ -422,8 +423,8 @@ def test_system_views_use_east_north_toward(view):
         assert not result.ax.yaxis_inverted()
     else:
         arrow = arrow_vector(artists["observer"])
-        assert arrow[0] > 0.0 and arrow[1] == pytest.approx(0.0)
-        assert artists["observer"].xy[0] > 0.0
+        assert arrow[0] < 0.0 and arrow[1] == pytest.approx(0.0)
+        assert artists["observer"].xy[0] < 0.0
         assert not result.ax.xaxis_inverted()
 
 
@@ -443,13 +444,14 @@ def test_scattering_angle_on_the_minor_axis_is_90_minus_i(incl):
 
 
 def test_geometry_panel_places_the_midplane_at_the_inclination():
-    """The midplane makes angle i with the sky plane, near half at +z."""
+    """The midplane makes angle i with the sky plane, near half at -z."""
     for incl in (10.0, 45.0, 80.0):
         gids = by_gid(viz.plot_disk_geometry(make_system(incl, 0.0)))
         z, u = gids["disk/near"].get_xydata().T
-        tilt = np.degrees(np.arctan2(z[1] - z[0], u[1] - u[0]))
+        tilt = np.degrees(np.arctan2(-(z[1] - z[0]), u[1] - u[0]))
         assert tilt == pytest.approx(incl, abs=1e-9)
-        assert np.all(z > 0.0)
+        # Near-side distances are negative in the away chart.
+        assert np.all(z < 0.0)
 
 
 def test_zodi_sightline_angles_match_the_inputs():
@@ -1330,3 +1332,48 @@ def test_zodi_top_look_label_clears_the_rays(font):
                 frame = ax.get_window_extent()
                 assert frame.x0 <= bb.x0 and bb.x1 <= frame.x1, (beta, dlon)
                 assert frame.y0 <= bb.y0 and bb.y1 <= frame.y1, (beta, dlon)
+
+
+def test_side_view_superior_conjunction_is_away_from_observer():
+    """A full-phase planet at z > 0 is opposite the observer's negative-z arrow."""
+    planet = Planet(
+        Rp_Rearth=jnp.array([1.0]),
+        Mp_Mearth=jnp.array([1.0]),
+        orbit=KeplerianOrbit(
+            a_AU=jnp.array([1.0]),
+            e=jnp.array([0.0]),
+            W_rad=jnp.array([0.0]),
+            i_rad=jnp.array([np.pi / 2]),
+            w_rad=jnp.array([0.0]),
+            M0_rad=jnp.array([np.pi / 2]),
+            t0_d=jnp.array([0.0]),
+        ),
+        physical_model=LambertianPhysicalModel(Ag=jnp.array([0.3])),
+    )
+    # Use the exact solver at conjunction to exclude grid interpolation error.
+    system = System(
+        star=make_system().star, planets=(planet,), trig_solver=markley_solve_trig
+    )
+    result = viz.plot_system(system, 0.0, view="side")
+    artists = by_gid(result)
+    np.testing.assert_allclose(
+        artists["planet/b"].get_offsets()[0], [1.0, 0.0], atol=1e-8
+    )
+    assert "away from the observer" in result.ax.get_xlabel()
+    assert arrow_vector(artists["observer"])[0] < 0
+    assert artists["observer"].xy[0] < 0
+    star_x = result.ax.transData.transform((0.0, 0.0))[0]
+    planet_x = result.ax.transData.transform(artists["planet/b"].get_offsets()[0])[0]
+    observer_x = result.ax.transData.transform(artists["observer"].xy)[0]
+    assert observer_x < star_x < planet_x
+
+
+def test_disk_side_observer_and_scattered_light_point_to_negative_z():
+    """Observer, near-side grain and outgoing ray all use the away-z chart."""
+    result = viz.plot_disk_geometry(make_system())
+    artists = by_gid(result)
+    assert "away from the observer" in result.ax.get_xlabel()
+    assert artists["grain"].get_offsets()[0, 0] < 0
+    assert artists["observer"].xy[0] < 0
+    assert arrow_vector(artists["observer"])[0] < 0
+    assert arrow_vector(artists["scattered"])[0] < 0

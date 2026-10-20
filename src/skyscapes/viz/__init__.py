@@ -9,8 +9,10 @@ checked only when a plot function is first touched.
 Every view draws in the library's own frames. The sky frame is
 ``(x, y, z)`` with ``x`` the east offset (Delta RA cos Dec, drawn increasing
 to the left), ``y`` the north (Dec) offset and ``+z`` pointing from the star
-toward the observer. ``Planet.propagate`` converts orbix positions into this
-frame, shared by ``Planet.position_arcsec`` and the parametric disk kernels. The
+away from the observer: (east, north, away), right-handed.
+``Planet.propagate`` passes orbix positions through with cos(beta) = z/r;
+``Planet.position_arcsec`` reads the first two rows. The disk LOS kernel
+keeps a private toward-pointing depth and returns only a sky image. The
 disk midplane is placed in that frame by ``System.midplane_inc_deg`` and
 ``System.midplane_pa_deg`` through ``io._frames.rotate_to_sky_coords``,
 so a drawn outline and a parametric surface-brightness map agree. The

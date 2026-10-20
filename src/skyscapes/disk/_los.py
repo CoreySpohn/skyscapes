@@ -48,9 +48,11 @@ def los_integrate_scattered(
 ) -> Array:
     """Integrate scattered light along LOS around the disk midplane.
 
-    Sky frame: ``+x`` along the image columns (the axis
-    ``Planet.position_arcsec`` reports as the RA offset), ``+y`` along the
-    rows toward N, observer along ``+z``. ``pa_deg`` rotates the disk's
+    Private integration chart: (east, north, toward), with depth ``l_grid``
+    positive toward the observer (the negative of public sky z). ``+x``
+    runs along image columns (the east offset from ``Planet.position_arcsec``),
+    ``+y`` along rows toward N. Only a 2D brightness map leaves this kernel;
+    no vector is returned in the private chart. ``pa_deg`` rotates the disk's
     projected major axis (the line of nodes) from ``+x`` toward ``+y``, so
     ``pa_deg = 0`` puts the major axis along ``+x``. This is not the
     astronomical position angle: with ``+x`` east, the major axis lies at
@@ -155,7 +157,7 @@ def los_integrate_scattered(
     r_AU = jnp.sqrt(xy_sq_safe)
     rho = density_fn(r_AU, z_d, valid)
 
-    # Scattering angle: observer-frame z / |position| = l_grid / |position|.
+    # Scattering cosine: private toward-depth / distance = -public sky z / r.
     safe_d_sq = jnp.where(d_star_sq > 0.0, d_star_sq, 1.0)
     safe_d = jnp.sqrt(safe_d_sq)
     cos_phi = l_grid / safe_d
