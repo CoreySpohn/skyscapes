@@ -107,9 +107,10 @@ extent `(+half_x, -half_x, -half_y, +half_y)`: RA offset increases to the
 left without a separate x-axis inversion. Planets and outlines retain
 their east/north sky coordinates.
 
-The views place the disk through the same rotation the ExoVista loader
-applies and the line-of-sight kernels integrate in, so an outline drawn by
-a view and a disk rendered by `surface_brightness` agree.
+The views place the disk through the same rotation the line-of-sight
+kernels integrate in, so an outline drawn by a view and a disk rendered by
+`surface_brightness` agree. ExoVista scenes reach that rotation through
+the converted (east, north, away) states and the header `(I, PA)` below.
 
 The loader also converts the FITS star header's `(I, PA)` into
 `System.midplane_inc_deg = I` and `System.midplane_pa_deg = (-PA) % 360`.

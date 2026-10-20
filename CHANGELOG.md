@@ -26,8 +26,9 @@
   ExoVista's (west, north, toward) axes to (east, north, away) at load
   with the proper rotation (-x, y, -z). Earlier releases kept ExoVista's axes, so
   loaded elements (Omega, i, omega) followed a different convention, though
-  the raw FITS state values round-tripped. Imported contrast light curves
-  are preserved.
+  the raw FITS state values round-tripped. Time-indexed contrast light
+  curves are preserved. Phase-indexed contrasts are regridded on the
+  star-relative phase, so they can differ slightly from earlier releases.
 
 * **scene:** `Planet.position_arcsec` now returns (Delta alpha*, Delta Dec) =
   (east, north), where Delta alpha* = Delta RA cos Dec. `Planet.propagate`
@@ -36,10 +37,14 @@
   cos(beta) = z/r. This requires orbix>=3.0.0. Earlier releases returned
   raw orbix rows (north, east, away) re-labelled as east/north, swapping
   sky axes for planets built from orbital elements;
-  ExoVista planets instead had west-positive offsets. Element-built planets
-  also had inverted phases (crescent and gibbous exchanged), changing
+  ExoVista planets instead had west-positive offsets. In 1.6.1 and 2.0.0,
+  element-built planets also had inverted phases (crescent and gibbous exchanged), changing
   `alpha_dMag`, `contrast` and `spec_flux_density`. ExoVista phase grids use
-  the same standard angle at construction and evaluation, preserving imported fluxes.
+  the same standard angle at construction and evaluation.
+
+* **viz:** Side views in `plot_system` and `plot_disk_geometry` place the
+  observer on the left at -z, with z labelled away from the observer. The
+  scattering diagram labels the illumination angle beta.
 
 ## [2.0.0](https://github.com/CoreySpohn/skyscapes/compare/v1.6.1...v2.0.0) (2026-10-13)
 

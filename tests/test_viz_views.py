@@ -1163,13 +1163,13 @@ def test_scattering_angle_values_go_where_asked(values):
         arcs = [gids[f"{a}/label"].get_text() for a in ANGLES]
         if values == "corner":
             assert [_degrees_in(t) for t in corner] == [theta, 180 - theta]
-            assert arcs == [r"$\Theta$", r"$\alpha$"]
+            assert arcs == [r"$\Theta$", r"$\beta$"]
         elif values == "arcs":
             assert corner == ["", ""]
             assert [_degrees_in(t) for t in arcs] == [theta, 180 - theta]
         else:
             assert corner == ["", ""]
-            assert arcs == [r"$\Theta$", r"$\alpha$"]
+            assert arcs == [r"$\Theta$", r"$\beta$"]
 
 
 ANGLES = ("scattering_angle", "illumination_angle")

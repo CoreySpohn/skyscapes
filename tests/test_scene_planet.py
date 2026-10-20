@@ -79,7 +79,7 @@ def test_planet_alpha_dMag_matches_orbix():
     Rp_AU = jnp.array([1.0]) * Rearth2AU
 
     r_AU, _, dist_AU = orbit.propagate(SOLVER, t_jd, Ms_kg=Ms_kg)
-    # Raw orbix z points away: cos(alpha) = z / r.
+    # Raw orbix z points away: cos(beta) = z / r.
     cos_a = r_AU[:, 2, :] / dist_AU
     phase = lambert_phase_exact(cos_a, jnp.sqrt(1.0 - cos_a**2))
     log_arg = Ag[:, None] * (Rp_AU[:, None] / dist_AU) ** 2 * phase
@@ -146,9 +146,9 @@ _STAR = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
 def _sample_orbit(planet, n=361):
     """Positions, phase angle and dMag over one period (K=1)."""
     t_jd = jnp.linspace(0.0, 365.25, n)
-    r_AU, alpha, _ = planet.propagate(SOLVER, t_jd, star=_STAR)
+    r_AU, beta, _ = planet.propagate(SOLVER, t_jd, star=_STAR)
     _, dMag = planet.alpha_dMag(SOLVER, t_jd, star=_STAR)
-    return r_AU[0], alpha[0], dMag[0]
+    return r_AU[0], beta[0], dMag[0]
 
 
 def _quarter_period_times(planet):
@@ -165,15 +165,15 @@ def test_phase_angle_and_sky_position_at_known_anomalies():
     away). Brown (2005), ApJ 624, 1010, Eq. 4 uses zero at full phase.
     """
     p = _circular_planet(jnp.deg2rad(60.0))
-    r, alpha, dist = p.propagate(SOLVER, _quarter_period_times(p), star=_STAR)
-    np.testing.assert_allclose(jnp.rad2deg(alpha[0]), [30.0, 150.0], atol=1e-6)
+    r, beta, dist = p.propagate(SOLVER, _quarter_period_times(p), star=_STAR)
+    np.testing.assert_allclose(jnp.rad2deg(beta[0]), [30.0, 150.0], atol=1e-6)
     np.testing.assert_allclose(
         r[0],
         [[0.5, -0.5], [0.0, 0.0], [np.sqrt(3) / 2, -np.sqrt(3) / 2]],
         atol=1e-6,
     )
     np.testing.assert_allclose(dist, 1.0, atol=1e-8)
-    np.testing.assert_allclose(jnp.cos(alpha), r[:, 2, :] / dist, atol=1e-8)
+    np.testing.assert_allclose(jnp.cos(beta), r[:, 2, :] / dist, atol=1e-8)
 
 
 @pytest.mark.parametrize("observable", ["contrast", "dMag", "flux"])
@@ -185,8 +185,8 @@ def test_lambert_brightness_at_mean_anomaly_90(observable):
     """
     p = _circular_planet(jnp.deg2rad(60.0))
     times = _quarter_period_times(p)[:1]
-    alpha = np.pi / 6
-    phase_factor = (np.sin(alpha) + (np.pi - alpha) * np.cos(alpha)) / np.pi
+    beta = np.pi / 6
+    phase_factor = (np.sin(beta) + (np.pi - beta) * np.cos(beta)) / np.pi
     assert phase_factor == pytest.approx(0.88084278, abs=1e-8)
     expected_contrast = 0.3 * Rearth2AU**2 * phase_factor
     if observable == "contrast":
@@ -232,9 +232,9 @@ def test_edge_on_superior_conjunction_is_brightest():
     """
     p = _circular_planet(jnp.deg2rad(89.0))
     times = _quarter_period_times(p)
-    r, alpha, _ = p.propagate(SOLVER, times, star=_STAR)
+    r, beta, _ = p.propagate(SOLVER, times, star=_STAR)
     _, dMag = p.alpha_dMag(SOLVER, times, star=_STAR)
-    np.testing.assert_allclose(jnp.rad2deg(alpha[0]), [1.0, 179.0], atol=1e-6)
+    np.testing.assert_allclose(jnp.rad2deg(beta[0]), [1.0, 179.0], atol=1e-6)
     # Positive z is behind the star in the away chart.
     assert r[0, 2, 0] > 0 > r[0, 2, 1]
     assert dMag[0, 0] < 23.5
@@ -244,18 +244,18 @@ def test_edge_on_superior_conjunction_is_brightest():
 def test_quadrature_phase_angle_is_half_pi():
     """With the planet on the sky plane (z = 0) the phase angle is pi / 2."""
     p = _circular_planet(jnp.deg2rad(89.0))
-    r, alpha, dMag = _sample_orbit(p)
+    r, beta, dMag = _sample_orbit(p)
     k = int(jnp.argmin(jnp.abs(r[2])))
-    assert abs(float(alpha[k]) - jnp.pi / 2) < 0.03
+    assert abs(float(beta[k]) - jnp.pi / 2) < 0.03
     assert abs(float(dMag[k]) - 24.40) < 0.05
 
 
 def test_inclined_phase_angle_range():
     """For i = 60 deg the phase angle spans [90 - i, 90 + i] = [30, 150] deg."""
     p = _circular_planet(jnp.deg2rad(60.0))
-    _, alpha, _ = _sample_orbit(p, n=1461)
-    assert abs(float(jnp.rad2deg(alpha.min())) - 30.0) < 0.2
-    assert abs(float(jnp.rad2deg(alpha.max())) - 150.0) < 0.2
+    _, beta, _ = _sample_orbit(p, n=1461)
+    assert abs(float(jnp.rad2deg(beta.min())) - 30.0) < 0.2
+    assert abs(float(jnp.rad2deg(beta.max())) - 150.0) < 0.2
 
 
 def test_planet_propagate_passes_orbix_through_exactly():
