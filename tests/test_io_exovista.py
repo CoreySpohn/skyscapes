@@ -144,7 +144,7 @@ def test_exovista_flux_preserved_with_standard_phase(
     )
     for planet in system.planets:
         raw, _, dist = planet.orbit.propagate(
-            system.trig_solver, times, Ms_kg=system.star.Ms_kg
+            system.trig_solver, times, Ms_kg=planet.central_mass_kg(star=system.star)
         )
         _, phase, _ = planet.propagate(system.trig_solver, times, star=system.star)
         np.testing.assert_allclose(jnp.cos(phase), raw[:, 2, :] / dist, atol=1e-6)

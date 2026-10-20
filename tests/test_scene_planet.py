@@ -5,7 +5,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from hwoutils.constants import G, Rearth2AU
+from hwoutils.constants import G, Mearth2kg, Rearth2AU
 from orbix.equations.orbit import mean_motion, period_n
 from orbix.equations.phase import lambert_phase_exact
 from orbix.kepler.shortcuts.grid import get_grid_solver
@@ -73,7 +73,8 @@ def test_planet_alpha_dMag_matches_orbix():
         M0_rad=jnp.array([jnp.pi / 4]),
         t0_d=jnp.array([0.0]),
     )
-    Ms_kg = jnp.array([1.989e30])
+    # The planet adds its own mass to the central mass (two-body mu).
+    Ms_kg = jnp.array([1.989e30]) + p.Mp_Mearth * Mearth2kg
     dist_pc = jnp.array([10.0])
     Ag = jnp.array([0.3])
     Rp_AU = jnp.array([1.0]) * Rearth2AU
@@ -132,9 +133,11 @@ def _circular_planet(i_rad, M0_rad=0.0, W_rad=0.0):
         M0_rad=jnp.array([M0_rad]),
         t0_d=jnp.array([0.0]),
     )
+    # Mass zero means unknown: a test particle, so mu = G M_star exactly and
+    # the hand-derived anomalies below hold without a mass correction.
     return Planet(
         Rp_Rearth=jnp.array([1.0]),
-        Mp_Mearth=jnp.array([1.0]),
+        Mp_Mearth=jnp.array([0.0]),
         orbit=orbit,
         physical_model=LambertianPhysicalModel(Ag=jnp.array([0.3])),
     )
@@ -262,7 +265,9 @@ def test_planet_propagate_passes_orbix_through_exactly():
     """Positions, phase and distance share orbix's public frame unchanged."""
     p = _single_planet()
     times = jnp.array([0.0, 42.0, 200.0])
-    expected = p.orbit.propagate(SOLVER, times, Ms_kg=_STAR.Ms_kg)
+    expected = p.orbit.propagate(
+        SOLVER, times, Ms_kg=_STAR.Ms_kg + p.Mp_Mearth * Mearth2kg
+    )
     actual = p.propagate(SOLVER, times, star=_STAR)
     for got, want in zip(actual, expected, strict=True):
         np.testing.assert_array_equal(got, want)

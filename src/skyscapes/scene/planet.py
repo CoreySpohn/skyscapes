@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import equinox as eqx
 import jax.numpy as jnp
-from hwoutils.constants import G, pc2AU, rad2arcsec, two_pi
+from hwoutils.constants import G, Mearth2kg, pc2AU, rad2arcsec, two_pi
 from jaxtyping import Array
 from orbix.equations.orbit import mean_anomaly_tp, mean_motion, period_n
 from orbix.orbit import AbstractOrbit
@@ -54,6 +54,21 @@ class Planet(eqx.Module):
         """Number of planets ``K`` carried by this composed module."""
         return int(self.Rp_Rearth.shape[0])
 
+    def central_mass_kg(self, *, star: AbstractStar) -> Array:
+        """Mass that sets each planet's orbital period [kg], shape ``(K,)``.
+
+        The two-body relative orbit has gravitational parameter
+        ``G (M_star + M_planet)``. Where ``Mp_Mearth`` is finite and positive
+        the planet mass is added to the stellar mass; where it is NaN, zero or
+        negative (mass unknown) the planet is treated as a test particle and
+        only ``M_star`` is used. Loaders that derive elements from a state
+        vector use the same sum, so loading and propagation share one
+        gravitational parameter.
+        """
+        mp_kg = self.Mp_Mearth * Mearth2kg
+        known = jnp.isfinite(mp_kg) & (mp_kg > 0.0)
+        return star.Ms_kg + jnp.where(known, mp_kg, 0.0)
+
     def mean_anomaly(self, t_jd: Array, *, star: AbstractStar) -> Array:
         """Mean anomaly mod 360 [deg], shape ``(K, T)``.
 
@@ -61,7 +76,7 @@ class Planet(eqx.Module):
         that hold a scalar should wrap it in ``jnp.asarray([t])`` at the
         call site.
         """
-        n = mean_motion(self.orbit.a_AU, G * star.Ms_kg)
+        n = mean_motion(self.orbit.a_AU, G * self.central_mass_kg(star=star))
         T_d = period_n(n)
         tp_d = self.orbit.t0_d - T_d * self.orbit.M0_rad / two_pi
         M = mean_anomaly_tp(t_jd[None, :], n[:, None], tp_d[:, None]) % two_pi
@@ -81,7 +96,9 @@ class Planet(eqx.Module):
         conjunction). orbix returns this angle directly; it is unchanged.
         In this sky chart, ``cos(phase_angle_rad) = +r_AU[:, 2, :] / dist_AU``.
         """
-        return self.orbit.propagate(trig_solver, t_jd, Ms_kg=star.Ms_kg)
+        return self.orbit.propagate(
+            trig_solver, t_jd, Ms_kg=self.central_mass_kg(star=star)
+        )
 
     def position_arcsec(
         self,

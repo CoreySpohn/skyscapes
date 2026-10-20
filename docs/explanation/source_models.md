@@ -146,6 +146,44 @@ It supports the legacy stellar extension and the newer layout with a
 spot extension before the star, including ExoVista v2.6, without
 relying on an extension-count header alone.
 
+### Orbital dynamics of loaded planets
+
+ExoVista writes barycentric states for the star and each planet. The
+importer subtracts the star's state, converts the difference to the
+(east, north, away) chart and derives the orbital elements from it with the
+two-body gravitational parameter $\mu = G (M_\star + M_p)$, where $M_p$ is
+the planet mass in the planet header (`M`, Earth masses). `Planet`
+propagates with the same $\mu$, so a loaded planet keeps its period.
+Propagating with $G M_\star$ instead would shorten the mean motion by the
+fraction $\tfrac12 M_p / M_\star$ and make the planet lag its true position:
+for a Jupiter-mass planet around a solar-mass star that is 0.048 percent
+of the mean motion, or 0.145 degrees of orbital phase after ten years
+(0.0132 AU at 5.2 AU, 1.3 milliarcseconds at 10 pc). Versions before 2.1.0
+carry this lag. When the planet mass is unknown (NaN, zero or negative
+`Mp_Mearth`), the planet is a test particle and only $M_\star$ enters. The
+sum is computed by `Planet.central_mass_kg`, which is jit- and
+vmap-compatible and has a fixed shape `(K,)`.
+
+Subtracting the star's barycentric motion also changes what phase-mode
+planets look like. With `planet_spectra="phase"` the contrast is a function
+of the star-planet-observer angle $\beta$ and the star-planet distance, both
+computed from the star-relative orbit. In the eight-planet solar-system
+demo scene the star sits 0.0077 AU from the barycenter, which is 0.55 to
+1.07 percent of the inner planets' orbital radii. Loading it with
+star-relative states instead of barycentric ones changes the phase-mode
+planet contrasts at 600 nm over the 367 FITS epochs by a median of 0.4 to
+4.4 percent for the six inner planets, by up to 7.3 percent at their 99th
+percentile for the fifth planet and up to 31 percent at the single worst
+epoch of the innermost planet, where the contrast curve is steepest. The two
+outer planets change by about 2e-5 relative. The size is set by the ratio of
+the star's offset to the planet's orbital radius, so it grows toward small
+orbits. The peak depends strongly on which epochs and planets are sampled,
+so the distribution is given. The numbers come from loading the same file twice, once as written and once with
+the star's rows zeroed so that the barycentric states are used as relative
+states, and taking the relative difference of `System.contrasts`.
+Time-mode
+contrasts are unchanged because they are read from the FITS table directly.
+
 The stellar angular diameter is $2 R_\star / d$, computed from the
 header's `RSTAR` (solar radii) and `DIST` (pc). ExoVista's `ANGDIAM`
 card is not used for it, because its meaning depends on the input: a

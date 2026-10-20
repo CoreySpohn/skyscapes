@@ -321,6 +321,9 @@ def _load_single_planet(
     r_sky_m = r_sky_au * AU2m
     v_sky_m_s = jnp.array(au_per_yr_to_m_per_s(v_sky_au_yr))
     planet_mass_kg = float(obj_header.get("M")) * Mearth2kg
+    if not (np.isfinite(planet_mass_kg) and planet_mass_kg > 0.0):
+        # Unknown mass: test-particle limit, matching Planet.central_mass_kg.
+        planet_mass_kg = 0.0
     mu_SI = G_si * (star.Ms_kg + planet_mass_kg)
     _a_m, _e, i_rad, W_rad, w_rad, M_rad = state_vector_to_keplerian(
         r_sky_m, v_sky_m_s, mu_SI
@@ -353,7 +356,9 @@ def _load_single_planet(
         ), t0
 
     # beta(t_i) per FITS input time, using the same solver the runtime uses.
-    _r_AU, beta_rad, _dist_AU = orbit.propagate(trig_solver, times_jd, Ms_kg=star.Ms_kg)
+    _r_AU, beta_rad, _dist_AU = orbit.propagate(
+        trig_solver, times_jd, Ms_kg=star.Ms_kg + planet_mass_kg
+    )
     # orbix already returns the standard phase angle, as does Planet.propagate.
     phase_angle_rad = beta_rad
     beta_deg = jnp.rad2deg(phase_angle_rad[0])  # (T,), already in [0, 180]
