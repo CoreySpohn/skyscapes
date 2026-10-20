@@ -96,8 +96,11 @@ def plot_disk_image(
 
     A disk is rendered once here with its own ``surface_brightness`` at
     the given wavelength, time, inclination and position angle; a bare
-    ``(ny, nx)`` array is drawn as given. Pixel ``(row, col)`` sits at
-    sky ``(y, x)``, with ``x`` the RA offset, drawn increasing to the left.
+    ``(ny, nx)`` array follows the FITS convention: +column west, +row
+    north. Column offset = -east / pixel scale. ``imshow(origin="lower")``
+    shows north up and east left, with astronomical PA (north through east)
+    counterclockwise. A descending east-offset extent labels the image in
+    sky coordinates, with no additional x-axis inversion.
     The disk's truncation rings, projected at the same orientation, are
     overlaid as outlines, so the geometry and the rendered light can be
     checked against each other by eye.
@@ -200,7 +203,7 @@ def plot_disk_image(
     base = ep.imshow_log(
         image,
         ax=ax,
-        extent=(-half_x, half_x, -half_y, half_y),
+        extent=(half_x, -half_x, -half_y, half_y),
         floor=floor,
         vmin=floor,
         vmax=max(peak, 10.0 * floor),
@@ -210,7 +213,6 @@ def plot_disk_image(
         cbar_kw=cbar_kw,
     )
     ax = base.ax
-    ax.set_xlim(half_x, -half_x)
     ax.set_ylim(-half_y, half_y)
     ax.set_xlabel(_SKY_LABELS[0])
     ax.set_ylabel(_SKY_LABELS[1])

@@ -155,11 +155,11 @@ def principal_axes(points):
 def image_axes(image):
     """Flux-weighted axis ratio proxy and major-axis angle of an image.
 
-    Column index is the sky ``x`` (RA offset) axis and row index ``y``.
+    FITS columns increase west: sky east is -column and north is +row.
     """
     image = np.asarray(image, float)
     ny, nx = image.shape
-    x, y = np.meshgrid(np.arange(nx) - (nx - 1) / 2, np.arange(ny) - (ny - 1) / 2)
+    x, y = np.meshgrid(-(np.arange(nx) - (nx - 1) / 2), np.arange(ny) - (ny - 1) / 2)
     w = image / image.sum()
     cov = np.array(
         [
@@ -318,15 +318,16 @@ def test_ring_orientation_matches_the_rendered_disk(incl, pa):
 
 
 def test_disk_image_pixels_land_at_their_sky_coordinates():
-    """Column index maps to +RA offset, drawn increasing to the left."""
+    """The descending extent puts column zero east and RA increasing left."""
     image = np.full((21, 21), 1e-8)
-    image[15, 17] = 1.0  # row 15 is +y, column 17 is +x
+    image[15, 3] = 1.0  # FITS column below center is east; row above is north.
     result = viz.plot_disk_image(image, pixel_scale_arcsec=0.1)
     left, right, bottom, top = result.artists["image"].get_extent()
-    assert left < right and bottom < top
+    assert (left, right, bottom, top) == pytest.approx((1.05, -1.05, -1.05, 1.05))
+    assert result.artists["image"].origin == "lower"
     assert result.ax.xaxis_inverted()
     # The bright pixel's center, from the extent, is at +x, +y.
-    x = left + (17 + 0.5) * (right - left) / 21
+    x = left + (3 + 0.5) * (right - left) / 21
     y = bottom + (15 + 0.5) * (top - bottom) / 21
     assert x > 0.0 and y > 0.0
     center = result.ax.transData.transform((0.0, 0.0))
@@ -353,7 +354,7 @@ def test_near_side_is_where_the_kernel_scatters_forward(pa):
         )
     )
     ny, nx = image.shape
-    x, y = np.meshgrid(np.arange(nx) - (nx - 1) / 2, np.arange(ny) - (ny - 1) / 2)
+    x, y = np.meshgrid(-(np.arange(nx) - (nx - 1) / 2), np.arange(ny) - (ny - 1) / 2)
     centroid = np.array([(image * x).sum(), (image * y).sum()]) / image.sum()
 
     sky = by_gid(viz.plot_system(system, 0.0))
@@ -611,14 +612,14 @@ def test_bad_inputs_raise_named_errors(call, match):
 
 
 def _kernel_centroid(system, incl, pa):
-    """Flux centroid (col, row offsets) of the kernel's rendered disk."""
+    """Flux centroid (east, north offsets) of the kernel's rendered disk."""
     image = np.asarray(
         system.disk.surface_brightness(
             jnp.array(550.0), jnp.array(0.0), jnp.array(incl), jnp.array(pa)
         )
     )
     ny, nx = image.shape
-    x, y = np.meshgrid(np.arange(nx) - (nx - 1) / 2, np.arange(ny) - (ny - 1) / 2)
+    x, y = np.meshgrid(-(np.arange(nx) - (nx - 1) / 2), np.arange(ny) - (ny - 1) / 2)
     return np.array([(image * x).sum(), (image * y).sum()]) / image.sum()
 
 

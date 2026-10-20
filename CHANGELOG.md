@@ -4,13 +4,19 @@
 
 ### Bug Fixes
 
-* **io:** ExoVista scenes now match the true sky. Planet RA offsets were
-  labelled east but were west-positive; they now change sign. The disk
-  cube is used as written (+column west, east left), and `System.midplane_pa_deg` becomes (-PA) mod 360,
+* **disk, viz:** Images follow the FITS display convention: +column west,
+  north up and east left with `origin="lower"`. Parametric disk images are
+  mirrored left-right compared with earlier releases. ExoVista cubes are
+  used as written, unchanged from 2.0.0. `plot_disk_image` no longer inverts
+  the x axis separately; its descending extent sets the orientation.
+
+* **io:** ExoVista scenes now match the true sky. In 2.0.0, planet RA offsets
+  were labelled east but were west-positive; their east offsets now change
+  sign. The cube was already used as written (+column west, east left), but
+  `plot_disk_image` inverted the x axis assuming +column east; its displayed
+  orientation now changes. `System.midplane_pa_deg` becomes (-PA) mod 360,
   so parametric disks and outlines built from `System.midplane_*` match the
-  loaded image. Released versions' planets and disks agreed with each other
-  but were both mirrored east-west. Code placing planets or disks with the
-  old sign must be re-derived.
+  loaded image. Code placing planets with the old sign must be updated.
 
 * **io:** ExoVista planet states are now made star-relative before conversion
   to orbital elements. Earlier releases used barycentric states, which biased

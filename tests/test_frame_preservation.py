@@ -196,8 +196,8 @@ DEMO_ELEMENTS = [
 @pytest.mark.parametrize(
     ("index", "inc", "pa"), [(0, 35.0, 20.0), (1, 60.0, 130.0), (2, 125.0, -40.0)]
 )
-def test_disk_image_unchanged(index, inc, pa):
-    """The shared Grater/Exovista LOS kernel preserves every pixel and near half."""
+def test_disk_image_mirrors_stored_columns(index, inc, pa):
+    """The FITS column convention mirrors stored images, preserving the near half."""
     image = los_integrate_scattered(
         lambda r, z, valid: jnp.exp(-((r - 2.0) ** 2 + (z / 0.2) ** 2)),
         lambda cos_phi: (1.0 - 0.6**2) / (1.0 + 0.6**2 - 1.2 * cos_phi) ** 1.5,
@@ -212,8 +212,11 @@ def test_disk_image_unchanged(index, inc, pa):
         dist_pc=10.0,
         n_slices_los=101,
     )
-    np.testing.assert_allclose(image, LOS_IMAGES[index], rtol=1e-12, atol=0)
-    y, x = np.indices(image.shape) - 2
+    # Mirror the stored arrays for +column west; do not recapture snapshots.
+    expected = np.asarray(LOS_IMAGES[index])[:, ::-1]
+    np.testing.assert_allclose(image, expected, rtol=1e-12, atol=0)
+    y, col = np.indices(image.shape) - 2
+    x = -col  # Sky east is minus the FITS column offset.
     minor = -x * np.sin(np.radians(pa)) + y * np.cos(np.radians(pa))
     assert np.sum(image * minor) * np.cos(np.radians(inc)) > 0
 

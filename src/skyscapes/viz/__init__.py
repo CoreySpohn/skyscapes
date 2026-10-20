@@ -17,8 +17,9 @@ disk midplane is placed in that frame by ``System.midplane_inc_deg`` and
 ``System.midplane_pa_deg`` through ``io._frames.rotate_to_sky_coords``,
 so a drawn outline and a parametric surface-brightness map agree. The
 ExoVista loader converts header (I, PA) to (I, -PA modulo 360) in this
-east/north chart; it converts already projected states and mirrors cube
-columns without applying the midplane rotation again.
+east/north chart; it converts already projected states and uses cube
+arrays as written (+column west, +row north), without applying the
+midplane rotation again.
 That position angle turns the line of nodes from ``+x`` toward ``+y``; it
 is not the astronomical position angle, which (with ``+x`` east) is
 ``90 - pa`` (mod 180) for the major axis. Inclinations run over

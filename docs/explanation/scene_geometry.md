@@ -89,12 +89,23 @@ system = System(
 | Quantity | Convention |
 |---|---|
 | Sky frame | `(x, y, z)`, star-centered. `x` is the east offset (Delta alpha* = Delta RA cos Dec), `y` the north (Dec) offset, and `+z` points away from the observer. This (east, north, away) frame is right-handed, with dz/dt positive receding. `Planet.propagate` passes orbix's positions through unchanged; `Planet.position_arcsec` returns `(x, y)` in arcsec. The phase angle is the standard star-planet-observer angle, 0 at full phase (planet behind the star) and pi at new phase, as orbix returns it, so `cos(beta) = z / r` in this frame. |
-| Sky images | ExoVista cubes are used as written: +row is north and +column is west (FITS display convention), so east is drawn to the left. |
+| Sky images | All disk arrays use the FITS display convention described below; ExoVista cubes are used as written. |
 | Disk orientation | Set once, on the system, by `System.midplane_inc_deg` and `System.midplane_pa_deg`. Parametric disks and outlines use that orientation; loaded cubes retain their rendered geometry. The planets' orbits carry their own elements and need not be coplanar with it. |
 | Inclination | The angle between the midplane normal and the line of sight, in `[0, 180]`, 0 for a face-on disk. The projected axis ratio is `abs(cos(i))`, and `i` at `pa` is the same midplane as `180 - i` at `pa + 180`. The parametric disks render the same nonnegative map for both; above 90 degrees the near, forward-scattering half lies on the opposite side of the line of nodes from its position at `180 - i` and the same `pa`. |
 | Position angle | The projected major axis (the line of nodes) lies at `pa` from `+x` toward `+y`, so `pa = 0` puts it along the RA axis. This is **not** the astronomical position angle: with `+x` east, the major axis lies at astronomical PA (north through east) `90 - pa`, modulo 180. |
 | Near side | The half of the disk displaced toward the observer, at negative z. Its grains scatter forward, so a forward-scattering phase function brightens it. |
 | Scattering angle | The angle at a grain between the incident propagation direction (star to grain) and the direction toward the observer; 0 is forward scattering. The illumination angle is its supplement. |
+
+Image arrays have row index increasing north and column index increasing
+west. Thus `imshow(origin="lower")` with no axis inversion shows north up
+and east left (Calabretta and Greisen 2002, A&A 395, 1077, Sect. 5).
+Astronomical PA, north through east, is counterclockwise on this image.
+One sky-to-pixel step carries the sign: `column offset = -east / scale`;
+`row offset = north / scale`, about the center `((nx - 1) / 2, (ny - 1) / 2)`.
+For axes labelled in sky offsets, `plot_disk_image` uses the descending
+extent `(+half_x, -half_x, -half_y, +half_y)`: RA offset increases to the
+left without a separate x-axis inversion. Planets and outlines retain
+their east/north sky coordinates.
 
 The views place the disk through the same rotation the ExoVista loader
 applies and the line-of-sight kernels integrate in, so an outline drawn by

@@ -255,6 +255,17 @@ two_planet = Planet(
 | `GraterDisk` | Two-power-law density × Henyey-Greenstein scattering; parametric / synthetic |
 | `CompositeDisk` | Sum of any other disks (e.g. main disk + a clump) |
 
+All disk images follow the [FITS display convention](scene_geometry.md#the-frames):
++row is north and +column is west. With `imshow(origin="lower")`, north is
+up and east is left. Map a sky offset to pixels using
+`col = (nx - 1) / 2 - east / pixel_scale_arcsec` and
+`row = (ny - 1) / 2 + north / pixel_scale_arcsec`.
+`GraterDisk` and `ExovistaParametricDisk` share that pixel grid;
+`CompositeDisk` sums component images without resampling.
+`ExovistaDisk` uses the FITS cube as written, with no column flip, and
+interpolates only in wavelength. `plot_disk_image` supplies the descending
+east-offset extent needed to place sky-coordinate overlays on those pixels.
+
 Loaded disks (`ExovistaDisk`) capture real ExoVista physics but are
 non-differentiable through the disk's morphology. Parametric disks
 (`GraterDisk`, `ExovistaParametricDisk`) are fully differentiable --

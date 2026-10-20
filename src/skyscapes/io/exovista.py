@@ -419,8 +419,11 @@ def _load_disk(hdul: fits.HDUList, fits_ext: int) -> ExovistaDisk:
     """Load the ExoVista disk extension into an ExovistaDisk.
 
     The contrast cube is already rendered in the on-sky frame by
-    ExoVista, with +column west and +row north (see ExoVista's
-    ``src/exovista/generate_scene.py``); it is used as written.
+    ExoVista, with +column west and +row north (FITS display convention;
+    see ExoVista's ``src/exovista/generate_scene.py``). It is used as written.
+    With ``imshow(origin="lower")`` and no axis inversion, north is up and
+    east is left; astronomical PA (north through east) is counterclockwise.
+    Column offset = -east / pixel scale.
 
     ``from_exovista`` converts the FITS star header's (I, PA) to
     (I, -PA modulo 360) on ``System.midplane_inc_deg`` /

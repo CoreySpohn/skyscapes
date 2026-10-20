@@ -11,7 +11,8 @@ than a second derivation of them:
 - The disk midplane is placed in the sky frame by
   ``skyscapes.io._frames.rotate_to_sky_coords``. The ExoVista loader instead
   converts already on-sky states from (west, north, toward) to orbix's
-  (east, north, away) axes and mirrors cube columns. It converts header
+  (east, north, away) axes and uses cube arrays as written (+column west,
+  +row north). It converts header
   (I, PA) to (I, -PA modulo 360) on ``System.midplane_*`` for these
   east/north axes; it does not apply the midplane rotation again.
   The rotation's first two output rows are the images of the disk's

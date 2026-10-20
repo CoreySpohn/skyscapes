@@ -66,7 +66,8 @@ def midplane_measurements(fits_fixture):
         assert np.all(np.isfinite(image)) and np.all(image >= 0)
         assert image.sum() > 0
     row, col = np.indices(reference.shape, dtype=float)
-    east, north = col - (nx - 1) / 2, row - (ny - 1) / 2
+    # FITS columns increase west, so sky east is minus the column offset.
+    east, north = -(col - (nx - 1) / 2), row - (ny - 1) / 2
     reference_angle = _major_axis_deg(east, north, reference)
     rendered_angle = _major_axis_deg(east, north, rendered)
     # Fix the signed minor direction from the reference image alone, so

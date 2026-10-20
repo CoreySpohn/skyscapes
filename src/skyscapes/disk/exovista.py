@@ -11,6 +11,12 @@ from .base import AbstractDisk
 class ExovistaDisk(AbstractDisk):
     """Wavelength-interpolated 3D contrast cube loaded from ExoVista FITS.
 
+    The cube is used as written: +column west, +row north (FITS display
+    convention). With ``imshow(origin="lower")`` and no axis inversion,
+    north is up and east is left; astronomical PA (north through east)
+    is counterclockwise. Column offset = -east / pixel scale.
+    Interpolation is only along wavelength and preserves the spatial axes.
+
     Attributes:
         pixel_scale_arcsec: Pixel scale [arcsec/pixel].
         wavelengths_nm: 1-D wavelength grid [nm], shape ``(n_wl,)``.
