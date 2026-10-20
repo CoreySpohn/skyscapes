@@ -420,10 +420,7 @@ def _load_disk(hdul: fits.HDUList, fits_ext: int) -> ExovistaDisk:
 
     The contrast cube is already rendered in the on-sky frame by
     ExoVista, with +column west and +row north (see ExoVista's
-    ``src/exovista/generate_scene.py``). Mirror columns at load so
-    +column is the east offset (Delta alpha*) and +row is north,
-    matching planets and parametric disks. The image center remains
-    ``((nx - 1) / 2, (ny - 1) / 2)`` for even and odd dimensions.
+    ``src/exovista/generate_scene.py``); it is used as written.
 
     ``from_exovista`` converts the FITS star header's (I, PA) to
     (I, -PA modulo 360) on ``System.midplane_inc_deg`` /
@@ -435,9 +432,7 @@ def _load_disk(hdul: fits.HDUList, fits_ext: int) -> ExovistaDisk:
     wavelengths_um = hdul[fits_ext - 1].data
 
     wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
-    contrast_cube = jnp.asarray(
-        np.ascontiguousarray(obj_data[:-1, :, ::-1], dtype=np.float32)
-    )
+    contrast_cube = jnp.asarray(obj_data[:-1].astype(np.float32))
     pixel_scale_arcsec = header["PXSCLMAS"] * mas2arcsec
 
     return ExovistaDisk(

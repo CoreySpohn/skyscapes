@@ -5,8 +5,8 @@
 ### Bug Fixes
 
 * **io:** ExoVista scenes now match the true sky. Planet RA offsets were
-  labelled east but were west-positive; they now change sign. Disk cube
-  columns are mirrored, and `System.midplane_pa_deg` becomes (-PA) mod 360,
+  labelled east but were west-positive; they now change sign. The disk
+  cube is used as written (+column west, east left), and `System.midplane_pa_deg` becomes (-PA) mod 360,
   so parametric disks and outlines built from `System.midplane_*` match the
   loaded image. Released versions' planets and disks agreed with each other
   but were both mirrored east-west. Code placing planets or disks with the

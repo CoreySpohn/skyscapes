@@ -260,12 +260,6 @@ non-differentiable through the disk's morphology. Parametric disks
 (`GraterDisk`, `ExovistaParametricDisk`) are fully differentiable --
 you can take gradients of observables with respect to disk parameters.
 
-`ExovistaDisk.contrast_cube` and `surface_brightness` use +column east
-(Delta alpha* = Delta RA cos Dec) and +row north, matching planet sky
-positions and parametric disk images. ExoVista writes +column west, so
-`from_exovista` mirrors the columns at load. The pixel scale and geometric
-image center are preserved.
-
 ```python
 from skyscapes.disk import GraterDisk
 
