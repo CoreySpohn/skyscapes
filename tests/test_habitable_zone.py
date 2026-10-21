@@ -83,6 +83,23 @@ def test_kopparapu_flux_at_the_solar_temperature_is_the_solar_coefficient(limit)
     assert float(kopparapu_effective_flux(5780.0, limit)) == s_sun
 
 
+# S_eff at 3000, 4500 and 7000 K, evaluated by hand from Table 1 of
+# Kopparapu et al. (2014) for a 1 Earth-mass planet.
+KOPPARAPU_TABLE_1_CHECKS = {
+    "recent_venus": (1.4791538008, 1.5637132906, 2.0432451855),
+    "runaway_greenhouse": (0.9219746116, 0.9746303702, 1.2736568438),
+    "maximum_greenhouse": (0.2329794468, 0.2850033676, 0.4267713723),
+    "early_mars": (0.2094049062, 0.2561806832, 0.3836158471),
+}
+
+
+@pytest.mark.parametrize("limit", sorted(KOPPARAPU_TABLE_1_CHECKS))
+def test_kopparapu_flux_away_from_the_solar_temperature(limit):
+    """The quartic matches hand evaluations of Table 1 at non-solar Teff."""
+    flux = kopparapu_effective_flux(jnp.array([3000.0, 4500.0, 7000.0]), limit)
+    np.testing.assert_allclose(flux, KOPPARAPU_TABLE_1_CHECKS[limit], rtol=1e-9)
+
+
 def test_kopparapu_solar_edges():
     """The effective-flux limits reproduce the published solar distances."""
     # Kopparapu et al. (2014): 0.95 / 1.68 AU conservative, 0.75 / 1.77 AU

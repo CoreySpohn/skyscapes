@@ -119,7 +119,9 @@ def kopparapu_effective_flux(teff_k: ArrayLike, limit: str) -> Array:
     Args:
         teff_k: Stellar effective temperature in K.
         limit: One of ``"recent_venus"``, ``"runaway_greenhouse"``,
-            ``"maximum_greenhouse"`` or ``"early_mars"``.
+            ``"maximum_greenhouse"`` or ``"early_mars"``. A Python string,
+            static under ``jit`` (bind it in a closure or pass it through
+            ``static_argnames``).
 
     Returns:
         The effective flux, dimensionless, with the shape of ``teff_k``.
