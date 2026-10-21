@@ -41,6 +41,7 @@ from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.orbit import KeplerianOrbit
 
 from ..disk import ExovistaDisk
+from ..habitable_zone import HZ_INNER_EEID, HZ_OUTER_EEID
 from ..physical_model import GridPhysicalModel, TimeSeriesPhysicalModel
 from ..scene import Planet, Star, StarSpots, System
 
@@ -424,7 +425,9 @@ def _earth_like_planet_indices_from_hdul(hdul: fits.HDUList) -> list[int]:
         radius_rearth = planet_header.get("R", 1.0)
         a_scaled = a_au / np.sqrt(star_luminosity_lsun)
         lower_r = 0.8 / np.sqrt(a_scaled)
-        if (0.95 <= a_scaled < 1.67) and (lower_r <= radius_rearth < 1.4):
+        if (HZ_INNER_EEID <= a_scaled < HZ_OUTER_EEID) and (
+            lower_r <= radius_rearth < 1.4
+        ):
             earth_indices.append(i)
     return earth_indices
 

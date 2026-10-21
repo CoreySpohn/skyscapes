@@ -13,5 +13,12 @@ def test_toplevel_identity():
 
 def test_submodules_importable():
     """All public submodules round-trip through the top-level package."""
-    for name in ("scene", "disk", "physical_model", "background", "io"):
+    for name in (
+        "scene",
+        "disk",
+        "physical_model",
+        "background",
+        "io",
+        "habitable_zone",
+    ):
         assert hasattr(skyscapes, name), f"skyscapes.{name} missing"
