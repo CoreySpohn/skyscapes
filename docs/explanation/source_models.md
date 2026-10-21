@@ -172,17 +172,21 @@ demo scene the star sits 0.0077 AU from the barycenter, which is 0.55 to
 1.07 percent of the inner planets' orbital radii. Loading it with
 star-relative states instead of barycentric ones changes the phase-mode
 planet contrasts at 600 nm over the 367 FITS epochs by a median of 0.4 to
-4.4 percent for the six inner planets, by up to 7.3 percent at their 99th
-percentile for the fifth planet and up to 31 percent at the single worst
-epoch of the innermost planet, where the contrast curve is steepest. The two
+4.4 percent for the six inner planets, by up to 30 percent at their 99th
+percentile (the innermost planet; 21 percent for the third, 13 percent for
+the fourth and 7 percent for the fifth) and up to 31 percent at the single
+worst epoch of the innermost planet, where the contrast curve is steepest. The two
 outer planets change by about 2e-5 relative. The size is set by the ratio of
 the star's offset to the planet's orbital radius, so it grows toward small
 orbits. The peak depends strongly on which epochs and planets are sampled,
 so the distribution is given. The numbers come from loading the same file twice, once as written and once with
 the star's rows zeroed so that the barycentric states are used as relative
 states, and taking the relative difference of `System.contrasts`.
-Time-mode
-contrasts are unchanged because they are read from the FITS table directly.
+`tools/star_reflex_contrast.py` reproduces them and prints the median,
+99th-percentile and maximum change for each planet; run
+`python tools/star_reflex_contrast.py [wavelength_nm]` from the repository
+root. Time-mode contrasts are unchanged because they are read from the FITS
+table directly.
 
 The stellar angular diameter is $2 R_\star / d$, computed from the
 header's `RSTAR` (solar radii) and `DIST` (pc). ExoVista's `ANGDIAM`
