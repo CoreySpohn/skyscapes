@@ -128,6 +128,10 @@ pip install skyscapes
 **Loaders**:
 - `from_exovista` (top-level) -- one-call ingestion of ExoVista FITS
 
+**Habitable zone**:
+- [`skyscapes.habitable_zone`](how-to/habitable_zone) -- `eeid_au`,
+  `habitable_zone_au`, `kopparapu_habitable_zone_au`
+
 **See also**:
 - [Source models](explanation/source_models) -- what each source type
   represents and when to use which
@@ -147,6 +151,14 @@ explanation/source_models
 explanation/physical_models
 explanation/local_zodi_geometry
 explanation/scene_geometry
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: How-to
+:hidden:
+
+how-to/habitable_zone
 ```
 
 <!-- TODO(post-1.0): write tutorials/01_loading_a_scene and re-add a "Get started" toctree. -->
