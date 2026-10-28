@@ -4,8 +4,8 @@ The thermal-infrared counterpart of
 :class:`~skyscapes.physical_model.exojax.physical_model.ExoJaxPhysicalModel`.
 It shares that model's species records, opacity engines, mixing-ratio
 profiles and :class:`~.components.absorption.Absorption` component, and
-replaces the reflected-light solver with ExoJAX's ``ArtEmisPure``
-(intensity-based, pure absorption) plus an opaque emitting ground.
+integrates pure-absorption transfer locally using ExoJAX's ``ArtEmisPure``
+pressure grid, opacity and angular quadrature plus an opaque emitting ground.
 
 Known omissions:
 
@@ -44,6 +44,7 @@ from typing import Any
 import equinox as eqx
 import interpax
 import jax.numpy as jnp
+import numpy as np
 from exojax.rt import ArtEmisPure
 from exojax.utils.grids import wavenumber_grid
 from hwoutils import constants as const
@@ -84,6 +85,9 @@ def _top_of_atmosphere_flux(
     (``exp(-tau_top / mu) - exp(-tau_bottom / mu)``), then integrated over
     the hemisphere with weights ``2 mu w``. Layers are ordered top to
     bottom; the last layer may be an opaque ground.
+
+    Reference: Rybicki & Lightman (1979), Radiative Processes in
+    Astrophysics, Sec. 1.4 (formal solution and angular flux integral).
     """
     tau = jnp.cumsum(dtau, axis=0)  # (L, n_nu)
     trans = jnp.exp(-tau[None] / mus[:, None, None])  # (M, L, n_nu)
@@ -144,7 +148,8 @@ def build_exojax_emission_engines(
     with an ``ArtEmisPure`` engine and HITRAN line lists for every
     molecule (including O3 and SO2, whose reflected-light recipes use
     ultraviolet/visible cross-section tables that do not extend to the
-    infrared). The model's bottom layer sits at ``surface_pressure_bar``.
+    infrared). Log-spaced layer boundaries end at ``surface_pressure_bar``;
+    the opacity and T-P profile are evaluated at geometric layer centers.
 
     Args:
         molecules: Molecule names, keys of ``MOLECULE_RECIPES``.
@@ -161,7 +166,8 @@ def build_exojax_emission_engines(
         crit: Line-strength cutoff passed to ``MdbHitran``.
 
     Returns:
-        Dict with keys ``rt_engine``, ``nu_grid``, ``n_nu`` and
+        Dict with keys ``rt_engine``, ``nu_grid``, ``n_nu``, the static
+        Python float ``surface_pressure_bar`` and
         ``species_prebuilt`` (name to ``{molmass, opa, rayleigh_xs}``).
     """
     if databases_dir is None:
@@ -173,11 +179,26 @@ def build_exojax_emission_engines(
     nu_grid, _, _ = wavenumber_grid(
         nu_min, nu_max, n_wavenumbers, xsmode="premodit", unit="cm-1"
     )
+    # Roundoff in logspace must not exclude the declared wavelength limits.
+    nu_grid[[0, -1]] = (nu_min, nu_max)
+    pressure_boundary = np.geomspace(
+        pressure_top_bar, surface_pressure_bar, n_layers + 1
+    )
+    pressure = np.sqrt(pressure_boundary[:-1] * pressure_boundary[1:])
     rt_engine = ArtEmisPure(
         nu_grid=nu_grid,
-        pressure_top=pressure_top_bar,
-        pressure_btm=surface_pressure_bar,
+        pressure_top=float(pressure[0]),
+        pressure_btm=float(pressure[-1]),
         nlayer=n_layers,
+    )
+    # ArtEmisPure takes center pressures. Derive widths directly from the
+    # declared boundaries so hydrostatic column mass is exactly Delta P / g
+    # (Pierrehumbert 2010, Principles of Planetary Climate, Ch. 4).
+    rt_engine.pressure = pressure
+    rt_engine.pressure_boundary = pressure_boundary
+    rt_engine.dParr = np.diff(pressure_boundary)
+    rt_engine.pressure_decrease_rate = float(
+        pressure_boundary[0] / pressure_boundary[1]
     )
 
     species_prebuilt: dict[str, dict[str, Any]] = {}
@@ -202,6 +223,7 @@ def build_exojax_emission_engines(
         "rt_engine": rt_engine,
         "nu_grid": nu_grid,
         "n_nu": int(nu_grid.shape[0]),
+        "surface_pressure_bar": float(surface_pressure_bar),
         "species_prebuilt": species_prebuilt,
     }
 
@@ -223,8 +245,8 @@ class ExoJaxEmissionModel(eqx.Module):
         surface: :class:`EmittingSurface`.
         absorption: :class:`Absorption` component (shared with the
             reflected-light model).
-        rt_engine: ExoJAX ``ArtEmisPure`` instance. Its bottom pressure is
-            the surface pressure.
+        rt_engine: ExoJAX ``ArtEmisPure`` instance. Its bottom pressure
+            boundary is the surface pressure; ``pressure`` holds centers.
         nu_grid: Wavenumber grid [cm^-1].
         n_nu: Length of ``nu_grid``.
     """
@@ -343,7 +365,7 @@ class ExoJaxEmissionModel(eqx.Module):
 
         ``engines`` is the dict returned by
         :func:`build_exojax_emission_engines`. ``surface_pressure_bar``
-        defaults to the engine's bottom pressure.
+        defaults to the static surface boundary stored in ``engines``.
         """
         tp_profile = PolynomialTPProfile(
             coefficients=jnp.atleast_2d(jnp.asarray(temperature_coefficients))
@@ -352,7 +374,7 @@ class ExoJaxEmissionModel(eqx.Module):
         rt_engine = engines["rt_engine"]
         n_nu = engines["n_nu"]
         if surface_pressure_bar is None:
-            surface_pressure_bar = float(jnp.max(rt_engine.pressure))
+            surface_pressure_bar = engines["surface_pressure_bar"]
         if surface_temperature_K is None:
             surface_temperature_K = jnp.stack(
                 [
@@ -433,6 +455,8 @@ class ExoJaxEmissionModel(eqx.Module):
         :meth:`~skyscapes.physical_model.exojax.physical_model.ExoJaxPhysicalModel.contrast_cube`
         (wavelength first); multiplying that cube's contrast by a stellar
         flux in Jy gives the reflected-light flux on the same axis.
+        Linear interpolation in wavenumber preserves nonnegative flux.
+        Wavelengths outside the engine's spectral grid return NaN.
 
         Args:
             wavelength_nm: Wavelengths [nm], shape ``(W,)``.
@@ -444,7 +468,7 @@ class ExoJaxEmissionModel(eqx.Module):
         at_wl = jnp.stack(
             [
                 interpax.interp1d(
-                    target_nu, self.nu_grid, f, method="cubic", extrap=True
+                    target_nu, self.nu_grid, f, method="linear", extrap=False
                 )
                 for f in flux
             ],

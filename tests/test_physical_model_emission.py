@@ -19,9 +19,8 @@ import numpy as np
 import pytest
 from exojax.database.multimol import database_path_hitran12
 from exojax.opacity import OpaPremodit
-from exojax.rt import ArtEmisPure
-from exojax.utils.grids import wavenumber_grid
 from hwoutils import constants as const
+from scipy.special import expn
 
 from skyscapes.physical_model import ExoJaxEmissionModel
 from skyscapes.physical_model.exojax import (
@@ -30,6 +29,7 @@ from skyscapes.physical_model.exojax import (
     MolecularSpecies,
     PolynomialTPProfile,
     brightness_temperature,
+    build_exojax_emission_engines,
     log_gravity_cgs_from_mass_radius,
 )
 
@@ -40,6 +40,7 @@ K_B_J_K = 1.380649e-23
 REARTH_M = 6.3781e6
 PC_M = 3.085677581491367e16
 JY_SI = 1.0e-26
+ATOMIC_MASS_G = 1.66053906660e-24
 
 # Earth twin: T(P) = sum a_i log10(P[bar])^i with log10(P0) = 0.006.
 EARTH_TWIN_COEFFS = (285.218, 146.626, 99.703, 23.120, 1.674)
@@ -89,22 +90,17 @@ class _ConstantOpa:
 
 
 N_NU = 400
-NU_GRID_MIN, NU_GRID_MAX = 1.0e4 / 18.5, 1.0e4 / 4.0
 
 
 @pytest.fixture(scope="module")
 def engines():
     """Real ArtEmisPure engine on a mid-infrared grid; no opacity attached."""
-    nu_grid, _, _ = wavenumber_grid(
-        NU_GRID_MIN, NU_GRID_MAX, N_NU, xsmode="premodit", unit="cm-1"
+    return build_exojax_emission_engines(
+        molecules=(),
+        n_wavenumbers=N_NU,
+        n_layers=60,
+        surface_pressure_bar=10**EARTH_TWIN_LOG_P0,
     )
-    rt = ArtEmisPure(
-        nu_grid=nu_grid,
-        pressure_top=1.0e-4,
-        pressure_btm=10**EARTH_TWIN_LOG_P0,
-        nlayer=60,
-    )
-    return {"rt_engine": rt, "nu_grid": nu_grid, "n_nu": int(nu_grid.shape[0])}
 
 
 def _model(engines, coefficients, species=(), **kwargs):
@@ -171,9 +167,32 @@ def test_earth_twin_profile_spans_216_to_286_kelvin(engines):
     model = _model(engines, EARTH_TWIN_COEFFS)
     layers = np.asarray(model.layer_temperature())
     assert 215.0 < layers.min() < 217.0
-    assert 285.5 < layers.max() < 286.5
-    # The ground defaults to the profile at the surface pressure.
-    assert float(model.surface.temperature_K[0]) == pytest.approx(layers.max(), abs=0.2)
+    ground = float(model.surface.temperature_K[0])
+    assert 285.5 < ground < 286.5
+    assert layers.max() < ground
+
+
+@pytest.mark.parametrize("surface_bar", [1.0, 10**EARTH_TWIN_LOG_P0, 4.0])
+def test_pressure_column_ends_at_the_declared_surface(surface_bar):
+    """Layer widths cover exactly the declared top-to-surface column."""
+    top_bar = 1.0e-4
+    built = build_exojax_emission_engines(
+        molecules=(), n_wavenumbers=N_NU, surface_pressure_bar=surface_bar
+    )
+    rt = built["rt_engine"]
+    np.testing.assert_allclose(np.sum(rt.dParr), surface_bar - top_bar, rtol=1e-10)
+    np.testing.assert_allclose(rt.pressure_boundary[[0, -1]], [top_bar, surface_bar])
+    np.testing.assert_allclose(rt.dParr, np.diff(rt.pressure_boundary), rtol=1e-10)
+    np.testing.assert_allclose(
+        rt.pressure,
+        np.sqrt(rt.pressure_boundary[:-1] * rt.pressure_boundary[1:]),
+        rtol=1e-10,
+    )
+    model = _model(built, (280.0, 40.0))
+    np.testing.assert_allclose(
+        model.surface.temperature_K, [280.0 + 40.0 * np.log10(surface_bar)], rtol=1e-12
+    )
+    assert rt.pressure[-1] < surface_bar
 
 
 @vv.case("planet-thermal-emission", "code-verification")
@@ -261,6 +280,87 @@ def test_thick_atmosphere_hides_a_hotter_ground(engines):
 
 
 @vv.case("planet-thermal-emission", "code-verification")
+@pytest.mark.parametrize("tau", [0.1, 1.0, 3.0])
+def test_finite_gray_slab_matches_analytic_angular_integral(engines, tau):
+    """A cool slab over hot ground obeys F = Sa + 2 E3(tau) (Sg - Sa).
+
+    Reference: Rybicki & Lightman (1979), Radiative Processes in
+    Astrophysics, Sec. 1.4; E3 is defined in NIST DLMF 8.19.2.
+    Tolerance basis: four-point Gauss-Legendre hemispheric transmission
+    has at most 0.12 percent relative error at these depths; allow 0.2
+    percent in the resulting flux. S denotes pi B.
+    """
+    column_bar = 10**EARTH_TWIN_LOG_P0 - 1.0e-4
+    xs = tau * 44.0 * ATOMIC_MASS_G * 10**2.99 / (0.01 * column_bar * 1.0e6)
+    model = _model(
+        engines,
+        (220.0,),
+        species=_species(xs),
+        surface_temperature_K=jnp.array([320.0]),
+    )
+    nu = np.asarray(model.nu_grid)
+    atmosphere = _blackbody_flux_cgs(nu, 220.0)
+    ground = _blackbody_flux_cgs(nu, 320.0)
+    expected = atmosphere + 2.0 * expn(3, tau) * (ground - atmosphere)
+    np.testing.assert_allclose(model.emergent_flux()[0], expected, rtol=2e-3)
+
+
+@vv.case("planet-thermal-emission", "code-verification")
+@pytest.mark.parametrize("upper_K,lower_K", [(220.0, 300.0), (300.0, 220.0)])
+def test_two_temperature_layers_keep_top_to_bottom_order(upper_K, lower_K):
+    """Two slabs retain their order in the formal solution (Rybicki & Lightman).
+
+    Tolerance basis: 0.3 percent allows four-point angular quadrature
+    error for the E3 transmissions at optical depths 0.3 and 3.3.
+    """
+    built = build_exojax_emission_engines(
+        molecules=(), n_wavenumbers=N_NU, n_layers=2, pressure_top_bar=0.01
+    )
+    slope = lower_K - upper_K
+    xs = 0.3 * 44.0 * ATOMIC_MASS_G * 10**2.99 / (0.01 * 0.09 * 1.0e6)
+    model = _model(
+        built,
+        (upper_K + 1.5 * slope, slope),
+        species=_species(xs),
+        surface_temperature_K=jnp.array([320.0]),
+    )
+    nu = np.asarray(model.nu_grid)
+    upper = _blackbody_flux_cgs(nu, upper_K)
+    lower = _blackbody_flux_cgs(nu, lower_K)
+    ground = _blackbody_flux_cgs(nu, 320.0)
+    expected = (
+        upper
+        + 2.0 * expn(3, 0.3) * (lower - upper)
+        + 2.0 * expn(3, 3.3) * (ground - lower)
+    )
+    np.testing.assert_allclose(model.emergent_flux()[0], expected, rtol=3e-3)
+
+
+@vv.case("planet-thermal-emission", "code-verification")
+def test_gray_species_column_opacity_has_independent_cgs_normalization():
+    """Hydrostatic tau = sigma q P / (m_mol m_u g), with negligible top P.
+
+    Reference: Pierrehumbert (2010), Principles of Planetary Climate,
+    Ch. 4 (hydrostatic pressure-coordinate optical depth).
+    Tolerance basis: 3e-8 allows ExoJAX's older atomic-mass constant;
+    the omitted 1e-12 bar top contributes only one part in 1e12.
+    """
+    built = build_exojax_emission_engines(
+        molecules=(), n_wavenumbers=N_NU, pressure_top_bar=1.0e-12
+    )
+    model = _model(built, (250.0,), species=_species(1.0e-24))
+    dtau = model.absorption.compute(
+        model.species,
+        model.layer_temperature(),
+        model.rt_engine.pressure,
+        10**2.99,
+        model.rt_engine,
+    ).dtau_total
+    expected = 1.0e-24 * 0.01 * 1.0e6 / (44.0 * ATOMIC_MASS_G * 10**2.99)
+    np.testing.assert_allclose(np.sum(dtau, axis=0), expected, rtol=3e-8)
+
+
+@vv.case("planet-thermal-emission", "code-verification")
 def test_brightness_temperature_inverts_planck():
     """The brightness temperature of a Planck flux is its temperature."""
     nu = np.linspace(540.0, 2500.0, 50)
@@ -277,9 +377,8 @@ def test_flux_density_matches_si_planck_at_the_observer(engines):
 
     The expected value is built in SI from lambda and temperature; the
     model works in cgs per wavenumber, so this anchors the unit chain
-    (per cm^-1 to per Hz, erg to W, Rp/d). Tolerance basis: the cubic
-    interpolation of a smooth Planck curve onto the requested wavelengths
-    (measured at 1e-5).
+    (per cm^-1 to per Hz, erg to W, Rp/d). Tolerance basis: linear
+    interpolation of a smooth Planck curve on the 400-point grid (1e-4).
     """
     ground_K = 288.0
     model = _model(engines, (200.0,), surface_temperature_K=jnp.array([ground_K]))
@@ -297,6 +396,39 @@ def test_flux_density_matches_si_planck_at_the_observer(engines):
     )
     expected = np.pi * b_nu * (REARTH_M / (10.0 * PC_M)) ** 2 / JY_SI
     np.testing.assert_allclose(flux, expected, rtol=1e-4)
+
+
+def test_flux_interpolation_preserves_nonnegativity_at_an_emissivity_step(engines):
+    """Resampling a nonnegative spectrum cannot undershoot an emissivity step."""
+    spectrum = jnp.where(jnp.arange(N_NU) < N_NU // 2, 0.0, 1.0)
+    model = _model(engines, (288.0,), surface_emissivity_spectrum=spectrum)
+    nu = np.asarray(model.nu_grid)
+    target_nu = np.linspace(nu[N_NU // 2 - 3], nu[N_NU // 2 + 3], 101)
+    flux = np.asarray(model.flux_density_jy(1.0e7 / target_nu, jnp.array([1.0]), 10.0))
+    assert np.all(np.isfinite(flux))
+    assert np.all(flux >= 0.0)
+    assert np.any(flux > 0.0)
+
+
+def test_flux_interpolation_returns_nan_outside_the_spectral_grid(engines):
+    """Requests beyond either grid edge return NaN, including inside JIT."""
+    model = _model(engines, (288.0,))
+    nu = np.asarray(model.nu_grid)
+    wavelength_nm = jnp.asarray(1.0e7 / np.array([nu[0] * 0.99, nu[-1] * 1.01]))
+    flux = jax.jit(lambda wl: model.flux_density_jy(wl, jnp.array([1.0]), 10.0))(
+        wavelength_nm
+    )
+    assert np.all(np.isnan(flux))
+
+
+def test_flux_interpolation_includes_the_declared_wavelength_endpoints(engines):
+    """Log-grid roundoff cannot exclude either advertised wavelength limit."""
+    model = _model(engines, (288.0,))
+    flux = np.asarray(
+        model.flux_density_jy(jnp.array([4000.0, 18500.0]), jnp.array([1.0]), 10.0)
+    )
+    assert np.all(np.isfinite(flux))
+    assert np.all(flux > 0.0)
 
 
 @vv.case("planet-thermal-emission", "code-verification")
@@ -331,6 +463,19 @@ def test_jit_equals_eager_and_gradient_matches_finite_difference(engines):
     step = 1.0e-2
     central = (mean_flux(t0 + step) - mean_flux(t0 - step)) / (2.0 * step)
     np.testing.assert_allclose(jax.grad(mean_flux)(t0)[0], central, rtol=1e-6)
+
+
+def test_from_engines_constructs_and_emits_inside_jit(engines):
+    """Default ground pressure remains static when model assembly is traced."""
+
+    def construct_and_emit(coefficients):
+        return _model(engines, coefficients, species=_species(1.0e-24)).emergent_flux()
+
+    coefficients = jnp.array([280.0, 20.0])
+    expected = construct_and_emit(coefficients)
+    actual = jax.jit(construct_and_emit)(coefficients)
+    np.testing.assert_allclose(actual, expected, rtol=1e-12)
+    assert np.all(np.isfinite(actual))
 
 
 def test_log_gravity_from_mass_radius_gives_earth_surface_gravity():
@@ -383,6 +528,19 @@ def test_earth_twin_window_sees_the_ground(earth_twin):
     Tolerance basis: spike (measured 1.3 K below the ground; 4 K allows
     the weak continuum-free line wings).
     """
+    wavelengths_um = np.array([6.3, 9.6, 11.0, 15.0])
+    temperatures_K = np.interp(
+        1.0e4 / wavelengths_um,
+        np.asarray(earth_twin.nu_grid),
+        np.asarray(earth_twin.brightness_temperature()[0]),
+    )
+    print(
+        "Earth-twin brightness temperatures: "
+        + ", ".join(
+            f"{wl:g} um = {temperature:.6f} K"
+            for wl, temperature in zip(wavelengths_um, temperatures_K, strict=True)
+        )
+    )
     ground = float(earth_twin.surface.temperature_K[0])
     assert np.median(_band(earth_twin, 10.5, 11.5)) == pytest.approx(ground, abs=4.0)
 

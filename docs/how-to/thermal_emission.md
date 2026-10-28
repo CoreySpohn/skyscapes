@@ -3,14 +3,28 @@
 {class}`~skyscapes.physical_model.ExoJaxEmissionModel` is the thermal-infrared
 counterpart of {class}`~skyscapes.physical_model.ExoJaxPhysicalModel`. It
 shares the species records, HITRAN opacity engines and mixing-ratio profiles
-of the reflected-light model, and replaces the 2-stream solver with ExoJAX's
-pure-absorption emission solver over an opaque, emitting ground. It needs the
+of the reflected-light model. Pure-absorption transfer is integrated locally
+over an opaque, emitting ground using ExoJAX's pressure grid, opacity and
+Gauss-Legendre quadrature over mu. The integration is two-stream-free and
+includes no scattering; it does not call ExoJAX's transfer solver. It needs the
 HITRAN line lists for each molecule in the ExoJAX cache (they are downloaded
 on first use).
 
 Ozone and sulfur dioxide use cross-section tables in the reflected-light
 model, and those tables stop short of the infrared. The thermal builder always
 uses HITRAN lines, so the 9.6 micron ozone band is present.
+
+Atmospheric layer boundaries span `pressure_top_bar` to exactly
+`surface_pressure_bar`. Opacity and atmospheric temperatures use the geometric
+layer centers; the default ground temperature uses the profile at the exact
+surface boundary. The hydrostatic column mass is the pressure difference
+divided by gravity (Pierrehumbert 2010, *Principles of Planetary Climate*, Ch. 4).
+The formal transfer solution and angular flux integral follow Rybicki and
+Lightman (1979), *Radiative Processes in Astrophysics*, Sec. 1.4.
+
+`flux_density_jy` uses linear interpolation in wavenumber to preserve
+nonnegative flux. Requested wavelengths outside the engine's spectral grid
+return NaN, including under JIT.
 
 ## An Earth twin at 10 pc
 
