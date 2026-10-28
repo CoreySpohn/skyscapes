@@ -46,6 +46,36 @@
   observer on the left at -z, with z labelled away from the observer. The
   scattering diagram labels the illumination angle beta.
 
+## [2.1.0](https://github.com/CoreySpohn/skyscapes/compare/v2.0.0...v2.1.0) (2026-10-28)
+
+
+### Features
+
+* **exojax:** add ExoJaxEmissionModel for thermal-infrared planet spectra ([a50d4b8](https://github.com/CoreySpohn/skyscapes/commit/a50d4b8254dd73da86a60628b2bd959c66dc6b4c))
+* **exojax:** add polynomial T-P profile, emitting surface and HITRAN-only species option ([88c1029](https://github.com/CoreySpohn/skyscapes/commit/88c1029694b50484d84122bb169bb41c56a78347))
+* **exojax:** optional HITRAN collision-induced absorption in the emission model ([396baf0](https://github.com/CoreySpohn/skyscapes/commit/396baf0e32ae303eab6b1bd5614f1720f0622baa))
+* **habitable_zone:** add EEID-scaled and Kopparapu habitable-zone edges ([80626f4](https://github.com/CoreySpohn/skyscapes/commit/80626f49403f46d6f84d77a3259cf9b4257f06c8))
+* **scene:** add BlackbodyStar, a diluted Planck spectrum from Teff, radius and distance ([0d4eb07](https://github.com/CoreySpohn/skyscapes/commit/0d4eb07dc2907d9acadf877e294d00258428b902))
+
+
+### Bug Fixes
+
+* **disk:** render images in the FITS display convention with +column west ([8331be5](https://github.com/CoreySpohn/skyscapes/commit/8331be52c96a4af1b35896b7ca619bcf1066091c))
+* **exojax:** end emission layers at the surface pressure boundary ([a0e1497](https://github.com/CoreySpohn/skyscapes/commit/a0e14979093f57c16d26a4f5621697fa30998800))
+* **exojax:** size reflected grids by resolving power so line-resolved bands converge ([453aba5](https://github.com/CoreySpohn/skyscapes/commit/453aba50acd0829c9eaeb67e9a6fa5d448ef0ef6))
+* **io:** check PHOENIX conversion inputs and warn when VMAG is unusable ([b251d62](https://github.com/CoreySpohn/skyscapes/commit/b251d62f1e6a945508d84c30bac38ddc6e4ac1ab))
+* **io:** convert ExoVista (west, north, toward) states to the orbital-element frame at load ([d608a0e](https://github.com/CoreySpohn/skyscapes/commit/d608a0e1cbd55e0bbb89a64b2f927a307a050560))
+* **io:** convert the ExoVista midplane position angle into the east/north chart ([51c19bc](https://github.com/CoreySpohn/skyscapes/commit/51c19bc1efef09f783d5849714603d4eba96763e))
+* **io:** convert unmarked ExoVista 2.5+ stellar spectra from PHOENIX surface flux to observer Jy ([abd038c](https://github.com/CoreySpohn/skyscapes/commit/abd038cabb9b45b10afd8b45d4467eff08372047))
+* **io:** derive the ExoVista stellar diameter from RSTAR and DIST, since system files store ANGDIAM as a radius ([3a29ec8](https://github.com/CoreySpohn/skyscapes/commit/3a29ec88a86fbc31490450df951b9a76f690283c))
+* **io:** make ExoVista planet states star-relative before deriving orbital elements ([54a44af](https://github.com/CoreySpohn/skyscapes/commit/54a44afca31a220843f99a53c3a6ac4622af95a2))
+* **io:** mirror ExoVista disk cubes at load so +column is east, matching the planets ([f175991](https://github.com/CoreySpohn/skyscapes/commit/f17599116ed4ce6290b106b20d14e4687cb567e6))
+* **io:** require RSTAR and DIST for the ExoVista stellar diameter ([02e36c0](https://github.com/CoreySpohn/skyscapes/commit/02e36c06503cf4f7a2f1431d805a4ba2a24d3f44))
+* **scene:** pass orbix (east, north, away) states through and convert ExoVista states by a proper rotation ([a06f896](https://github.com/CoreySpohn/skyscapes/commit/a06f896d5db887218eac1113dc5aaf40a0c8c0e2))
+* **scene:** propagate planets with G (M_star + M_planet), matching the ExoVista load ([4159e2f](https://github.com/CoreySpohn/skyscapes/commit/4159e2f80fa156fe4a2e8292e5cca483e39e566a))
+* **scene:** return planet positions in the (east, north, toward) sky chart with the standard phase angle ([fd028b2](https://github.com/CoreySpohn/skyscapes/commit/fd028b275802cd0ed082d44d3704304a857d0ce6))
+* **viz:** label the illumination angle beta and scope the changelog history claims ([3782e86](https://github.com/CoreySpohn/skyscapes/commit/3782e86451814838ae5a86e65d71db0e4617bc83))
+
 ## [2.0.0](https://github.com/CoreySpohn/skyscapes/compare/v1.6.1...v2.0.0) (2026-10-13)
 
 
