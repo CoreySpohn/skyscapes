@@ -64,6 +64,57 @@ tb = model.brightness_temperature()  # shape (K, n_nu), on model.nu_grid
 The 11 micron window sees the 286 K ground, the 15 micron CO2 band sees the
 cold tropopause near 216 K, and the 9.6 micron ozone band sits in between.
 
+## Collision-induced absorption
+
+CIA is optional: `cia_pairs=()` leaves the line-only spectrum unchanged.
+To include the O2-O2 fundamental near 6.4 microns and N2-N2 absorption, add
+these arguments to `from_default_setup` above:
+
+```python
+cia_pairs=("O2-O2", "N2-N2"),
+cia_vmr={"N2": 0.78, "O2": 0.21},
+mean_molecular_weight=28.97,
+```
+
+`cia_vmr` specifies constant **volume** mixing ratios for partners absent
+from `log_mmrs`. A modeled partner always uses its existing layer-dependent
+mass-mixing-ratio profile, converted as `VMR = MMR * mean_molecular_weight /
+molmass`; a `cia_vmr` entry cannot override that profile. Missing partners
+raise an error. The mean molecular weight [u] is constant across layers and
+planets and defaults to dry air; set it for a different bulk composition.
+CIA uses `k_CIA * n_a * n_b * dz`, with coefficients in cm^5 molecule^-2,
+number densities in cm^-3, and hydrostatic layer thickness in cm. There is
+no extra symmetry factor for identical partners.
+
+Place the desired [HITRAN CIA](https://hitran.org/cia/) files in
+`~/.cache/skyscapes/cia/`, or supply `cia_dir`:
+
+| Pair | Cached filename |
+| --- | --- |
+| N2-N2 | `N2-N2_2021.cia` |
+| O2-O2 | `O2-O2_2024.cia` |
+| O2-N2 | `O2-N2_2024.cia` |
+| CO2-CO2 | `CO2-CO2_2024.cia` |
+| N2-H2O | `N2-H2O_2018.cia` |
+
+CIA files are never downloaded automatically. A missing file raises
+`FileNotFoundError` with its expected path and the HITRAN link. For reusable
+engines, pass `cia_pairs` and `cia_dir` to `build_exojax_emission_engines`,
+then `cia_vmr` and `mean_molecular_weight` to `from_engines`.
+
+The HITRAN CIA set is described by Karman et al. (2019), *Icarus* **328**,
+160-175. ExoJAX 2.5's native reader handles N2-H2O; a local block reader
+handles the other files, whose grids vary between bands and temperatures.
+Coefficients are interpolated linearly in wavenumber and temperature,
+with zero absorption outside tabulated spectral blocks. Negative experimental
+baseline samples are floored at zero before interpolation. Temperatures outside
+a band's tabulated range use its nearest endpoint. This avoids ExoJAX
+`OpaCIA`'s next-bin spectral lookup and preserves positive tabulated values.
+Blocks overlapping by at least half the narrower spectral interval are treated
+as measurements of the same band. At repeated temperatures, later measurements
+replace earlier ones only within their own coverage; adjacent bands remain
+separate and add where their edges overlap.
+
 ## Reflected light on the same axis
 
 `ExoJaxPhysicalModel.contrast_cube` returns planet-to-star flux ratios, with
@@ -75,8 +126,6 @@ spans 200 to 2000 nm.
 
 ## What is left out
 
-- Collision-induced absorption is not included. It is a small effect for an
-  Earth twin and matters mainly for dense CO2 atmospheres.
 - There is no scattering (clouds and Rayleigh) in the thermal solver.
 - The planet is a uniformly emitting disk: no day-night contrast and no phase
   dependence.

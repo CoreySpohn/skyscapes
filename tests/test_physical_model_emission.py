@@ -577,3 +577,52 @@ def test_ozone_uses_line_lists_in_the_infrared(earth_twin):
     """The thermal builder gives O3 a HITRAN opacity, not the PSG table."""
     o3 = next(s for s in earth_twin.species if s.name == "O3")
     assert isinstance(o3.opa, OpaPremodit)
+
+
+def test_earth_twin_cia_cools_oxygen_band_preserves_window(earth_twin):
+    """CIA lowers mean 1450-1650 cm^-1 Tb; 10-11 um changes by <0.01 K."""
+    cache = Path.home() / ".cache" / "skyscapes" / "cia"
+    for filename in ("O2-O2_2024.cia", "N2-N2_2021.cia"):
+        if not (cache / filename).exists():
+            pytest.skip(f"data-absent: {cache / filename}")
+    # Reuse the cached line engines; only the CIA tables need a new build.
+    engines = build_exojax_emission_engines(
+        molecules=(),
+        n_wavenumbers=earth_twin.n_nu,
+        n_layers=len(earth_twin.rt_engine.pressure),
+        surface_pressure_bar=10**EARTH_TWIN_LOG_P0,
+        cia_pairs=("O2-O2", "N2-N2"),
+    )
+    cia = ExoJaxEmissionModel.from_engines(
+        engines=engines,
+        species=earth_twin.species,
+        temperature_coefficients=earth_twin.tp_profile.coefficients,
+        log_gravity_cgs=earth_twin.log_gravity_cgs,
+        cia_vmr={"N2": 0.78, "O2": 0.21},
+    )
+    delta = np.asarray(
+        cia.brightness_temperature() - earth_twin.brightness_temperature()
+    )[0]
+    nu = np.asarray(cia.nu_grid)
+    band = delta[(nu >= 1450) & (nu <= 1650)]
+    window = delta[(nu >= 1e4 / 11) & (nu <= 1000)]
+    print(
+        f"CIA Tb change: O2 band mean={band.mean():.9g} K, "
+        f"minimum={band.min():.9g} K; window max abs={np.abs(window).max():.9g} K"
+    )
+    assert band.mean() < -0.01
+    assert np.max(np.abs(window)) < 0.01
+
+
+def test_empty_cia_preserves_existing_absorbing_spectrum(engines):
+    """An existing finite-opacity emission case is bitwise unchanged."""
+    explicit = build_exojax_emission_engines(
+        molecules=(),
+        n_wavenumbers=N_NU,
+        n_layers=60,
+        surface_pressure_bar=10**EARTH_TWIN_LOG_P0,
+        cia_pairs=(),
+    )
+    baseline = _model(engines, EARTH_TWIN_COEFFS, species=_species(1e-24))
+    empty = _model(explicit, EARTH_TWIN_COEFFS, species=_species(1e-24))
+    np.testing.assert_array_equal(empty.emergent_flux(), baseline.emergent_flux())

@@ -6,12 +6,10 @@ It shares that model's species records, opacity engines, mixing-ratio
 profiles and :class:`~.components.absorption.Absorption` component, and
 integrates pure-absorption transfer locally using ExoJAX's ``ArtEmisPure``
 pressure grid, opacity and angular quadrature plus an opaque emitting ground.
+Optional cached HITRAN collision-induced absorption adds molecular-pair continua.
 
 Known omissions:
 
-- Collision-induced absorption (N2-N2, O2-O2, CO2-CO2, ...) is not
-  included. It matters mainly in the 8-12 micron window for dense CO2
-  atmospheres and is a small effect for an Earth twin.
 - Scattering (Rayleigh and clouds) is not included: the atmosphere is a
   cloud-free, purely absorbing, plane-parallel column.
 - The planet is treated as a uniformly emitting disk, with no day-night
@@ -46,12 +44,14 @@ import interpax
 import jax.numpy as jnp
 import numpy as np
 from exojax.rt import ArtEmisPure
+from exojax.utils.constants import m_u
 from exojax.utils.grids import wavenumber_grid
 from hwoutils import constants as const
 from hwoutils.constants import G_si, Mearth2kg, Rearth2AU, Rearth2m
 from hwoutils.conversions import nm_to_wavenumber_cm
 from jaxtyping import Array
 
+from .cia import TabulatedCIA, cia_path, load_cia
 from .components import (
     Absorption,
     ConstantMmr,
@@ -140,6 +140,8 @@ def build_exojax_emission_engines(
     temperature_range_K: tuple[float, float] = (150.0, 350.0),
     databases_dir: str | None = None,
     crit: float = 0.0,
+    cia_pairs: tuple[str, ...] = (),
+    cia_dir: str | Path | None = None,
 ) -> dict:
     """Build the heavy shared engines for thermal emission.
 
@@ -165,12 +167,22 @@ def build_exojax_emission_engines(
         databases_dir: HITRAN line-list cache (never downloaded here unless
             the cache is empty).
         crit: Line-strength cutoff passed to ``MdbHitran``.
+        cia_pairs: Optional HITRAN CIA pairs: N2-N2, O2-O2, O2-N2,
+            CO2-CO2, N2-H2O. Empty by default, preserving line-only results.
+        cia_dir: Local CIA cache, default ``~/.cache/skyscapes/cia``.
+            Missing files raise FileNotFoundError; CIA is never downloaded.
 
     Returns:
         Dict with keys ``rt_engine``, ``nu_grid``, ``n_nu``, the static
         Python float ``surface_pressure_bar`` and
-        ``species_prebuilt`` (name to ``{molmass, opa, rayleigh_xs}``).
+        ``species_prebuilt`` (name to ``{molmass, opa, rayleigh_xs}``),
+        and ``cia_prebuilt`` (tuple of tabulated continua).
     """
+    if len(set(cia_pairs)) != len(cia_pairs):
+        raise ValueError("cia_pairs must not contain duplicates")
+    # Fail before building line engines, which may otherwise fetch line lists.
+    for pair in cia_pairs:
+        cia_path(pair, cia_dir)
     if databases_dir is None:
         databases_dir = str(Path.home() / ".cache" / "skyscapes" / "exojax")
     Path(databases_dir).mkdir(parents=True, exist_ok=True)
@@ -203,6 +215,7 @@ def build_exojax_emission_engines(
         pressure_boundary[0] / pressure_boundary[1]
     )
 
+    cia_prebuilt = tuple(load_cia(pair, cia_dir, nu_grid) for pair in cia_pairs)
     species_prebuilt: dict[str, dict[str, Any]] = {}
     for name in molecules:
         molmass, opa, rayleigh_xs = build_species_prebuilt(
@@ -227,6 +240,7 @@ def build_exojax_emission_engines(
         "n_nu": int(nu_grid.shape[0]),
         "surface_pressure_bar": float(surface_pressure_bar),
         "species_prebuilt": species_prebuilt,
+        "cia_prebuilt": cia_prebuilt,
     }
 
 
@@ -251,6 +265,9 @@ class ExoJaxEmissionModel(eqx.Module):
             boundary is the surface pressure; ``pressure`` holds centers.
         nu_grid: Wavenumber grid [cm^-1].
         n_nu: Length of ``nu_grid``.
+        cia: Optional tabulated collision-induced absorption continua.
+        cia_vmr: Constant volume fractions for unmodeled CIA partners.
+        mean_molecular_weight: Mean atmospheric molecular mass [u] for CIA.
     """
 
     log_gravity_cgs: Array
@@ -261,6 +278,9 @@ class ExoJaxEmissionModel(eqx.Module):
     rt_engine: Any = eqx.field(static=True)
     nu_grid: Array
     n_nu: int = eqx.field(static=True)
+    cia: tuple[TabulatedCIA, ...] = ()
+    cia_vmr: dict[str, Array] = eqx.field(default_factory=dict)
+    mean_molecular_weight: float = 28.97
 
     @classmethod
     def from_default_setup(
@@ -282,6 +302,10 @@ class ExoJaxEmissionModel(eqx.Module):
         temperature_range_K: tuple[float, float] = (150.0, 350.0),
         databases_dir: str | None = None,
         crit: float = 0.0,
+        cia_pairs: tuple[str, ...] = (),
+        cia_dir: str | Path | None = None,
+        cia_vmr: dict[str, float] | None = None,
+        mean_molecular_weight: float = 28.97,
     ) -> ExoJaxEmissionModel:
         """Build engines and default components in one call.
 
@@ -309,6 +333,16 @@ class ExoJaxEmissionModel(eqx.Module):
             temperature_range_K: See :func:`build_exojax_emission_engines`.
             databases_dir: See :func:`build_exojax_emission_engines`.
             crit: See :func:`build_exojax_emission_engines`.
+            cia_pairs: See :func:`build_exojax_emission_engines`.
+            cia_dir: See :func:`build_exojax_emission_engines`.
+            cia_vmr: Constant volume fractions for CIA partners absent from
+                ``log_mmrs``, e.g. ``{"N2": 0.78, "O2": 0.21}``. Modeled
+                partners always use their mass profiles converted to VMR.
+            mean_molecular_weight: Atmospheric mean molecular mass [u],
+                constant with altitude and across planets. Used only for
+                CIA: MMR-to-VMR conversion and hydrostatic layer thickness.
+                The default 28.97 is appropriate for air; set it explicitly
+                for other bulk compositions.
         """
         if molecules is None:
             molecules = tuple(log_mmrs.keys())
@@ -323,6 +357,8 @@ class ExoJaxEmissionModel(eqx.Module):
             temperature_range_K=temperature_range_K,
             databases_dir=databases_dir,
             crit=crit,
+            cia_pairs=cia_pairs,
+            cia_dir=cia_dir,
         )
         species = []
         for name, value in log_mmrs.items():
@@ -348,6 +384,8 @@ class ExoJaxEmissionModel(eqx.Module):
             surface_emissivity=surface_emissivity,
             surface_emissivity_spectrum=surface_emissivity_spectrum,
             surface_pressure_bar=surface_pressure_bar,
+            cia_vmr=cia_vmr,
+            mean_molecular_weight=mean_molecular_weight,
         )
 
     @classmethod
@@ -362,13 +400,27 @@ class ExoJaxEmissionModel(eqx.Module):
         surface_emissivity: Array | None = None,
         surface_emissivity_spectrum: Array | None = None,
         surface_pressure_bar: float | None = None,
+        cia_vmr: dict[str, float] | None = None,
+        mean_molecular_weight: float = 28.97,
     ) -> ExoJaxEmissionModel:
         """Assemble a model from prebuilt engines (build once, fit many).
 
         ``engines`` is the dict returned by
         :func:`build_exojax_emission_engines`. ``surface_pressure_bar``
         defaults to the static surface boundary stored in ``engines``.
+        ``cia_vmr`` supplies constant volume fractions for unmodeled CIA
+        partners. Modeled species use their live MMR profiles instead.
+        ``mean_molecular_weight`` [u] defaults to air (28.97); it sets CIA
+        layer thickness and converts modeled MMRs to VMRs.
         """
+        cia = engines.get("cia_prebuilt", ())
+        cia_vmr = {} if cia_vmr is None else cia_vmr
+        names = {s.name for s in species}
+        missing = {p for c in cia for p in c.partners} - names - cia_vmr.keys()
+        if missing:
+            raise ValueError(
+                f"Supply cia_vmr for unmodeled CIA partners: {sorted(missing)}"
+            )
         tp_profile = PolynomialTPProfile(
             coefficients=jnp.atleast_2d(jnp.asarray(temperature_coefficients))
         )
@@ -401,7 +453,43 @@ class ExoJaxEmissionModel(eqx.Module):
             rt_engine=rt_engine,
             nu_grid=engines["nu_grid"],
             n_nu=n_nu,
+            cia=cia,
+            cia_vmr={name: jnp.asarray(value) for name, value in cia_vmr.items()},
+            mean_molecular_weight=mean_molecular_weight,
         )
+
+    def _cia_optical_depth(self, k: int) -> Array:
+        """CIA layer depth: k_CIA n_a n_b dz in ExoJAX's cgs convention.
+
+        Hydrostatic dz = k_B T / (mean_mass m_u g) * Delta P / P.
+        Identical partners use n_a squared, without an extra factor of two.
+        Reference: Karman et al. (2019), Icarus 328, 160.
+        """
+        pressure = jnp.asarray(self.rt_engine.pressure)
+        temperature = self.layer_temperature(k)
+        gravity = 10.0 ** self.log_gravity_cgs[k]
+        k_cgs = const.k_B * _J_S_TO_ERG_S
+        density = pressure * 1.0e6 / (k_cgs * temperature)
+        dz = (
+            k_cgs
+            * temperature
+            / (self.mean_molecular_weight * m_u * gravity)
+            * self.rt_engine.dParr
+            / pressure
+        )
+        vmrs = dict(self.cia_vmr)
+        for species in _species_at_planet(self.species, k):
+            vmrs[species.name] = (
+                species.profile.evaluate(pressure)
+                * self.mean_molecular_weight
+                / species.molmass
+            )
+        dtau = jnp.zeros((pressure.shape[0], self.n_nu))
+        for continuum in self.cia:
+            a, b = continuum.partners
+            column = vmrs[a] * vmrs[b] * density**2 * dz
+            dtau = dtau + continuum.coefficient_matrix(temperature) * column[:, None]
+        return dtau
 
     def layer_temperature(self, k: int = 0) -> Array:
         """Layer temperatures [K] of planet ``k``, shape ``(n_layers,)``."""
@@ -421,6 +509,9 @@ class ExoJaxEmissionModel(eqx.Module):
             gravity,
             self.rt_engine,
         ).dtau_total
+
+        if self.cia:
+            dtau = dtau + self._cia_optical_depth(k)
 
         source = planck_flux_cgs(self.nu_grid, temperature)
         ground = self.surface.compute_emissivity(k) * planck_flux_cgs(
