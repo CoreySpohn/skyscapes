@@ -214,10 +214,10 @@ class ScatteringAngle:
     toward the observer along ``k_out``. The scattering angle is measured
     from the forward continuation of ``k_in`` to ``k_out``; the
     illumination angle, its supplement, from the direction back toward the
-    star to ``k_out``. For a disk seen from far along ``+z`` this is the
+    star to ``k_out``. For a disk seen from far along ``-z`` this is the
     angle the disk kernels evaluate their phase functions at: their
-    ``cos_phi`` is the line-of-sight coordinate over the star-grain
-    distance, which is ``k_in . k_out``.
+    ``cos_phi`` is the private toward-pointing depth over the star-grain
+    distance, or -z/r in the public sky frame, which is ``k_in . k_out``.
 
     The star glyph, the observer glyph and the ray labels are optional and
     are created after the core artists, so a drawing without them has
@@ -313,7 +313,7 @@ class ScatteringAngle:
         self.forward.set_data([0.0, 0.8 * k_in[0]], [0.0, 0.8 * k_in[1]])
         theta = np.degrees(np.arccos(np.clip(k_in @ k_out, -1.0, 1.0)))
         theta_text = rf"$\Theta$ = {theta:.0f}{DEGREE}"
-        alpha_text = rf"$\alpha$ = {180.0 - theta:.0f}{DEGREE}"
+        alpha_text = rf"$\beta$ = {180.0 - theta:.0f}{DEGREE}"
         on_arcs = self.values == "arcs"
         # Each label sits a fixed gap beyond its arc; on the arcs the longer
         # value text is aligned to grow away from the grain.
@@ -331,7 +331,7 @@ class ScatteringAngle:
             -k_in,
             k_out,
             self.alpha_radius,
-            alpha_text if on_arcs else r"$\alpha$",
+            alpha_text if on_arcs else r"$\beta$",
             label_distance=self.alpha_radius + _ALPHA_GAP,
             outward=on_arcs,
         )

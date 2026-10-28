@@ -61,9 +61,9 @@ def plot_scattering_angle(
     direction, star to grain) and leaves it toward the observer along
     ``k_out``. The scattering angle ``Theta`` is measured from the forward
     continuation of ``k_in`` (dashed) to ``k_out``, so ``Theta = 0`` is
-    forward scattering; the illumination angle ``alpha = 180 - Theta`` is
+    forward scattering; the illumination (phase) angle ``beta = 180 - Theta`` is
     measured from the direction back toward the star to ``k_out``. For a
-    disk seen from far along ``+z``, ``cos(Theta) = k_in . k_out`` is the
+    disk seen from far along ``-z``, ``cos(Theta) = k_in . k_out`` is the
     angle the disk kernels evaluate their phase functions at.
 
     Two-element directions are drawn in the page plane as given. Three-
@@ -90,7 +90,7 @@ def plot_scattering_angle(
             the forward continuation.
         values: Where to print the two angle values: ``"corner"`` (the
             upper and lower left corners), ``"arcs"`` (on the arc labels,
-            which then read ``Theta = 62`` and ``alpha = 118`` degrees and
+            which then read ``Theta = 62`` and ``beta = 118`` degrees and
             grow away from the grain), or None (the arcs keep their bare
             symbols and nothing else is printed). The corner texts keep
             their gids in every case and are empty when unused.

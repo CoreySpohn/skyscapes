@@ -1,5 +1,51 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+* **disk, viz:** Images follow the FITS display convention: +column west,
+  north up and east left with `origin="lower"`. Parametric disk images are
+  mirrored left-right compared with earlier releases. ExoVista cubes are
+  used as written, unchanged from 2.0.0. `plot_disk_image` no longer inverts
+  the x axis separately; its descending extent sets the orientation.
+
+* **io:** ExoVista scenes now match the true sky. In 2.0.0, planet RA offsets
+  were labelled east but were west-positive; their east offsets now change
+  sign. The cube was already used as written (+column west, east left), but
+  `plot_disk_image` inverted the x axis assuming +column east; its displayed
+  orientation now changes. `System.midplane_pa_deg` becomes (-PA) mod 360,
+  so parametric disks and outlines built from `System.midplane_*` match the
+  loaded image. Code placing planets with the old sign must be updated.
+
+* **io:** ExoVista planet states are now made star-relative before conversion
+  to orbital elements. Earlier releases used barycentric states, which biased
+  the elements of massive planets.
+
+* **io:** ExoVista planet positions and velocities are now converted from
+  ExoVista's (west, north, toward) axes to (east, north, away) at load
+  with the proper rotation (-x, y, -z). Earlier releases kept ExoVista's axes, so
+  loaded elements (Omega, i, omega) followed a different convention, though
+  the raw FITS state values round-tripped. Time-indexed contrast light
+  curves are preserved. Phase-indexed contrasts are regridded on the
+  star-relative phase, so they can differ slightly from earlier releases.
+
+* **scene:** `Planet.position_arcsec` now returns (Delta alpha*, Delta Dec) =
+  (east, north), where Delta alpha* = Delta RA cos Dec. `Planet.propagate`
+  returns orbix's (east, north, away) positions unchanged: right-handed,
+  z positive away and dz/dt positive receding, with the standard phase
+  cos(beta) = z/r. This requires orbix>=3.0.0. Earlier releases returned
+  raw orbix rows (north, east, away) re-labelled as east/north, swapping
+  sky axes for planets built from orbital elements;
+  ExoVista planets instead had west-positive offsets. In 1.6.1 and 2.0.0,
+  element-built planets also had inverted phases (crescent and gibbous exchanged), changing
+  `alpha_dMag`, `contrast` and `spec_flux_density`. ExoVista phase grids use
+  the same standard angle at construction and evaluation.
+
+* **viz:** Side views in `plot_system` and `plot_disk_geometry` place the
+  observer on the left at -z, with z labelled away from the observer. The
+  scattering diagram labels the illumination angle beta.
+
 ## [2.0.0](https://github.com/CoreySpohn/skyscapes/compare/v1.6.1...v2.0.0) (2026-10-13)
 
 

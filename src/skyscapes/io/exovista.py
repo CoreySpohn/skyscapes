@@ -265,6 +265,17 @@ def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
     )
 
 
+def _exovista_to_orbix(vector: jnp.ndarray) -> jnp.ndarray:
+    """Convert (west, north, toward) to orbix's (east, north, away).
+
+    ExoVista's ``src/exovista/generate_scene.py`` ``generate_scene``
+    docstring defines +x as west, +y as north and +z toward the observer.
+    For either a position or velocity vector, the conversion is (-x, y, -z),
+    a proper rotation (det +1).
+    """
+    return jnp.stack([-vector[0], vector[1], -vector[2]])
+
+
 def _load_single_planet(
     hdul: fits.HDUList,
     fits_ext: int,
@@ -278,16 +289,16 @@ def _load_single_planet(
 
     ExoVista stores the planet ``(r, v)`` state vectors already in the
     on-sky ("bary-sky") frame -- the same frame the disk cube is rendered
-    in -- so they are converted to Keplerian elements directly, with NO
-    additional sky rotation. Rotating them again (as an earlier version
-    did) double-applies the system inclination and PA and tilts every
-    planetary system off its disk.
+    in. Subtract the star's state at the same epoch to obtain star-relative
+    states, then convert their (west, north, toward) axes to orbix's
+    (east, north, away) axes before deriving Keplerian elements. The system
+    inclination and PA are already applied by the writer.
 
     With ``planet_spectra="time"`` the contrasts stay indexed by the FITS
     epochs, which preserves the stellar-activity history. With
     ``planet_spectra="phase"`` they are regridded onto the standard phase
-    angle arccos(-r_z / |r|) (0 = full phase), computed at load time with the
-    same ``trig_solver`` the runtime ``System`` uses; this stays
+    angle returned by orbix (0 = full phase), computed at load time with
+    the same ``trig_solver`` the runtime ``System`` uses; this stays
     self-consistent with rendering because the grid is keyed by the same
     phase angle ``Planet.propagate`` returns at render time.
     """
@@ -299,15 +310,21 @@ def _load_single_planet(
 
     contrast_data = jnp.asarray(obj_data[:, 16:].T.astype(np.float32))
 
-    # ExoVista's state vectors are already in the on-sky ("bary-sky") frame;
-    # use them directly. FITS data is big-endian ('>f8'); convert to native
-    # float64 before passing to JAX.
-    r_sky_au = jnp.asarray(obj_data[0, 9:12].astype(np.float64))  # (3,)
-    v_sky_au_yr = jnp.asarray(obj_data[0, 12:15].astype(np.float64))  # (3,)
+    # Both layouts store barycentric body states in columns 9:15. Convert
+    # big-endian FITS data to native float64 before subtracting stellar reflex.
+    star_data = hdul[_star_extension(hdul)].data
+    relative_state = obj_data[0, 9:15].astype(np.float64) - star_data[0, 9:15].astype(
+        np.float64
+    )
+    r_sky_au = _exovista_to_orbix(jnp.asarray(relative_state[:3]))
+    v_sky_au_yr = _exovista_to_orbix(jnp.asarray(relative_state[3:]))
 
     r_sky_m = r_sky_au * AU2m
     v_sky_m_s = jnp.array(au_per_yr_to_m_per_s(v_sky_au_yr))
     planet_mass_kg = float(obj_header.get("M")) * Mearth2kg
+    if not (np.isfinite(planet_mass_kg) and planet_mass_kg > 0.0):
+        # Unknown mass: test-particle limit, matching Planet.central_mass_kg.
+        planet_mass_kg = 0.0
     mu_SI = G_si * (star.Ms_kg + planet_mass_kg)
     _a_m, _e, i_rad, W_rad, w_rad, M_rad = state_vector_to_keplerian(
         r_sky_m, v_sky_m_s, mu_SI
@@ -340,10 +357,11 @@ def _load_single_planet(
         ), t0
 
     # beta(t_i) per FITS input time, using the same solver the runtime uses.
-    _r_AU, beta_rad, _dist_AU = orbit.propagate(trig_solver, times_jd, Ms_kg=star.Ms_kg)
-    # orbix measures from the +z observer axis; the standard phase angle
-    # (0 = full phase) is pi minus that, as in Planet.propagate.
-    phase_angle_rad = jnp.pi - beta_rad
+    _r_AU, beta_rad, _dist_AU = orbit.propagate(
+        trig_solver, times_jd, Ms_kg=star.Ms_kg + planet_mass_kg
+    )
+    # orbix already returns the standard phase angle, as does Planet.propagate.
+    phase_angle_rad = beta_rad
     beta_deg = jnp.rad2deg(phase_angle_rad[0])  # (T,), already in [0, 180]
 
     # Sort by beta. Duplicates are fine for interpolation (axisymmetric
@@ -388,14 +406,35 @@ def _load_single_planet(
     )
 
 
+def _midplane_to_east_north(inc_deg: float, pa_deg: float) -> tuple[float, float]:
+    """Convert ExoVista header (I, PA) to the east/north midplane chart.
+
+    ExoVista's ``src/exovista/generate_scene.py`` ``generate_scene``
+    docstring defines +x west, +y north, +z toward the observer. Negating
+    x and z maps the node vector to minus the node vector at -PA, and the
+    near in-plane vector to the near vector at -PA in (east, north, away),
+    with I unchanged. The physical near half points toward the observer
+    (negative z). This preserves both the plane and its near side below
+    and above I = 90;
+    180 - PA would preserve only the projected major-axis line.
+    """
+    return inc_deg, (-pa_deg) % 360.0
+
+
 def _load_disk(hdul: fits.HDUList, fits_ext: int) -> ExovistaDisk:
     """Load the ExoVista disk extension into an ExovistaDisk.
 
     The contrast cube is already rendered in the on-sky frame by
-    ExoVista; the system midplane angles (I, PA) live on
-    ``System.midplane_inc_deg`` / ``System.midplane_pa_deg`` (populated
-    by ``from_exovista`` from the same FITS star header), not on the
-    disk itself.
+    ExoVista, with +column west and +row north (FITS display convention;
+    see ExoVista's ``src/exovista/generate_scene.py``). It is used as written.
+    With ``imshow(origin="lower")`` and no axis inversion, north is up and
+    east is left; astronomical PA (north through east) is counterclockwise.
+    Column offset = -east / pixel scale.
+
+    ``from_exovista`` converts the FITS star header's (I, PA) to
+    (I, -PA modulo 360) on ``System.midplane_inc_deg`` /
+    ``System.midplane_pa_deg``. These east/north angles orient parametric
+    disks and outlines; this loaded cube already has its geometry.
     """
     obj_data = hdul[fits_ext].data
     header = hdul[fits_ext].header
@@ -453,9 +492,12 @@ def from_exovista(
 ) -> System:
     """Load an ExoVista FITS file into a ``scene.System``.
 
-    State vectors are already in the on-sky frame. Midplane inclination
-    and position angle are retained for diagnostics without rotating the
-    states again. Elapsed simulation years become Julian Dates relative
+    State vectors are already on-sky; their (west, north, toward) axes
+    are converted to orbix's (east, north, away) axes. The FITS star
+    header's midplane (I, PA) becomes (I, -PA modulo 360) in the east/north
+    chart on ``System.midplane_*``, used by parametric disks and outlines.
+    These angles are not applied again to the states or loaded image.
+    Elapsed simulation years become Julian Dates relative
     to J2000, with exactly 365.25 days per year. Enable ``jax_enable_x64``
     before loading to preserve this time coordinate.
 
@@ -513,8 +555,9 @@ def from_exovista(
         wavelengths_um = hdul[0].data
         wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
         star_header = hdul[star_ext].header
-        midplane_inc_deg = float(star_header.get("I", 0.0))
-        midplane_pa_deg = float(star_header.get("PA", 0.0))
+        midplane_inc_deg, midplane_pa_deg = _midplane_to_east_north(
+            float(star_header.get("I", 0.0)), float(star_header.get("PA", 0.0))
+        )
 
         star = _load_star(hdul, fits_ext=star_ext)
         solver = get_grid_solver(level="scalar", E=False, trig=True, jit=True)

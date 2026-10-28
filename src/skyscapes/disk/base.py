@@ -13,7 +13,9 @@ class AbstractDisk(eqx.Module):
 
     Subclasses return contrast (flux ratio relative to the host star) per
     pixel. The concrete ``System`` multiplies by ``star.spec_flux_density``
-    to turn that into ph/s/m^2/nm per pixel.
+    to turn that into ph/s/m^2/nm per pixel. Image rows increase north and
+    columns increase west (FITS display convention); sky east maps to
+    negative column offset.
 
     ``incl_deg`` / ``pa_deg`` are supplied at render time rather than stored
     on the disk so the System's midplane orientation drives every disk

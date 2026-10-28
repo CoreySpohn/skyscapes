@@ -400,3 +400,29 @@ def test_wavelength_vmap_returns_cube():
     assert cube.shape == (3, d.ny, d.nx)
     assert bool(jnp.all(jnp.isfinite(cube)))
     assert not jnp.allclose(cube[0], cube[1])
+
+
+def test_ring_major_axis_has_fits_sky_pa():
+    """North-through-east PA is measured with east=-column, north=+row."""
+    disk = make_disk(
+        g_HG=0.0,
+        sma_AU=jnp.array(20.0),
+        alpha_in=jnp.array(30.0),
+        alpha_out=jnp.array(-30.0),
+        ksi0_AU=jnp.array(0.4),
+        rmin_AU=jnp.array(10.0),
+        rmax_AU=jnp.array(30.0),
+        nx=101,
+        ny=101,
+        pixel_scale_arcsec=0.1,
+    )
+    sky_pa = 60.0
+    image = np.asarray(_render(disk, incl_deg=60.0, pa_deg=90.0 - sky_pa))
+    row, col = np.indices(image.shape, dtype=float)
+    east, north = -(col - 50), row - 50
+    ee = np.sum(image * east**2)
+    nn = np.sum(image * north**2)
+    en = np.sum(image * east * north)
+    measured = np.degrees(0.5 * np.arctan2(2 * en, nn - ee)) % 180
+    difference = abs((measured - sky_pa + 90) % 180 - 90)
+    assert difference < 0.5, f"sky PA {measured:.3f} deg, expected {sky_pa} deg"

@@ -30,16 +30,16 @@ class System(eqx.Module):
             ``orbix.kepler.shortcuts.grid.get_grid_solver``). Required --
             callers must provide a built solver, not None.
         disk: Optional extended-source disk (``AbstractDisk | None``).
-        midplane_inc_deg: System midplane inclination [deg] in the
-            barycentric -> sky frame. Default 0.0 means "midplane = sky"
-            and is intentionally indistinguishable from a real face-on
-            system at this inclination; this ambiguity is acceptable
-            because the field is diagnostic-only after load (no runtime
-            hot path consults it). Populated by ``io.from_exovista``
-            from the FITS star header. After load, frame rotation has
-            already been baked into each ``Planet``'s orbital elements.
-        midplane_pa_deg: System midplane position angle [deg]. Same
-            semantics as ``midplane_inc_deg``.
+        midplane_inc_deg: Disk midplane inclination [deg] in [0, 180],
+            with 0 face-on (the default). Together with ``midplane_pa_deg``,
+            orients parametric disks and visualization outlines in the
+            right-handed (east, north, away) sky frame. ``io.from_exovista``
+            preserves the FITS star header's I. Planet orbits and loaded
+            disk images already carry their own geometry.
+        midplane_pa_deg: Disk line-of-nodes angle [deg], measured from east
+            (+x) toward north (+y), default 0. This is not astronomical PA.
+            ``io.from_exovista`` converts the FITS star header's west-based
+            PA to ``(-PA) % 360``, preserving the near half toward the observer (-z).
     """
 
     star: AbstractStar

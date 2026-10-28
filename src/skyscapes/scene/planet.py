@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import equinox as eqx
 import jax.numpy as jnp
-from hwoutils.constants import G, pc2AU, rad2arcsec, two_pi
+from hwoutils.constants import G, Mearth2kg, pc2AU, rad2arcsec, two_pi
 from jaxtyping import Array
 from orbix.equations.orbit import mean_anomaly_tp, mean_motion, period_n
 from orbix.orbit import AbstractOrbit
@@ -54,6 +54,21 @@ class Planet(eqx.Module):
         """Number of planets ``K`` carried by this composed module."""
         return int(self.Rp_Rearth.shape[0])
 
+    def central_mass_kg(self, *, star: AbstractStar) -> Array:
+        """Mass that sets each planet's orbital period [kg], shape ``(K,)``.
+
+        The two-body relative orbit has gravitational parameter
+        ``G (M_star + M_planet)``. Where ``Mp_Mearth`` is finite and positive
+        the planet mass is added to the stellar mass; where it is NaN, zero or
+        negative (mass unknown) the planet is treated as a test particle and
+        only ``M_star`` is used. Loaders that derive elements from a state
+        vector use the same sum, so loading and propagation share one
+        gravitational parameter.
+        """
+        mp_kg = self.Mp_Mearth * Mearth2kg
+        known = jnp.isfinite(mp_kg) & (mp_kg > 0.0)
+        return star.Ms_kg + jnp.where(known, mp_kg, 0.0)
+
     def mean_anomaly(self, t_jd: Array, *, star: AbstractStar) -> Array:
         """Mean anomaly mod 360 [deg], shape ``(K, T)``.
 
@@ -61,7 +76,7 @@ class Planet(eqx.Module):
         that hold a scalar should wrap it in ``jnp.asarray([t])`` at the
         call site.
         """
-        n = mean_motion(self.orbit.a_AU, G * star.Ms_kg)
+        n = mean_motion(self.orbit.a_AU, G * self.central_mass_kg(star=star))
         T_d = period_n(n)
         tp_d = self.orbit.t0_d - T_d * self.orbit.M0_rad / two_pi
         M = mean_anomaly_tp(t_jd[None, :], n[:, None], tp_d[:, None]) % two_pi
@@ -70,18 +85,20 @@ class Planet(eqx.Module):
     def propagate(self, trig_solver, t_jd: Array, *, star: AbstractStar):
         """Propagate the orbit; returns ``(r_AU, phase_angle_rad, dist_AU)``.
 
+        ``r_AU`` has shape ``(K, 3, T)`` in orbix's right-handed
+        (east, north, away) frame, passed through unchanged. Positive z
+        points away from the observer; dz/dt is positive when receding.
+        ``position_arcsec`` reads rows 0 and 1 as east and north.
+
         ``phase_angle_rad`` is the standard star-planet-observer phase angle:
         0 at full phase (superior conjunction, planet behind the star),
         ``pi / 2`` at quadrature and ``pi`` at new phase (inferior
-        conjunction). orbix reports the angle between the position vector
-        and the ``+z`` observer axis, which is ``pi`` minus this; the
-        conversion happens here, once, so every physical model receives
-        the standard angle.
+        conjunction). orbix returns this angle directly; it is unchanged.
+        In this sky chart, ``cos(phase_angle_rad) = +r_AU[:, 2, :] / dist_AU``.
         """
-        r_AU, beta_rad, dist_AU = self.orbit.propagate(
-            trig_solver, t_jd, Ms_kg=star.Ms_kg
+        return self.orbit.propagate(
+            trig_solver, t_jd, Ms_kg=self.central_mass_kg(star=star)
         )
-        return r_AU, jnp.pi - beta_rad, dist_AU
 
     def position_arcsec(
         self,
@@ -90,7 +107,11 @@ class Planet(eqx.Module):
         *,
         star: AbstractStar,
     ) -> Array:
-        """On-sky position, shape ``(2, K, T)`` -- (dRA, dDec) in arcsec."""
+        """On-sky (east, north) offsets in arcsec, shape ``(2, K, T)``.
+
+        ``(dRA, dDec) = (Delta alpha*, Delta Dec)``, where the east offset
+        ``Delta alpha* = Delta RA cos Dec`` includes the declination factor.
+        """
         r_AU, _, _ = self.propagate(trig_solver, t_jd, star=star)
         dist_AU = star.dist_pc * pc2AU
         scale = rad2arcsec / dist_AU

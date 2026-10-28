@@ -9,6 +9,15 @@
 
 JAX-native astrophysical scene modeling for HWO direct imaging.
 
+`Planet.propagate` returns orbix's star-centered (east, north, away)
+positions unchanged. This frame is right-handed: z is positive away from
+the observer, and dz/dt is positive receding. The standard phase angle
+beta satisfies `cos(beta) = z / r` (zero at full phase).
+`position_arcsec` reads rows 0 and 1 as (Delta alpha*, Delta Dec), where
+Delta alpha* = Delta RA cos Dec. ExoVista positions and velocities are
+converted from (west, north, toward) with `(-x, y, -z)` before deriving
+elements; the header midplane mapping remains `(-PA) % 360`.
+
 ## What skyscapes is
 
 `skyscapes` provides the **scene representation** that downstream HWO

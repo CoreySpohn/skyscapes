@@ -3,16 +3,23 @@
 Every direction here comes from the library's own frame conventions rather
 than a second derivation of them:
 
-- The sky frame is ``(x, y, z)``: ``x`` the RA offset, ``y`` the Dec
-  offset, ``+z`` from the star toward the observer. ``Planet`` positions
-  (through orbix) and the parametric disk kernels both use it.
+- The sky frame is ``(x, y, z)``: ``x`` the east (Delta alpha*) offset, ``y`` the Dec
+  offset, ``+z`` away from the observer: (east, north, away), right-handed.
+  ``Planet`` passes orbix positions through, with phase cos(beta) = z/r.
+  The disk LOS kernel uses a private toward-pointing integration depth
+  and returns only a sky image.
 - The disk midplane is placed in the sky frame by
-  ``skyscapes.io._frames.rotate_to_sky_coords``, the rotation the ExoVista
-  loader applies. Its first two output rows are the images of the disk's
+  ``skyscapes.io._frames.rotate_to_sky_coords``. The ExoVista loader instead
+  converts already on-sky states from (west, north, toward) to orbix's
+  (east, north, away) axes and uses cube arrays as written (+column west,
+  +row north). It converts header
+  (I, PA) to (I, -PA modulo 360) on ``System.midplane_*`` for these
+  east/north axes; it does not apply the midplane rotation again.
+  The rotation's first two output rows are the images of the disk's
   in-plane axes: the line of nodes, at angle ``pa`` from ``+x`` toward
-  ``+y``, and the in-plane axis whose ``+z`` component is ``sin(incl)``,
+  ``+y``, and the in-plane axis whose ``z`` component is ``-sin(incl)``,
   which points at the near (forward-scattering) half of the disk. These
-  are the same axes the line-of-sight kernel integrates in.
+  describe the same physical disk as the line-of-sight kernel.
 """
 
 from __future__ import annotations
@@ -24,7 +31,7 @@ from skyscapes.io._frames import rotate_to_sky_coords
 
 
 def disk_axes_sky(incl_deg, pa_deg):
-    """Sky-frame unit vectors of the disk's axes.
+    """Right-handed (east, north, away) unit vectors of the disk's axes.
 
     Args:
         incl_deg: Midplane inclination [deg]; 0 is face-on.
@@ -33,7 +40,8 @@ def disk_axes_sky(incl_deg, pa_deg):
     Returns:
         ``(nodes, near, normal)``, each shape ``(3,)``: the line of nodes
         (the projected major axis), the in-plane axis toward the near half,
-        and the right-handed midplane normal ``nodes x near``.
+        and the right-handed midplane normal ``nodes x near``. For
+        inclinations in (0, 180), the near vector has negative z.
     """
     basis = np.asarray(
         rotate_to_sky_coords(jnp.eye(3), inc_deg=float(incl_deg), pa_deg=float(pa_deg)),
@@ -71,7 +79,7 @@ def to_side(points_xyz, minor_xy):
         minor_xy: Projected minor-axis direction from ``minor_axis_direction``.
 
     Returns:
-        ``(z, u)``: distance toward the observer and offset along the
+        ``(z, u)``: distance away from the observer and offset along the
         projected minor axis, each shape ``(...)``.
     """
     p = np.asarray(points_xyz, dtype=float)

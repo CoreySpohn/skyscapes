@@ -88,25 +88,54 @@ system = System(
 
 | Quantity | Convention |
 |---|---|
-| Sky frame | `(x, y, z)`, star-centered. `x` is the RA offset, `y` the Dec offset, and `+z` points from the star toward the observer. `Planet.position_arcsec` returns `(x, y)` in arcsec, and `Planet.propagate` returns the standard phase angle, 0 at full phase (planet behind the star) and pi at new phase; orbix itself reports the angle from the `+z` axis, which is pi minus that. |
-| Sky images | Pixel `(row, col)` lies at `(y, x)`; the RA offset is drawn increasing to the left. |
-| Disk orientation | Set once, on the system, by `System.midplane_inc_deg` and `System.midplane_pa_deg`. Every disk component renders at that orientation; the planets' orbits carry their own elements and need not be coplanar with it. |
+| Sky frame | `(x, y, z)`, star-centered. `x` is the east offset (Delta alpha* = Delta RA cos Dec), `y` the north (Dec) offset, and `+z` points away from the observer. This (east, north, away) frame is right-handed, with dz/dt positive receding. `Planet.propagate` passes orbix's positions through unchanged; `Planet.position_arcsec` returns `(x, y)` in arcsec. The phase angle is the standard star-planet-observer angle, 0 at full phase (planet behind the star) and pi at new phase, as orbix returns it, so `cos(beta) = z / r` in this frame. |
+| Sky images | All disk arrays use the FITS display convention described below; ExoVista cubes are used as written. |
+| Disk orientation | Set once, on the system, by `System.midplane_inc_deg` and `System.midplane_pa_deg`. Parametric disks and outlines use that orientation; loaded cubes retain their rendered geometry. The planets' orbits carry their own elements and need not be coplanar with it. |
 | Inclination | The angle between the midplane normal and the line of sight, in `[0, 180]`, 0 for a face-on disk. The projected axis ratio is `abs(cos(i))`, and `i` at `pa` is the same midplane as `180 - i` at `pa + 180`. The parametric disks render the same nonnegative map for both; above 90 degrees the near, forward-scattering half lies on the opposite side of the line of nodes from its position at `180 - i` and the same `pa`. |
 | Position angle | The projected major axis (the line of nodes) lies at `pa` from `+x` toward `+y`, so `pa = 0` puts it along the RA axis. This is **not** the astronomical position angle: with `+x` east, the major axis lies at astronomical PA (north through east) `90 - pa`, modulo 180. |
-| Near side | The half of the disk displaced toward `+z`. Its grains scatter forward, so a forward-scattering phase function brightens it. |
+| Near side | The half of the disk displaced toward the observer, at negative z. Its grains scatter forward, so a forward-scattering phase function brightens it. |
 | Scattering angle | The angle at a grain between the incident propagation direction (star to grain) and the direction toward the observer; 0 is forward scattering. The illumination angle is its supplement. |
 
-The views place the disk through the same rotation the ExoVista loader
-applies and the line-of-sight kernels integrate in, so an outline drawn by
-a view and a disk rendered by `surface_brightness` agree.
+Image arrays have row index increasing north and column index increasing
+west. Thus `imshow(origin="lower")` with no axis inversion shows north up
+and east left (Calabretta and Greisen 2002, A&A 395, 1077, Sect. 5).
+Astronomical PA, north through east, is counterclockwise on this image.
+One sky-to-pixel step carries the sign: `column offset = -east / scale`;
+`row offset = north / scale`, about the center `((nx - 1) / 2, (ny - 1) / 2)`.
+For axes labelled in sky offsets, `plot_disk_image` uses the descending
+extent `(+half_x, -half_x, -half_y, +half_y)`: RA offset increases to the
+left without a separate x-axis inversion. Planets and outlines retain
+their east/north sky coordinates.
+
+The views place the disk through the same rotation the line-of-sight
+kernels integrate in, so an outline drawn by a view and a disk rendered by
+`surface_brightness` agree. ExoVista scenes reach that rotation through
+the converted (east, north, away) states and the header `(I, PA)` below.
+
+The loader also converts the FITS star header's `(I, PA)` into
+`System.midplane_inc_deg = I` and `System.midplane_pa_deg = (-PA) % 360`.
+The `generate_scene` docstring in ExoVista's `src/exovista/generate_scene.py`
+defines its chart as west, north, toward the observer. In that chart the
+node vector is `(cos(PA), sin(PA), 0)` and the in-plane vector toward the
+near half is `(-cos(I) sin(PA), cos(I) cos(PA), sin(I))`.
+Negating x and z gives minus the node vector at `-PA` (the same line) and
+exactly the near vector at `-PA` in (east, north, away), with inclination
+unchanged. This also works for `I > 90`, where `cos(I)` reverses the projected near direction.
+The equivalent representation `(180 - I, 180 - PA)` describes the same
+plane and near half, following the inclination equivalence above.
+Using `180 - PA` with I unchanged instead reverses the near half.
+For header `(60, 30)`, the converted major axis is 150 degrees from east
+toward north (astronomical PA 120), and the near half is at astronomical
+PA 30. These angles orient parametric disks and outlines consistently
+with the loaded cube without rotating the loaded image or states again.
 
 ## The system on the sky and side on
 
 {func}`~skyscapes.viz.plot_system` draws a system in one physical frame.
 The sky view is what a detector sees, in arcsec. The side view turns the
 same scene so the line of sight runs left to right, with the observer to
-the right; the vertical axis is the sky offset along the disk's projected
-minor axis. The disk appears side on as its midplane, tilted from the sky
+the left (negative z); the vertical axis is the sky offset along the
+disk's projected minor axis. The disk appears side on as its midplane, tilted from the sky
 plane by the inclination, and each planet sits at its true distance
 toward or away from the observer.
 
@@ -135,7 +164,7 @@ angles on their own before placing the grain in a disk.
 ```{code-cell} ipython3
 incl = np.radians(60.0)
 fig, ax = plt.subplots(figsize=(4.2, 3.6), layout="constrained")
-viz.plot_scattering_angle([np.sin(incl), np.cos(incl)], [1.0, 0.0], ax=ax);
+viz.plot_scattering_angle([-np.sin(incl), np.cos(incl)], [-1.0, 0.0], ax=ax);
 ```
 
 Here the incident ray reaches a near-side grain on the minor axis of a
@@ -154,8 +183,8 @@ as the inset it later becomes.
 ```{code-cell} ipython3
 fig, ax = plt.subplots(figsize=(4.2, 3.6), layout="constrained")
 viz.plot_scattering_angle(
-    [np.sin(incl), np.cos(incl)],
-    [1.0, 0.0],
+    [-np.sin(incl), np.cos(incl)],
+    [-1.0, 0.0],
     values="arcs",
     alpha_radius=0.55,
     ax=ax,

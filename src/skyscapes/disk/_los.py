@@ -3,6 +3,10 @@
 Lifted out of ``GraterDisk.surface_brightness`` so multiple disk classes
 (GraterDisk, ExovistaParametricDisk, ...) can plug in their own density
 profiles and phase functions while sharing the geometric integration.
+Images follow the FITS display convention: +column west, +row north.
+With ``imshow(origin="lower")`` and no axis inversion, north is up and
+east is left; astronomical PA (north through east) is counterclockwise.
+The sky-to-pixel sign is column offset = -east / pixel scale.
 """
 
 from __future__ import annotations
@@ -48,9 +52,15 @@ def los_integrate_scattered(
 ) -> Array:
     """Integrate scattered light along LOS around the disk midplane.
 
-    Sky frame: ``+x`` along the image columns (the axis
-    ``Planet.position_arcsec`` reports as the RA offset), ``+y`` along the
-    rows toward N, observer along ``+z``. ``pa_deg`` rotates the disk's
+    Private integration chart: (east, north, toward), with depth ``l_grid``
+    positive toward the observer (the negative of public sky z). Sky ``x``
+    is east (from ``Planet.position_arcsec``), and sky ``y`` is north.
+    Image columns increase west and rows increase north (FITS convention):
+    column offset = -east / pixel scale. With ``imshow(origin="lower")``
+    and no axis inversion, north is up, east is left, and astronomical PA
+    (north through east) is counterclockwise.
+    Only a 2D brightness map leaves this kernel;
+    no vector is returned in the private chart. ``pa_deg`` rotates the disk's
     projected major axis (the line of nodes) from ``+x`` toward ``+y``, so
     ``pa_deg = 0`` puts the major axis along ``+x``. This is not the
     astronomical position angle: with ``+x`` east, the major axis lies at
@@ -95,7 +105,7 @@ def los_integrate_scattered(
         Caller multiplies by an albedo / normalization to get contrast.
     """
     px_AU = pixel_scale_arcsec * dist_pc
-    x_pix = (jnp.arange(nx) - (nx - 1) / 2.0) * px_AU
+    x_pix = -(jnp.arange(nx) - (nx - 1) / 2.0) * px_AU
     y_pix = (jnp.arange(ny) - (ny - 1) / 2.0) * px_AU
     x_sky, y_sky = jnp.meshgrid(x_pix, y_pix)
 
@@ -155,7 +165,7 @@ def los_integrate_scattered(
     r_AU = jnp.sqrt(xy_sq_safe)
     rho = density_fn(r_AU, z_d, valid)
 
-    # Scattering angle: observer-frame z / |position| = l_grid / |position|.
+    # Scattering cosine: private toward-depth / distance = -public sky z / r.
     safe_d_sq = jnp.where(d_star_sq > 0.0, d_star_sq, 1.0)
     safe_d = jnp.sqrt(safe_d_sq)
     cos_phi = l_grid / safe_d
