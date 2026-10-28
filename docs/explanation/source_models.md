@@ -46,19 +46,20 @@ end-to-end.
 
 ## Stars
 
-Two concrete `AbstractStar` implementations:
+Three concrete `AbstractStar` implementations:
 
 | Class | When to use |
 |---|---|
 | `Star` | Tabulated stellar spectral flux, interpolated over wavelength and time with `interpax`. A single epoch is a static spectrum. ExoVista-loaded systems use this. |
 | `FlatStar` | Simplification: constant flux independent of wavelength or time. Sandbox / testing / closed-form sanity checks. |
+| `BlackbodyStar` | Planck blackbody spectrum from effective temperature, stellar radius, and distance. Static physical approximation for converting planet contrast to flux. |
 
 ```python
 import jax
 
 jax.config.update("jax_enable_x64", True)
 
-from skyscapes.scene import Star, FlatStar
+from skyscapes.scene import Star, FlatStar, BlackbodyStar
 import jax.numpy as jnp
 
 # Realistic: wavelength + time dependence
@@ -77,15 +78,32 @@ flat = FlatStar(
     flux_phot_per_nm_m2=1e9,
 )
 
-# Either implements the same interface
+# Physical approximation: a solar-temperature blackbody at 10 pc
+blackbody = BlackbodyStar(
+    Ms_kg=1.989e30,
+    dist_pc=10.0,
+    teff_K=5772.0,
+    radius_m=6.957e8,
+)
+
+# All implement the same interface
 print(star.spec_flux_density(wavelength_nm=550.0, time_jd=2_460_365.0))
 print(flat.spec_flux_density(wavelength_nm=550.0, time_jd=2_460_365.0))
+print(blackbody.spec_flux_density(wavelength_nm=550.0, time_jd=2_460_365.0))
 ```
 
 `Star` is the canonical choice for any real target -- it ingests
 ExoVista-style time- and wavelength-dependent flux tables. `FlatStar`
 is the sandbox stand-in when you only need a single constant flux
 value.
+
+`BlackbodyStar` evaluates the Planck function in photon units and returns
+the observer flux in photons/s/m^2/nm. Following Rybicki and Lightman
+(1979), *Radiative Processes in Astrophysics*, the surface flux is
+`pi * B_photon`, diluted by `(radius_m / (dist_pc * pc2m))**2` at the
+observer. Wavelengths are in nanometers, and the result retains their
+shape. The spectrum is static, so `time_jd` is ignored. Both `jax.jit`
+and `jax.vmap` over wavelength are supported.
 
 `flux_density_jy` is the observer's disk-integrated spectral flux
 density, shape `(n_wl, n_time)`. `spec_flux_density` returns
