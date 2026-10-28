@@ -116,6 +116,7 @@ pip install skyscapes
   `ExovistaDisk`, `GraterDisk`, `CompositeDisk`, ...
 - [`skyscapes.physical_model`](explanation/physical_models) --
   `LambertianPhysicalModel`, `ExoJaxPhysicalModel`,
+  `ExoJaxEmissionModel` ([how-to](how-to/thermal_emission)),
   `GridPhysicalModel`, ...
 - [`skyscapes.background`](explanation/source_models) -- `Zodi`
   (union), `AYOZodi`, `LeinertZodi`, `PrecomputedZodi`
@@ -159,6 +160,7 @@ explanation/scene_geometry
 :hidden:
 
 how-to/habitable_zone
+how-to/thermal_emission
 ```
 
 <!-- TODO(post-1.0): write tutorials/01_loading_a_scene and re-add a "Get started" toctree. -->
