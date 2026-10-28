@@ -2,7 +2,8 @@
 
 ``AbstractStar`` declares a ``Ms_kg`` / ``dist_pc`` pair and the
 ``spec_flux_density`` hook. ``FlatStar`` is a flat-spectrum stand-in
-useful for ETC runs. ``Star`` wraps an ``interpax.Interpolator2D``
+useful for ETC runs. ``BlackbodyStar`` supplies a diluted Planck spectrum.
+``Star`` wraps an ``interpax.Interpolator2D``
 over (wavelength, time) built from Jansky flux data, matching the legacy
 ``skyscapes._legacy.Star`` semantics.
 
@@ -19,6 +20,7 @@ import interpax
 import jax
 import jax.numpy as jnp
 from equinox import AbstractVar
+from hwoutils.constants import Msun2kg, c, h, k_B, nm2m, pc2m
 from hwoutils.conversions import jy_to_photons_per_nm_per_m2
 from jaxtyping import Array
 
@@ -70,6 +72,50 @@ class FlatStar(AbstractStar):
         return (
             f"FlatStar(M={m_solar:.3f} Msun, dist={self.dist_pc:.3g} pc, "
             f"flux={self.flux_phot_per_nm_m2:.3g} ph/s/m^2/nm)"
+        )
+
+
+class BlackbodyStar(AbstractStar):
+    """Planck blackbody spectrum diluted by the star's distance.
+
+    Uses the Planck function from Rybicki & Lightman (1979),
+    Radiative Processes in Astrophysics, divided by the photon energy.
+    The surface flux is pi times the photon spectral radiance.
+
+    Attributes:
+        Ms_kg: Stellar mass in kilograms.
+        dist_pc: Distance to the star in parsecs.
+        teff_K: Effective temperature in kelvin.
+        radius_m: Stellar radius in meters.
+    """
+
+    Ms_kg: float
+    dist_pc: float
+    teff_K: float
+    radius_m: float
+
+    def spec_flux_density(
+        self,
+        wavelength_nm: Array,
+        time_jd: Array,
+    ) -> Array:
+        """Photon flux density at the observer in ph/s/m^2/nm.
+
+        The result has wavelength_nm's shape. ``time_jd`` is part of
+        the AbstractStar interface but ignored here.
+        """
+        wavelength_m = jnp.asarray(wavelength_nm) * nm2m
+        exponent = h * c / (wavelength_m * k_B * self.teff_K)
+        photon_radiance = 2.0 * c / wavelength_m**4 / jnp.expm1(exponent)
+        dilution = (self.radius_m / (self.dist_pc * pc2m)) ** 2
+        return jnp.pi * photon_radiance * dilution * nm2m  # per m to per nm
+
+    def __repr__(self) -> str:
+        """Compact one-line summary of mass, distance, temperature, and radius."""
+        m_solar = self.Ms_kg / Msun2kg
+        return (
+            f"BlackbodyStar(M={m_solar:.3f} Msun, dist={self.dist_pc:.3g} pc, "
+            f"Teff={self.teff_K:.3g} K, radius={self.radius_m:.3g} m)"
         )
 
 
