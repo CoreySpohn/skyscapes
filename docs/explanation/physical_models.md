@@ -168,6 +168,59 @@ The first call triggers a HITRAN download and a 1-3 minute setup
 (see `PrecomputedPhysicalModel` below to avoid this cost in inner
 loops).
 
+#### Spectral grid resolution
+
+The opacity grid must resolve molecular lines before the emergent spectrum is
+binned to an instrument resolution. A coarse grid overstates the depths of
+line-resolved bands such as the O2 A-band and H2O, even when the final spectrum
+is binned to R=140. Use sampling resolving power $R_{\rm grid} \gtrsim 10^5$.
+This is distinct from the instrument resolving power.
+
+The default is `resolving_power=1.5e5`. For the logarithmic wavenumber grid,
+$R_{\rm grid} = N / \ln(\nu_{\max}/\nu_{\min})$, using the point-count convention.
+Thus `N = ceil(resolving_power * ln(nu_max / nu_min))`, rounded up to even
+because ExoJAX premodit requires an even point count. The logarithmic sampling
+follows [Kawahara et al. (2022), ApJS 258, 31, Section 2.1.2](https://arxiv.org/abs/2105.14782);
+see also the [ExoJAX grid documentation](https://secondearths.sakura.ne.jp/exojax/exojax/exojax.utils.html#exojax.utils.grids.wavenumber_grid).
+Over 400-1000 nm the default uses 137444 points, versus the former 2000
+(only $R_{\rm grid} \simeq 2200$).
+
+Measured Earth-modern R=140-binned minimum/continuum ratios illustrate the
+sampling error (smaller ratios mean deeper absorption):
+
+| Band | Grid resolving power | Minimum/continuum |
+|---|---:|---:|
+| O2 A-band | 1700 | 0.030 |
+| O2 A-band | 8700 | 0.280 |
+| O2 A-band | 26000 | 0.520 |
+| O2 A-band | 75000 | 0.555 |
+| O2 A-band | 150000 | 0.573 |
+| O2 A-band | 300000 | 0.572 |
+| H2O, 0.94 um | 95000 | 0.600 |
+| H2O, 0.94 um | 190000 | 0.625 |
+| H2O, 0.94 um | 380000 | 0.633 |
+
+These measurements motivate the default; convergence still depends on the
+band and atmosphere. The cached-data regression test in
+`tests/test_physical_model_exojax.py` compares the default and 300000 sampling
+over 750-780 nm with identical R=140 bins and atmosphere at both samplings.
+
+Memory and opacity evaluation time grow with `n_layers * n_wavenumbers` per
+absorbing species; premodit also stores line-density tables. Prefer a narrow
+wavelength window, for example `wavelength_min_nm=750, wavelength_max_nm=780`,
+to retain line accuracy at lower cost. To choose speed explicitly, pass
+`n_wavenumbers=2000`; an explicit count overrides `resolving_power` and is
+rounded up to even. Line-list models emit a `UserWarning` below
+$R_{\rm grid}=10^5$, including when an explicit point count is supplied.
+PSG-only cross-section models do not emit this band-depth warning. Both
+`from_default_setup` and `from_default_setup_cached` accept these grid options;
+the cached factory includes resolving power in its cache key.
+
+Reflected outputs, including precomputed models, use linear interpolation to
+preserve nonnegative values inside the grid. Linear extrapolation remains
+enabled outside the modeled wavelength range and can produce negative values;
+evaluate within the configured range for physical band predictions.
+
 ### `PrecomputedPhysicalModel`
 
 Wraps an ExoJax model's full per-planet reflectivity grid as a fast
@@ -248,6 +301,9 @@ system = System(star=star, planets=(lambertian_planet, cached_planet))
 
 Approximate cost per planet per wavelength on GPU:
 
+These illustrative timings depend on the spectral grid and hardware; they
+are not benchmarks for the default ExoJAX sampling at `resolving_power=1.5e5`.
+
 | Physical model | Per-call cost |
 |---|---|
 | `LambertianPhysicalModel` | ~0.01 ms |
@@ -256,7 +312,7 @@ Approximate cost per planet per wavelength on GPU:
 | `ExoJaxPhysicalModel` | ~13 ms (full 2-stream RT) |
 
 `PrecomputedPhysicalModel` is the right tool for inner loops where you
-need ExoJax-quality physics but cannot afford 13 ms per evaluation.
+need ExoJax-quality physics without repeated radiative transfer.
 Pre-compute once at simulation setup, then use the cached version for
 all subsequent calls.
 
@@ -282,9 +338,10 @@ contrast_spectrum = jax.vmap(
 )(wavelengths)
 ```
 
-For `ExoJaxPhysicalModel` specifically, the RT routine is vectorised
-internally, so `contrast_cube` runs at ~13 ms regardless of wavelength
-count (up to ~100 wl bins).
+For `ExoJaxPhysicalModel` specifically, `contrast_cube` shares one RT
+calculation across all requested wavelengths per planet. Its cost depends
+primarily on the opacity grid width, resolving power, layers, and species;
+the requested output wavelengths then add interpolation cost.
 
 ## See also
 

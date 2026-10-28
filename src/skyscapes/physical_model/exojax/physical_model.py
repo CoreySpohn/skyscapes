@@ -42,6 +42,8 @@ References:
 from __future__ import annotations
 
 import hashlib
+import warnings
+from math import ceil, log
 from pathlib import Path
 from typing import Any
 
@@ -64,6 +66,7 @@ from ..base import AbstractPhysicalModel
 from ..cached import PrecomputedPhysicalModel
 from ..lambertian import _lambert_phase
 from .components import (
+    MOLECULE_RECIPES,
     Absorption,
     AbstractAbsorption,
     AbstractClouds,
@@ -90,13 +93,26 @@ from .components import (
 DEFAULT_MOLECULES: tuple[str, ...] = ("H2O", "CO2", "CH4", "O2", "O3")
 
 
+def grid_resolving_power(nu_grid: Array) -> float:
+    """Sampling resolving power of an ascending logarithmic wavenumber grid.
+
+    Returns ``N / ln(nu_max / nu_min)`` for the ESLOG grid used by
+    premodit (Kawahara et al. 2022, ApJS 258, 31, Sec. 2.1.2). This uses
+    the point-count convention; the interval-count value is smaller by
+    a relative fraction 1/N.
+    Intended for setup diagnostics, outside JIT.
+    """
+    return len(nu_grid) / log(float(nu_grid[-1]) / float(nu_grid[0]))
+
+
 def build_exojax_engines(
     *,
     molecules: tuple[str, ...] = DEFAULT_MOLECULES,
     bulk_gas: str | None = "N2",
     wavelength_min_nm: float = 400.0,
     wavelength_max_nm: float = 1000.0,
-    n_wavenumbers: int = 2000,
+    n_wavenumbers: int | None = None,
+    resolving_power: float | None = 1.5e5,
     n_layers: int = 100,
     pressure_top_bar: float = 1.0e-5,
     pressure_btm_bar: float = 1.0e0,
@@ -126,7 +142,13 @@ def build_exojax_engines(
             contribution. Default ``"N2"`` for terrestrial atmospheres.
         wavelength_min_nm: Short-wavelength end of the spectral range [nm].
         wavelength_max_nm: Long-wavelength end of the spectral range [nm].
-        n_wavenumbers: Number of points in the wavenumber grid.
+        n_wavenumbers: Explicit grid point count, overriding
+            ``resolving_power``. Rounded up to even for ExoJAX premodit.
+        resolving_power: Grid sampling resolving power, default 150000.
+            When ``n_wavenumbers`` is None, use
+            ``ceil(resolving_power * ln(nu_max / nu_min))``, rounded up
+            to even. See :func:`grid_resolving_power`. Coarse line-list
+            grids (R_grid < 100000) warn about biased band depths.
         n_layers: Number of layers in the plane-parallel RT solver.
         pressure_top_bar: Pressure at the top of the model [bar].
         pressure_btm_bar: Pressure at the bottom of the model [bar].
@@ -148,9 +170,44 @@ def build_exojax_engines(
 
     nu_max = nm_to_wavenumber_cm(wavelength_min_nm)
     nu_min = nm_to_wavenumber_cm(wavelength_max_nm)
-    nu_grid, _, _ = wavenumber_grid(
-        nu_min, nu_max, n_wavenumbers, xsmode="premodit", unit="cm-1"
-    )
+    if n_wavenumbers is None:
+        if (
+            resolving_power is None
+            or not np.isfinite(resolving_power)
+            or resolving_power <= 0
+        ):
+            raise ValueError(
+                "resolving_power must be positive and finite when "
+                "n_wavenumbers is None."
+            )
+        n_wavenumbers = ceil(resolving_power * log(float(nu_max / nu_min)))
+    # ExoJAX premodit requires an even grid size.
+    n_wavenumbers += n_wavenumbers % 2
+    # Replace ExoJAX's generic R < 700000 warning with the reflected-band
+    # criterion below, which also distinguishes line lists from PSG tables.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Resolution may be too small\. R=",
+            category=UserWarning,
+            module=r"exojax\.utils\.grids",
+        )
+        nu_grid, _, _ = wavenumber_grid(
+            nu_min, nu_max, n_wavenumbers, xsmode="premodit", unit="cm-1"
+        )
+    R_grid = grid_resolving_power(nu_grid)
+    if R_grid < 1.0e5 and any(
+        name in MOLECULE_RECIPES and MOLECULE_RECIPES[name].psg_xs_url is None
+        for name in molecules
+    ):
+        warnings.warn(
+            f"R_grid={R_grid:.0f}: line-resolved band depths are biased deep "
+            "at coarse grids (R_grid < 100000). See Spectral grid resolution: "
+            "https://skyscapes.readthedocs.io/en/latest/explanation/"
+            "physical_models.html#spectral-grid-resolution",
+            UserWarning,
+            stacklevel=2,
+        )
 
     rt_engine = ArtReflectPure(
         nu_grid=nu_grid,
@@ -268,7 +325,7 @@ def _assemble_bulk(
 
 # Bump when the set of from_default_setup kwargs changes meaning in a
 # way that would silently invalidate previously-saved caches.
-_CACHE_KEY_VERSION = 1
+_CACHE_KEY_VERSION = 2
 
 
 def _hash_value(value: Any) -> bytes:
@@ -399,7 +456,8 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
         bulk_gas: str | None = "N2",
         wavelength_min_nm: float = 400.0,
         wavelength_max_nm: float = 1000.0,
-        n_wavenumbers: int = 2000,
+        n_wavenumbers: int | None = None,
+        resolving_power: float | None = 1.5e5,
         n_layers: int = 100,
         pressure_top_bar: float = 1.0e-5,
         pressure_btm_bar: float = 1.0e0,
@@ -431,6 +489,7 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
             wavelength_min_nm: See :func:`build_exojax_engines`.
             wavelength_max_nm: See :func:`build_exojax_engines`.
             n_wavenumbers: See :func:`build_exojax_engines`.
+            resolving_power: See :func:`build_exojax_engines`.
             n_layers: See :func:`build_exojax_engines`.
             pressure_top_bar: See :func:`build_exojax_engines`.
             pressure_btm_bar: See :func:`build_exojax_engines`.
@@ -445,6 +504,7 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
             wavelength_min_nm=wavelength_min_nm,
             wavelength_max_nm=wavelength_max_nm,
             n_wavenumbers=n_wavenumbers,
+            resolving_power=resolving_power,
             n_layers=n_layers,
             pressure_top_bar=pressure_top_bar,
             pressure_btm_bar=pressure_btm_bar,
@@ -512,7 +572,8 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
         bulk_gas: str | None = "N2",
         wavelength_min_nm: float = 400.0,
         wavelength_max_nm: float = 1000.0,
-        n_wavenumbers: int = 2000,
+        n_wavenumbers: int | None = None,
+        resolving_power: float | None = 1.5e5,
         n_layers: int = 100,
         pressure_top_bar: float = 1.0e-5,
         pressure_btm_bar: float = 1.0e0,
@@ -550,6 +611,7 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
             wavelength_min_nm: See :meth:`from_default_setup`.
             wavelength_max_nm: See :meth:`from_default_setup`.
             n_wavenumbers: See :meth:`from_default_setup`.
+            resolving_power: See :meth:`from_default_setup`.
             n_layers: See :meth:`from_default_setup`.
             pressure_top_bar: See :meth:`from_default_setup`.
             pressure_btm_bar: See :meth:`from_default_setup`.
@@ -574,6 +636,7 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
             "wavelength_min_nm": wavelength_min_nm,
             "wavelength_max_nm": wavelength_max_nm,
             "n_wavenumbers": n_wavenumbers,
+            "resolving_power": resolving_power,
             "n_layers": n_layers,
             "pressure_top_bar": pressure_top_bar,
             "pressure_btm_bar": pressure_btm_bar,
@@ -660,6 +723,9 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
     ) -> Array:
         """Per-planet, per-time geometric-albedo contrast at one wavelength.
 
+        Linear interpolation preserves nonnegative reflectivity inside the
+        grid. Outside it, linear extrapolation is enabled and can be negative.
+
         Args:
             phase_angle_rad: Star-planet-observer phase angle, ``(K, T)``.
             dist_AU: Star-planet distance [AU], ``(K, T)``.
@@ -682,7 +748,7 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
                 target_nu_cm_inv,
                 self.nu_grid,
                 spectrum,
-                method="cubic",
+                method="linear",
                 extrap=True,
             )
 
@@ -702,6 +768,9 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
     ) -> Array:
         """Per-planet, per-time contrast across many wavelengths.
 
+        Uses linear interpolation within the grid and linear extrapolation
+        outside it, with the same nonnegativity limits as :meth:`contrast`.
+
         Returns ``(W, K, T)`` geometric-albedo contrast cube. Computes
         the underlying 2-stream RT exactly once per planet rather
         than once per wavelength; applies the spherical-to-geometric
@@ -716,7 +785,7 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
                 target_nu_cm_inv,
                 self.nu_grid,
                 spectrum,
-                method="cubic",
+                method="linear",
                 extrap=True,
             )
 

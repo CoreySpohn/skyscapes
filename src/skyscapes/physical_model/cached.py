@@ -2,7 +2,7 @@
 
 Holds a fixed ``(K, n_nu)`` plane-parallel-reflectivity array that was
 produced by running some other :class:`AbstractPhysicalModel`'s heavy
-radiative transfer once. ``contrast`` becomes a cubic interpolation +
+radiative transfer once. ``contrast`` becomes a linear interpolation +
 Lambert phase + ``(Rp/d)^2`` lookup -- microseconds per call vs.
 seconds for an ExoJAX 2-stream RT.
 
@@ -144,6 +144,9 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
     ) -> Array:
         """Per-planet, per-time geometric-albedo contrast at one wavelength.
 
+        Linear interpolation preserves nonnegative reflectivity inside the
+        grid. Outside it, linear extrapolation is enabled and can be negative.
+
         Args:
             phase_angle_rad: Star-planet-observer phase angle, shape ``(K, T)``.
             dist_AU: Star-planet distance [AU], shape ``(K, T)``.
@@ -165,7 +168,7 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
                 target_nu,
                 self.nu_grid,
                 spectrum,
-                method="cubic",
+                method="linear",
                 extrap=True,
             )
 
@@ -184,6 +187,9 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
     ) -> Array:
         """Per-planet, per-time geometric-albedo contrast across wavelengths.
 
+        Uses linear interpolation within the grid and linear extrapolation
+        outside it, with the same nonnegativity limits as :meth:`contrast`.
+
         Returns shape ``(W, K, T)``. Avoids per-wavelength
         recomputation by vectorising the interpolation; applies the
         Lambertian-sphere spherical-to-geometric conversion the same
@@ -196,7 +202,7 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
                 target_nu,
                 self.nu_grid,
                 spectrum,
-                method="cubic",
+                method="linear",
                 extrap=True,
             )
 

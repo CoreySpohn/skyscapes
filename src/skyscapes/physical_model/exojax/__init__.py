@@ -55,6 +55,7 @@ from .physical_model import (
     DEFAULT_MOLECULES,
     ExoJaxPhysicalModel,
     build_exojax_engines,
+    grid_resolving_power,
 )
 from .presets import (
     EARTH_ARCHEAN_VMRS,
@@ -111,6 +112,7 @@ __all__ = [
     "build_exojax_engines",
     "build_mie_cloud",
     "build_species_prebuilt",
+    "grid_resolving_power",
     "log_gravity_cgs_from_mass_radius",
     "vmr_dict_to_earth_profile_dict",
     "vmr_dict_to_log_mmr_dict",

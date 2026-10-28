@@ -9,15 +9,29 @@ math without touching ExoJAX's internals.
 
 from __future__ import annotations
 
+import warnings
+from itertools import pairwise
+from pathlib import Path
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
+from exojax.database.multimol import database_path_hitran12
 
+import skyscapes.physical_model.exojax.physical_model as exojax_pm
 from skyscapes.physical_model import (
     AbstractPhysicalModel,
     ExoJaxPhysicalModel,
     LambertianPhysicalModel,
+    PrecomputedPhysicalModel,
+)
+from skyscapes.physical_model.exojax import (
+    EARTH_MODERN_VMRS,
+    MOLECULE_RECIPES,
+    build_exojax_engines,
+    vmr_dict_to_log_mmr_dict,
 )
 from skyscapes.physical_model.exojax.components import (
     Absorption,
@@ -151,6 +165,162 @@ def make_physical_model(K: int = 2, n_nu: int = 100, n_layers: int = 20):
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+
+def test_default_grid_resolving_power():
+    """The default 400-1000 nm grid resolves lines at R_grid = 150000."""
+    engines = build_exojax_engines(molecules=(), bulk_gas=None, n_layers=2)
+    grid = engines["nu_grid"]
+    expected_n = int(np.ceil(1.5e5 * np.log(1000.0 / 400.0)))
+    expected_n += expected_n % 2
+    assert engines["n_nu"] == expected_n
+    assert len(grid) % 2 == 0
+    assert exojax_pm.grid_resolving_power(grid) == pytest.approx(1.5e5, rel=0.01)
+
+
+@pytest.mark.parametrize("resolving_power", [None, 3.0e5, -1.0])
+def test_explicit_grid_size_wins_and_rounds_up(resolving_power):
+    """An explicit point count overrides resolving power and rounds to even."""
+    engines = build_exojax_engines(
+        molecules=(),
+        bulk_gas=None,
+        n_wavenumbers=101,
+        resolving_power=resolving_power,
+        n_layers=2,
+    )
+    assert engines["n_nu"] == 102
+
+
+@pytest.mark.parametrize("resolving_power", [None, 0.0, -1.0, np.inf, np.nan])
+def test_grid_requires_positive_finite_resolving_power(resolving_power):
+    """Without an explicit count, resolving power must define a finite grid."""
+    with pytest.raises(ValueError, match="resolving_power"):
+        build_exojax_engines(molecules=(), resolving_power=resolving_power)
+
+
+@pytest.mark.parametrize(
+    ("molecules", "resolving_power", "n_wavenumbers", "warns"),
+    [
+        (("O2",), 2000.0, None, True),
+        (("O3", "O2"), 2000.0, None, True),
+        (("O3", "SO2"), 2000.0, None, False),
+        (("O2",), 1.0e5, None, False),
+        (("O2",), 3.0e5, None, False),
+        (("O2",), 3.0e5, 2001, True),
+    ],
+)
+def test_coarse_grid_warning_only_for_line_lists(
+    monkeypatch, molecules, resolving_power, n_wavenumbers, warns
+):
+    """Coarse line-list grids warn, while PSG-only or resolved grids do not."""
+    # Opacity data are irrelevant to this grid contract; never access a database.
+    monkeypatch.setattr(
+        exojax_pm,
+        "build_species_prebuilt",
+        lambda **kw: (32.0, None, jnp.zeros_like(kw["nu_grid"])),
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", UserWarning)
+        engines = build_exojax_engines(
+            molecules=molecules,
+            bulk_gas=None,
+            resolving_power=resolving_power,
+            n_wavenumbers=n_wavenumbers,
+            n_layers=2,
+        )
+    grid_warnings = [w for w in caught if issubclass(w.category, UserWarning)]
+    assert len(grid_warnings) == int(warns)
+    if warns:
+        message = str(grid_warnings[0].message)
+        assert grid_warnings[0].category is UserWarning
+        assert "biased deep" in message
+        assert f"{exojax_pm.grid_resolving_power(engines['nu_grid']):.0f}" in message
+        assert "physical_models" in message
+
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_saturated_band_contrast_nonnegative(cached):
+    """Scalar and cube interpolation preserve a saturated band's zero floor."""
+    model = make_physical_model(K=1, n_nu=8)
+    model = eqx.tree_at(
+        lambda m: m.surface.spectrum,
+        model,
+        jnp.array([1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0]),
+    )
+    if cached:
+        model = PrecomputedPhysicalModel.from_physical_model(model)
+    wavelengths_nm = 1.0e7 / jnp.linspace(1.0e4, 2.5e4, 301)
+    phase, dist, radius = jnp.zeros((1, 1)), jnp.ones((1, 1)), jnp.ones(1)
+    cube = model.contrast_cube(phase, dist, wavelengths_nm, radius)
+    scalar = jax.vmap(lambda wl: model.contrast(phase, dist, wl, radius))(
+        wavelengths_nm
+    )
+    assert np.all(np.isfinite(cube))
+    assert np.all(np.asarray(cube) >= 0.0)
+    assert np.all(np.asarray(scalar) >= 0.0)
+    np.testing.assert_allclose(cube, scalar, rtol=1e-12)
+
+
+def _a_band_ratio(model):
+    """R=140 wavelength-bin means of emergent reflectivity, then min/continuum.
+
+    Constant resolving power uses logarithmic wavelength bins (Kawahara et al.
+    2022, ApJS 258, 31, Sec. 2.1.2). Integrate the piecewise-linear spectrum over
+    each bin, including its edges; the first and last bins define continuum.
+    """
+    wavelength_nm = (1.0e7 / np.asarray(model.nu_grid))[::-1]
+    reflectivity = np.asarray(model._reflectivity_all_planets()[0])[::-1]
+    edges = 750.0 * np.exp(np.arange(6) / 140.0)
+    means = []
+    for lo, hi in pairwise(edges):
+        interior = wavelength_nm[(wavelength_nm > lo) & (wavelength_nm < hi)]
+        samples = np.concatenate(([lo], interior, [hi]))
+        values = np.interp(samples, wavelength_nm, reflectivity)
+        means.append(np.trapezoid(values, samples) / (hi - lo))
+    return min(means[1:-1]) / np.mean([means[0], means[-1]])
+
+
+# Some trace gases have no lines in this narrow window; they retain Rayleigh.
+@pytest.mark.filterwarnings("ignore:.*has no HITRAN lines:UserWarning")
+def test_earth_modern_a_band_resolution_converges():
+    """Default sampling gives an R=140 A-band ratio within 0.02 of R=300000."""
+    databases_dir = Path.home() / ".cache" / "skyscapes" / "exojax"
+    missing = []
+    for name in EARTH_MODERN_VMRS:
+        if MOLECULE_RECIPES[name].psg_xs_url is not None:
+            cached = databases_dir / f"psg_{name.lower()}_xs.txt"
+            present = cached.exists()
+        else:
+            present = (databases_dir / database_path_hitran12(name)).exists() or (
+                databases_dir / name / f"{name}.hdf5"
+            ).exists()
+        if not present:
+            missing.append(name)
+    if missing:
+        pytest.skip(
+            f"data-absent: opacity data for {missing} not cached in {databases_dir}"
+        )
+    kwargs = dict(
+        log_mmrs=vmr_dict_to_log_mmr_dict(EARTH_MODERN_VMRS),
+        T_eq_K=jnp.array([288.0]),
+        T_alpha=jnp.array([0.07]),
+        log_surface_albedo=jnp.array([np.log10(0.1)]),
+        log_gravity_cgs=jnp.array([np.log10(981.0)]),
+        wavelength_min_nm=750.0,
+        wavelength_max_nm=780.0,
+        n_layers=30,
+        databases_dir=str(databases_dir),
+    )
+    default_ratio = _a_band_ratio(ExoJaxPhysicalModel.from_default_setup(**kwargs))
+    fine_ratio = _a_band_ratio(
+        ExoJaxPhysicalModel.from_default_setup(**kwargs, resolving_power=3.0e5)
+    )
+    print(
+        f"O2 A-band R=140 min/continuum: default={default_ratio:.8f}, "
+        f"R_grid=300000={fine_ratio:.8f}"
+    )
+    assert 0.0 < fine_ratio < 0.9  # A resolved absorption band, not empty opacity.
+    assert default_ratio == pytest.approx(fine_ratio, abs=0.02)
 
 
 def test_is_abstract_physical_model():

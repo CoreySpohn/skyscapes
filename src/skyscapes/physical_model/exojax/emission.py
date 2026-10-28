@@ -155,7 +155,8 @@ def build_exojax_emission_engines(
         molecules: Molecule names, keys of ``MOLECULE_RECIPES``.
         wavelength_min_nm: Short-wavelength end of the range [nm].
         wavelength_max_nm: Long-wavelength end of the range [nm].
-        n_wavenumbers: Points in the wavenumber grid.
+        n_wavenumbers: Points in the wavenumber grid, rounded up to even
+            as required by ExoJAX premodit.
         n_layers: Number of atmospheric layers.
         pressure_top_bar: Pressure at the top of the model [bar].
         surface_pressure_bar: Surface pressure, the bottom of the model [bar].
@@ -176,6 +177,7 @@ def build_exojax_emission_engines(
 
     nu_max = nm_to_wavenumber_cm(wavelength_min_nm)
     nu_min = nm_to_wavenumber_cm(wavelength_max_nm)
+    n_wavenumbers += n_wavenumbers % 2
     nu_grid, _, _ = wavenumber_grid(
         nu_min, nu_max, n_wavenumbers, xsmode="premodit", unit="cm-1"
     )

@@ -28,7 +28,7 @@ def test_precomputed_subclasses_abstract_physical_model():
 def test_precomputed_spectrum_matches_source_at_grid_wavelengths():
     """At a wavelength on the cached grid the spectrum matches source closely.
 
-    Cubic interpolation between grid points loses some precision; we
+    Interpolation between grid points loses some precision; we
     test on wavelengths sampled from the grid itself to keep the
     interpolation lossless.
     """
@@ -181,9 +181,11 @@ def test_cached_setup_roundtrip_using_fake_engines(tmp_path, monkeypatch):
 
     K = 1
     model = make_physical_model(K=K)
+    built_resolutions = []
 
     # Monkey-patch build_exojax_engines to skip ExoJAX entirely.
-    def fake_build(*, molecules, **_):
+    def fake_build(*, molecules, resolving_power=None, **_):
+        built_resolutions.append(resolving_power)
         species_prebuilt = {
             s.name: {
                 "molmass": s.molmass,
@@ -215,7 +217,6 @@ def test_cached_setup_roundtrip_using_fake_engines(tmp_path, monkeypatch):
         log_gravity_cgs=jnp.full((K,), jnp.log10(981.0)),
         wavelength_min_nm=400.0,
         wavelength_max_nm=1000.0,
-        n_wavenumbers=100,
         n_layers=20,
         cache_dir=tmp_path,
     )
@@ -228,9 +229,14 @@ def test_cached_setup_roundtrip_using_fake_engines(tmp_path, monkeypatch):
 
     # Second call: cache hit, loads same file.
     cached_b = ExoJaxPhysicalModel.from_default_setup_cached(**kwargs)
+    assert built_resolutions == [1.5e5], "a cache hit must reuse the default grid"
     assert isinstance(cached_b, PrecomputedPhysicalModel)
     files_after = list(tmp_path.glob("*.npz"))
     assert len(files_after) == 1, "cache hit should not write a new file"
+
+    ExoJaxPhysicalModel.from_default_setup_cached(**kwargs, resolving_power=3.0e5)
+    assert built_resolutions == [1.5e5, 3.0e5]
+    assert len(list(tmp_path.glob("*.npz"))) == 2, "resolution must enter the cache key"
 
     # The two should produce identical spectra at the same wavelength.
     phase = jnp.full((K, 1), 0.5)

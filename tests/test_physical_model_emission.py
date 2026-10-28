@@ -92,6 +92,15 @@ class _ConstantOpa:
 N_NU = 400
 
 
+# This grid tests even sizes without line opacities, not spectral convergence.
+@pytest.mark.filterwarnings("ignore:Resolution may be too small:UserWarning")
+def test_emission_odd_grid_size_rounds_up():
+    """Premodit grids round odd requests up to the next even point count."""
+    engines = build_exojax_emission_engines(molecules=(), n_wavenumbers=101, n_layers=2)
+    assert engines["n_nu"] == 102
+    assert len(engines["nu_grid"]) == 102
+
+
 @pytest.fixture(scope="module")
 def engines():
     """Real ArtEmisPure engine on a mid-infrared grid; no opacity attached."""
