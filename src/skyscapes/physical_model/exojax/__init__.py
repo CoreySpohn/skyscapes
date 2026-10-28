@@ -25,6 +25,7 @@ from .components import (
     BulkGasResidual,
     ConstantMmr,
     Contribution,
+    EmittingSurface,
     FlatSurface,
     GrayCloud,
     MieCloud,
@@ -32,6 +33,7 @@ from .components import (
     MoleculeRecipe,
     NoCloud,
     NullScattering,
+    PolynomialTPProfile,
     PowerLawTPProfile,
     RayleighScattering,
     StratosphericPeakMmr,
@@ -40,6 +42,13 @@ from .components import (
     build_bulk_prebuilt,
     build_mie_cloud,
     build_species_prebuilt,
+)
+from .emission import (
+    DEFAULT_EMISSION_MOLECULES,
+    ExoJaxEmissionModel,
+    brightness_temperature,
+    build_exojax_emission_engines,
+    log_gravity_cgs_from_mass_radius,
 )
 from .o3_chappuis import O3_MOLMASS, O3ChappuisOpacity
 from .physical_model import (
@@ -59,6 +68,7 @@ from .presets import (
 from .psg_xs import PsgCrossSectionOpacity
 
 __all__ = [
+    "DEFAULT_EMISSION_MOLECULES",
     "DEFAULT_MOLECULES",
     "EARTH_ARCHEAN_VMRS",
     "EARTH_EARLY_PROTEROZOIC_VMRS",
@@ -77,6 +87,8 @@ __all__ = [
     "BulkGasResidual",
     "ConstantMmr",
     "Contribution",
+    "EmittingSurface",
+    "ExoJaxEmissionModel",
     "ExoJaxPhysicalModel",
     "FlatSurface",
     "GrayCloud",
@@ -86,16 +98,20 @@ __all__ = [
     "NoCloud",
     "NullScattering",
     "O3ChappuisOpacity",
+    "PolynomialTPProfile",
     "PowerLawTPProfile",
     "PsgCrossSectionOpacity",
     "RayleighScattering",
     "StratosphericPeakMmr",
     "TroposphericMmr",
     "WavelengthDependentSurface",
+    "brightness_temperature",
     "build_bulk_prebuilt",
+    "build_exojax_emission_engines",
     "build_exojax_engines",
     "build_mie_cloud",
     "build_species_prebuilt",
+    "log_gravity_cgs_from_mass_radius",
     "vmr_dict_to_earth_profile_dict",
     "vmr_dict_to_log_mmr_dict",
     "vmr_dict_to_mmr_dict",
