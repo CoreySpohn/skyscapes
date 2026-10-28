@@ -232,6 +232,27 @@ def _assemble_species(
     return tuple(species)
 
 
+def _species_at_planet(
+    species: tuple[MolecularSpecies, ...], k: int
+) -> tuple[MolecularSpecies, ...]:
+    """Index every species' profile at planet ``k``.
+
+    Tree-map replaces K-shaped array leaves with their k-th slice while
+    leaving static fields (name, molmass, opa) untouched.
+    """
+
+    def _index_at_k(tree):
+        return jax.tree.map(
+            lambda x: x[k] if isinstance(x, jnp.ndarray) and x.ndim > 0 else x,
+            tree,
+        )
+
+    return tuple(
+        eqx.tree_at(lambda s: s.profile, s, replace=_index_at_k(s.profile))
+        for s in species
+    )
+
+
 def _assemble_bulk(
     bulk_prebuilt: dict[str, Any] | None,
 ) -> BulkGasResidual | None:
@@ -593,19 +614,7 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
             self.tp_profile.T_alpha[k],
         )
 
-        # Index each species' profile at planet k. Tree-map replaces
-        # K-shaped array leaves with their k-th slice while leaving
-        # static fields (name, molmass, opa) untouched.
-        def _index_at_k(tree):
-            return jax.tree.map(
-                lambda x: x[k] if isinstance(x, jnp.ndarray) and x.ndim > 0 else x,
-                tree,
-            )
-
-        species_one = tuple(
-            eqx.tree_at(lambda s: s.profile, s, replace=_index_at_k(s.profile))
-            for s in self.species
-        )
+        species_one = _species_at_planet(self.species, k)
 
         abs_c = self.absorption.compute(
             species_one, Tarr, pressure, gravity, self.rt_engine

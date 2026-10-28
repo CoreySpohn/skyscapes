@@ -47,8 +47,8 @@ from .species import (
     build_bulk_prebuilt,
     build_species_prebuilt,
 )
-from .surface import FlatSurface, WavelengthDependentSurface
-from .tp import PowerLawTPProfile
+from .surface import EmittingSurface, FlatSurface, WavelengthDependentSurface
+from .tp import PolynomialTPProfile, PowerLawTPProfile
 
 __all__ = [
     "BULK_GAS_RECIPES",
@@ -64,6 +64,7 @@ __all__ = [
     "BulkGasResidual",
     "ConstantMmr",
     "Contribution",
+    "EmittingSurface",
     "FlatSurface",
     "GrayCloud",
     "MieCloud",
@@ -71,6 +72,7 @@ __all__ = [
     "MoleculeRecipe",
     "NoCloud",
     "NullScattering",
+    "PolynomialTPProfile",
     "PowerLawTPProfile",
     "PrecomputedAbsorption",
     "RayleighScattering",

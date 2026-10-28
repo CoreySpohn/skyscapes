@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import equinox as eqx
+import jax.numpy as jnp
 from exojax.database import molinfo
 from exojax.database.hitran.api import MdbHitran
 from exojax.database.multimol import database_path_hitran12
@@ -191,12 +192,31 @@ def build_species_prebuilt(
     nu_max: float,
     databases_dir: str,
     crit: float,
+    use_line_lists: bool = False,
+    temperature_range_K: tuple[float, float] = (100.0, 700.0),
+    rayleigh: bool = True,
 ) -> tuple[float, Any, Array]:
     """Construct (molmass, opa, rayleigh_xs) for one molecule.
 
     Used by ``build_exojax_engines``; not typically called by users
     directly. Returns the static parts of a :class:`MolecularSpecies`
     (everything except ``log_mmr``).
+
+    Args:
+        name: Molecule name, a key of :data:`MOLECULE_RECIPES`.
+        nu_grid: Wavenumber grid [cm^-1].
+        nu_min: Lower edge of the HITRAN line selection [cm^-1].
+        nu_max: Upper edge of the HITRAN line selection [cm^-1].
+        databases_dir: Line-list and cross-section cache directory.
+        crit: HITRAN line-strength cutoff.
+        use_line_lists: If True, always build the opacity from HITRAN
+            lines, ignoring a recipe's PSG cross-section table. The PSG
+            tables for O3 and SO2 cover the ultraviolet and visible only,
+            so mid-infrared work must set this.
+        temperature_range_K: Temperature range the line-list opacity is
+            tabulated over; must bracket the atmosphere's T-P profile.
+        rayleigh: If False, skip the Rayleigh cross-section and return
+            zeros (negligible in the thermal infrared).
     """
     if name not in MOLECULE_RECIPES:
         raise KeyError(
@@ -206,7 +226,12 @@ def build_species_prebuilt(
         )
     recipe = MOLECULE_RECIPES[name]
 
-    if recipe.psg_xs_url is not None:
+    def _rayleigh() -> Array:
+        if not rayleigh:
+            return jnp.zeros_like(nu_grid)
+        return _build_rayleigh_xs(nu_grid, recipe.name, recipe.polarizability_override)
+
+    if recipe.psg_xs_url is not None and not use_line_lists:
         if recipe.psg_xs_molmass is None:
             raise ValueError(
                 f"MoleculeRecipe for {name!r} has psg_xs_url but no "
@@ -245,20 +270,14 @@ def build_species_prebuilt(
                     stacklevel=2,
                 )
                 molmass = recipe_default_molmass(name)
-                rayleigh_xs = _build_rayleigh_xs(
-                    nu_grid,
-                    recipe.name,
-                    recipe.polarizability_override,
-                )
-                return molmass, None, rayleigh_xs
+                return molmass, None, _rayleigh()
             raise
-        opa = OpaPremodit(mdb=mdb, nu_grid=nu_grid, auto_trange=[100.0, 700.0])
+        opa = OpaPremodit(
+            mdb=mdb, nu_grid=nu_grid, auto_trange=list(temperature_range_K)
+        )
         molmass = float(mdb.molmass)
 
-    rayleigh_xs = _build_rayleigh_xs(
-        nu_grid, recipe.name, recipe.polarizability_override
-    )
-    return molmass, opa, rayleigh_xs
+    return molmass, opa, _rayleigh()
 
 
 def recipe_default_molmass(name: str) -> float:

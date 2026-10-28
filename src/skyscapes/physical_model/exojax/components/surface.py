@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import equinox as eqx
 import jax.numpy as jnp
 from jaxtyping import Array
 
@@ -52,3 +53,28 @@ class FlatSurface(AbstractSurface):
     def compute_refl(self, log_albedo_scalar: Array, n_nu: int) -> Array:
         """Return scalar albedo broadcast across the wavenumber grid."""
         return (10.0**log_albedo_scalar) * jnp.ones(n_nu)
+
+
+class EmittingSurface(eqx.Module):
+    """Opaque thermal-emitting ground: ``emissivity * B_nu(T_surface)``.
+
+    The ground is a gray or spectrally shaped blackbody with emissivity
+    ``1 - reflectance`` (Kirchhoff). Downwelling atmospheric radiation
+    reflected by a ground with emissivity below one is neglected, so for
+    ``emissivity < 1`` the emergent flux is a lower bound.
+
+    Attributes:
+        temperature_K: Surface temperature [K], shape ``(K,)``.
+        emissivity: Scalar emissivity per planet, shape ``(K,)``.
+        spectrum: Wavelength-dependent emissivity shape on the wavenumber
+            grid, shape ``(n_nu,)``; flat ones for a gray ground. The
+            emissivity used is ``emissivity[k] * spectrum``.
+    """
+
+    temperature_K: Array
+    emissivity: Array
+    spectrum: Array
+
+    def compute_emissivity(self, k: int) -> Array:
+        """Emissivity of planet ``k`` on the wavenumber grid, shape ``(n_nu,)``."""
+        return self.emissivity[k] * self.spectrum
