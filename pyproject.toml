@@ -119,6 +119,10 @@ filterwarnings = [
     'ignore:The set_bad function will be deprecated in a future version\.:PendingDeprecationWarning:tol_colors$',
     # Vaex's expression formatter still checks deprecated ast.Num nodes on Python 3.12.
     'ignore:ast\.Num is deprecated and will be removed in Python 3\.14; use ast\.Constant instead:DeprecationWarning:vaex\.expresso$',  # codespell:ignore expresso
+    # Vaex overwrites an unused executor loop; allow its destructor to close its sockets.
+    'ignore:^unclosed event loop <_UnixSelectorEventLoop running=False closed=False debug=False>$:ResourceWarning:asyncio\.base_events$',
+    # Vaex overwrites its initial HDF5 reader when opening the memory map.
+    "ignore:^unclosed file <_io[.]BufferedReader name='[^']+[.]hdf5'>$:ResourceWarning:h5py[.]_hl[.]files$",
     # ExoJAX warns on nonpositive HITRAN temperature exponents even for its linear grid.
     'ignore:There exists negative or zero value\.$:UserWarning:exojax\.opacity\._common\.set_ditgrid$',
     # ExoJAX lacks King factors for several supported gases and defaults to 1.
