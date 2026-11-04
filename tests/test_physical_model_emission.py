@@ -531,6 +531,7 @@ def _band(model, lo_um, hi_um):
 
 
 @vv.case("planet-thermal-emission", "code-verification")
+@pytest.mark.slow
 def test_earth_twin_window_sees_the_ground(earth_twin):
     """The 11 micron window brightness temperature is near the ground's.
 
@@ -555,6 +556,7 @@ def test_earth_twin_window_sees_the_ground(earth_twin):
 
 
 @vv.case("planet-thermal-emission", "code-verification")
+@pytest.mark.slow
 def test_earth_twin_co2_band_probes_the_tropopause(earth_twin):
     """The 15 micron CO2 band minimum sits near the profile's coldest layer.
 
@@ -566,6 +568,7 @@ def test_earth_twin_co2_band_probes_the_tropopause(earth_twin):
 
 
 @vv.case("planet-thermal-emission", "code-verification")
+@pytest.mark.slow
 def test_earth_twin_ozone_and_water_bands_are_cooler_than_the_window(earth_twin):
     """The 9.6 micron O3 band and 6.3 micron H2O band emit above the ground."""
     window = np.median(_band(earth_twin, 10.5, 11.5))
@@ -573,12 +576,14 @@ def test_earth_twin_ozone_and_water_bands_are_cooler_than_the_window(earth_twin)
     assert np.median(_band(earth_twin, 6.0, 7.0)) < window - 40.0
 
 
+@pytest.mark.slow
 def test_ozone_uses_line_lists_in_the_infrared(earth_twin):
     """The thermal builder gives O3 a HITRAN opacity, not the PSG table."""
     o3 = next(s for s in earth_twin.species if s.name == "O3")
     assert isinstance(o3.opa, OpaPremodit)
 
 
+@pytest.mark.slow
 def test_earth_twin_cia_cools_oxygen_band_preserves_window(earth_twin):
     """CIA lowers mean 1450-1650 cm^-1 Tb; 10-11 um changes by <0.01 K."""
     cache = Path.home() / ".cache" / "skyscapes" / "cia"

@@ -151,6 +151,7 @@ def test_missing_partner_is_explicit(constant_engines):
 
 
 @pytest.mark.parametrize("pair", FILES)
+@pytest.mark.slow
 def test_cached_cia_matches_tabulated_point(pair):
     """A direct file sample is reproduced at its temperature and frequency."""
     path = CACHE / FILES[pair]
