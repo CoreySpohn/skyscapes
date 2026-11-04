@@ -146,6 +146,7 @@ Building one from scratch:
 
 ```python
 import jax.numpy as jnp
+from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.orbit import KeplerianOrbit
 
 from skyscapes import Scene, System
@@ -181,8 +182,9 @@ zodi = AYOZodi(
     surface_brightness_mag=22.0,
 )
 
+trig_solver = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
 scene = Scene(
-    system=System(star=star, planets=(planet,)),
+    system=System(star=star, planets=(planet,), trig_solver=trig_solver),
     zodi=zodi,
 )
 ```

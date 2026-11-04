@@ -398,7 +398,11 @@ def _precompute_absorption_model(model: ExoJaxPhysicalModel) -> ExoJaxPhysicalMo
 class ExoJaxPhysicalModel(AbstractPhysicalModel):
     """Composition-based reflected-light planet model over ExoJAX's 2-stream RT.
 
-    Per-planet state (PyTree leaves, fittable):
+    Gravity and composition are fittable per-planet PyTree leaves. Each
+    physics component owns its per-planet leaves. The RT engine and spectral
+    grid are shared across planets.
+
+    Attributes:
         log_gravity_cgs: Log10 surface gravity [cm/s^2], shape ``(K,)``.
         species: Tuple of :class:`MolecularSpecies`. Each species owns
             its own ``log_mmr`` (per-planet, shape ``(K,)``). The
@@ -406,8 +410,6 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
             :func:`build_exojax_engines`.
         bulk: Optional :class:`BulkGasResidual` (implicit residual gas).
 
-    Components (each owns its own per-planet PyTree leaves where
-    applicable):
         tp_profile: T-P profile component (e.g. ``PowerLawTPProfile``).
         absorption: Absorption orchestrator (e.g. ``Absorption``).
         scattering: Scattering component (e.g. ``RayleighScattering``,
@@ -415,7 +417,6 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
         clouds: Cloud component (e.g. ``GrayCloud``, ``NoCloud``).
         surface: Surface component (e.g. ``WavelengthDependentSurface``).
 
-    Shared / configuration attributes:
         rt_engine: ExoJAX ``ArtReflectPure`` instance.
         nu_grid: Wavenumber grid [cm^-1].
         n_nu: Length of ``nu_grid`` (static for JIT).

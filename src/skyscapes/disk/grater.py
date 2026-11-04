@@ -7,10 +7,10 @@ idiom so its parameters are PyTree leaves (fittable through the standard
 scene-as-PyTree pattern).
 
 References:
-    Augereau, J.-C., Lagrange, A.-M., Mouillet, D., Papaloizou, J. C. B.,
-    & Grorod, P. A. 1999, A&A, 348, 557
-    grater-jax (Kondapalli, Lewis, Ashcraft, Millar-Blanchaer):
-        https://github.com/UCSB-Exoplanet-Polarimetry-Lab/GRaTeR-JAX
+    - Augereau, J.-C., Lagrange, A.-M., Mouillet, D., Papaloizou, J. C. B.,
+      & Grorod, P. A. 1999, A&A, 348, 557.
+    - `grater-jax <https://github.com/UCSB-Exoplanet-Polarimetry-Lab/GRaTeR-JAX>`_
+      (Kondapalli, Lewis, Ashcraft, Millar-Blanchaer).
 
 Notes on convention:
     Disk orientation (``incl_deg`` / ``pa_deg``) is passed in at
@@ -105,7 +105,10 @@ def two_power_law_density(
 class GraterDisk(AbstractDisk):
     """Augereau 1999 scattered-light disk.
 
-    Attributes (PyTree leaves, fittable):
+    Density, scattering, and spectral parameters are fittable PyTree leaves.
+    Image geometry and LOS integration settings are static configuration.
+
+    Attributes:
         sma_AU: Reference radius [AU] (radial profile peak).
         alpha_in: Inner power-law slope (positive).
         alpha_out: Outer power-law slope (negative).
@@ -120,7 +123,6 @@ class GraterDisk(AbstractDisk):
         g_HG_grid: Henyey-Greenstein asymmetry at each grid wavelength.
         Ag_grid: Albedo-like scaling at each grid wavelength.
 
-    Static attributes (compilation-time constants):
         nx, ny: Output image shape.
         pixel_scale_arcsec: Pixel scale [arcsec/pixel].
         dist_pc: System distance [pc].

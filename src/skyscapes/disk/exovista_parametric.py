@@ -11,11 +11,13 @@ What's reproduced (Stark 2022 / ``Image.cpp``):
   - Vertical Gaussian with constant opening angle ``hor`` and per-radius
     normalization (mass per unit r preserved).
   - Four-region radial profile:
-        r > r0+dr:  ``exp(-0.5) * (r/(r0+dr))^-1.5``    (outer halo)
-        |r-r0|<dr:  ``exp(-0.5 (r-r0)^2 / dr^2)``       (Gaussian ring)
-        r0-dr>r>0:  inward decay from Wyatt 1999, eq 3.36,
-                    ``exp(-0.5) / (1 + 4 eta (1 - sqrt(r/(r0-dr))))``
-        r <= rinner: additional ``(r/rinner)^3`` cubic ramp
+
+    - ``r > r0+dr``: ``exp(-0.5) * (r/(r0+dr))^-1.5`` (outer halo).
+    - ``|r-r0| < dr``: ``exp(-0.5 (r-r0)^2 / dr^2)`` (Gaussian ring).
+    - ``r0-dr > r > 0``: inward decay from Wyatt 1999, eq 3.36,
+      ``exp(-0.5) / (1 + 4 eta (1 - sqrt(r/(r0-dr))))``.
+    - ``r <= rinner``: additional ``(r/rinner)^3`` cubic ramp.
+
   - Three-component Henyey-Greenstein phase function
     ``sum_i(w_i * HG(g_i))``, with scalar ``(g_i, w_i)`` parameters.
   - ``nzodis`` density scaling (zodi units).
@@ -156,7 +158,10 @@ def exovista_density(
 class ExovistaParametricDisk(AbstractDisk):
     """ExoVista-style disk component (faithful per-component reproduction).
 
-    Attributes (PyTree leaves, fittable):
+    Density, scattering, and spectral parameters are fittable PyTree leaves.
+    Image geometry and LOS integration settings are static configuration.
+
+    Attributes:
         r0_AU: Ring center radius [AU].
         dror: Ring fractional width ``Delta r / r0`` (dimensionless).
         rinner_AU: Inner truncation radius [AU]; below this the density
@@ -174,7 +179,6 @@ class ExovistaParametricDisk(AbstractDisk):
             outside this range return NaN.
         Ag_grid: Phenomenological albedo scaling vs wavelength.
 
-    Static attributes:
         nx, ny: Output image shape.
         pixel_scale_arcsec: Pixel scale [arcsec/pixel].
         dist_pc: System distance [pc].

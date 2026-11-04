@@ -47,19 +47,20 @@ class MieCloud(AbstractClouds):
     constants -- they vary with wavelength according to the
     condensate's refractive index n(lambda) + k(lambda).
 
-    Attributes (PyTree leaves, fittable):
+    Cloud pressure and optical depth are fittable PyTree leaves. The Mie
+    grids are built at engine time and shared across planets. Condensate,
+    particle-size parameters, and vertical width are static configuration.
+
+    Attributes:
         log_pressure_bar: Log10 cloud-deck pressure [bar], shape ``(K,)``.
         log_opt_depth: Log10 of the vertically-integrated cloud
             extinction optical depth, shape ``(K,)``.
 
-    Pre-computed Mie quantities (built at engine time, shared across
-    planets):
         ssa_grid: Single-scattering albedo on the wavenumber grid,
             shape ``(n_nu,)``. ``sigma_scattering / sigma_extinction``.
         g_grid: Asymmetry parameter on the wavenumber grid,
             shape ``(n_nu,)``.
 
-    Static config:
         condensate: Condensate name (``"H2O"``, ``"H2O_ice"``,
             ``"MgSiO3"``, etc.). Matters for the repr; the actual
             Mie params are baked into ssa_grid and g_grid.

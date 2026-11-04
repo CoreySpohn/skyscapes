@@ -33,12 +33,14 @@ class GrayCloud(AbstractClouds):
     spectrum. A Mie cloud with composition-dependent scattering would
     be a separate component implementing the same contract.
 
-    Attributes (PyTree leaves, fittable):
+    Cloud pressure and optical depth are fittable PyTree leaves. Scattering
+    properties and the vertical-distribution width are static configuration.
+
+    Attributes:
         log_pressure_bar: Log10 cloud-deck pressure [bar], shape ``(K,)``.
         log_opt_depth: Log10 of the vertically-integrated cloud
             scattering optical depth, shape ``(K,)``.
 
-    Static attributes (configuration):
         ssa: Single-scattering albedo (default 1.0, pure scattering).
         g: Asymmetry parameter (default 0.85, forward-peaked).
         log_sigma: Vertical-distribution width in log10(P) [dex].

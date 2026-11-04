@@ -321,7 +321,7 @@ two_planet = Planet(
 | `GraterDisk` | Two-power-law density × Henyey-Greenstein scattering; parametric / synthetic |
 | `CompositeDisk` | Sum of any other disks (e.g. main disk + a clump) |
 
-All disk images follow the [FITS display convention](scene_geometry.md#the-frames):
+All disk images follow the [FITS display convention](scene-frames):
 +row is north and +column is west. With `imshow(origin="lower")`, north is
 up and east is left. Map a sky offset to pixels using
 `col = (nx - 1) / 2 - east / pixel_scale_arcsec` and
