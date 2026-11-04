@@ -1,0 +1,4 @@
+[codespell]
+skip = .git,*.ipynb,uv.lock,*/_build,*.fits
+# RADIS is the line-by-line spectroscopy package used by ExoJAX.
+ignore-words-list = radis
