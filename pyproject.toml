@@ -104,6 +104,27 @@ packages = ["src/skyscapes"]
 exclude = ["/scripts", "/docs", "/tests", "/.github"]
 
 [tool.pytest.ini_options]
+filterwarnings = [
+    "error",
+    # ExoJAX applies its line-opacity resolution threshold to continuum-only grids.
+    'ignore:Resolution may be too small\. R=:UserWarning:exojax\.utils\.grids',
+    # interpax cubic splines store float64 intermediates in float32 FITS cube tables.
+    'ignore:scatter inputs have incompatible types\x3a cannot safely cast value from dtype=float64 to dtype=float32 with jax_numpy_dtype_promotion=standard\.:FutureWarning:jax\._src\.ops\.scatter',
+    # HAPI, ExoJAX and Vaex use non-raw regexes/docstrings with invalid Python 3.12 escapes.
+    'ignore:invalid escape sequence:SyntaxWarning:.*[/]site-packages[/](hapi[/]hapi|(exojax|vaex)[/].*)$',
+    # ExoJAX redirects HAPI's import output to an unclosed /dev/null stream.
+    "ignore:unclosed file.*name='/dev/null':ResourceWarning:exojax[.]database[.]_common[.]hitranapi$",
+    # tol_colors initializes colormaps with Matplotlib's pending-deprecated set_bad.
+    'ignore:The set_bad function will be deprecated in a future version\.:PendingDeprecationWarning:tol_colors$',
+    # Vaex's expression formatter still checks deprecated ast.Num nodes on Python 3.12.
+    'ignore:ast\.Num is deprecated and will be removed in Python 3\.14; use ast\.Constant instead:DeprecationWarning:vaex\.expresso$',  # codespell:ignore expresso
+    # ExoJAX warns on nonpositive HITRAN temperature exponents even for its linear grid.
+    'ignore:There exists negative or zero value\.$:UserWarning:exojax\.opacity\._common\.set_ditgrid$',
+    # ExoJAX lacks King factors for several supported gases and defaults to 1.
+    'ignore:No King correction factor found for molecule .* Using default value of 1\.0\. Modify by setting opa\.king_factor\.$:UserWarning:exojax\.opacity\.opacont$',
+    # ExoJAX warns before skyscapes can apply its explicit N2O polarizability override.
+    "ignore:No polarizability found for molecule 'N2O'[.] Set opa[.]polarizability manually[.]:UserWarning:exojax[.]opacity[.]opacont$",
+]
 markers = [
     "medium: tests with a 30-second default time budget",
     "slow: tests with a 300-second default time budget, run nightly",
