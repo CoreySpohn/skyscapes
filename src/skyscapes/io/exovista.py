@@ -372,16 +372,23 @@ def _load_single_planet(
 
     # Regular beta axis on [0, 180].
     regular_grid = jnp.linspace(0.0, 180.0, 100)
-    xq, yq = jnp.meshgrid(wavelengths_nm, regular_grid, indexing="ij")
-    contrast_grid = interpax.interp2d(
-        xq.flatten(),
-        yq.flatten(),
-        wavelengths_nm,
-        beta_sorted,
-        contrast_sorted,
-        method="linear",
-        extrap=True,
-    ).reshape(xq.shape)
+    if beta_sorted.size == 1:
+        # A single epoch is a static snapshot, with no phase slope to infer.
+        # interp2d needs at least two samples on each interpolation axis.
+        contrast_grid = jnp.broadcast_to(
+            contrast_sorted, (wavelengths_nm.size, regular_grid.size)
+        )
+    else:
+        xq, yq = jnp.meshgrid(wavelengths_nm, regular_grid, indexing="ij")
+        contrast_grid = interpax.interp2d(
+            xq.flatten(),
+            yq.flatten(),
+            wavelengths_nm,
+            beta_sorted,
+            contrast_sorted,
+            method="linear",
+            extrap=True,
+        ).reshape(xq.shape)
 
     # Contrast is a flux ratio and cannot be negative. Linear extrapolation past
     # the orbit's sampled beta coverage (extrap=True above) can dip a few 1e-11

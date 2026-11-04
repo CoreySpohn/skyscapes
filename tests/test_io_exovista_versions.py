@@ -128,10 +128,21 @@ def test_new_layout_keeps_time_dependent_contrast_at_equal_phase(scene_file):
     )
 
 
-def test_single_snapshot_and_empty_spots_are_supported(scene_file):
+@pytest.mark.parametrize("version", [2.33, 2.5, 2.6])
+@pytest.mark.parametrize("planet_spectra", ["auto", "time", "phase"])
+def test_single_snapshot_and_empty_spots_are_supported(
+    scene_file, version, planet_spectra
+):
     """A snapshot is constant in time; zero spots is distinct from no metadata."""
-    scene = from_exovista(scene_file(n_times=1, n_spots=0), load_disk=False)
-    assert scene.star.spots.latitude_deg.shape == (1, 0)
+    scene = from_exovista(
+        scene_file(version=version, n_times=1, n_spots=0),
+        load_disk=False,
+        planet_spectra=planet_spectra,
+    )
+    if version >= 2.5:
+        assert scene.star.spots.latitude_deg.shape == (1, 0)
+    else:
+        assert scene.star.spots is None
     times = scene.star._times_jd + jnp.array([0.0, 1.0])
     np.testing.assert_allclose(
         scene.star.spec_flux_density(600.0, times),
@@ -142,6 +153,24 @@ def test_single_snapshot_and_empty_spots_are_supported(scene_file):
     np.testing.assert_allclose(
         scene.contrasts(600.0, times)[0], 1e-10, rtol=1e-6, atol=0
     )
+
+
+@pytest.mark.parametrize("version", [2.33, 2.5, 2.6])
+def test_single_snapshot_phase_model_preserves_spectrum(scene_file, version):
+    """A phase-independent snapshot still interpolates its measured spectrum."""
+    path = scene_file(version=version, n_times=1)
+    with fits.open(path, mode="update") as hdul:
+        hdul[-2].data[0, 16:] = np.array([1.0, 2.0, 4.0]) * 1e-10
+    scene = from_exovista(path, load_disk=False, planet_spectra="phase")
+    model = scene.planets[0].physical_model
+    phases = jnp.deg2rad(jnp.array([[0.0, 30.0, 90.0, 180.0]]))
+    for wavelength, expected in [(500.0, 1.0), (550.0, 1.5), (700.0, 4.0)]:
+        np.testing.assert_allclose(
+            model.contrast(phases, jnp.ones_like(phases), wavelength, jnp.ones(1)),
+            expected * 1e-10,
+            rtol=1e-6,
+            atol=0,
+        )
 
 
 def test_legacy_has_no_imported_spots(scene_file):
