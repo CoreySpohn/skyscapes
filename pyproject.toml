@@ -7,7 +7,7 @@ name = "skyscapes"
 description = "Astrophysical scene modeling for HWO direct imaging"
 authors = [{ name = "Corey Spohn", email = "corey.a.spohn@nasa.gov" }]
 dynamic = ['readme', 'version']
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { file = "LICENSE" }
 classifiers = [
     "Development Status :: 3 - Alpha",
