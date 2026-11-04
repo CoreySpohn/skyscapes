@@ -47,7 +47,9 @@ flowchart LR
 
 The easiest path is loading an ExoVista FITS file into a `Scene`:
 
-```python
+Requires a user-supplied ExoVista FITS file.
+
+```python notest
 from skyscapes import from_exovista
 
 scene = from_exovista("path/to/exovista_system.fits")

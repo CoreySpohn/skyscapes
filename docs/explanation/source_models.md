@@ -35,7 +35,9 @@ flowchart TB
 
 A complete `Scene` is:
 
-```python
+Interface sketch; the concrete classes are defined in the package.
+
+```python notest
 class Scene(eqx.Module):
     system: System              # required
     zodi: Zodi | None = None    # optional
@@ -63,7 +65,9 @@ Three concrete `AbstractStar` implementations:
 | `FlatStar` | Simplification: constant flux independent of wavelength or time. Sandbox / testing / closed-form sanity checks. |
 | `BlackbodyStar` | Planck blackbody spectrum from effective temperature, stellar radius, and distance. Static physical approximation for converting planet contrast to flux. |
 
-```python
+Requires user-supplied stellar flux-density measurements.
+
+```python notest
 import jax
 
 jax.config.update("jax_enable_x64", True)
@@ -289,7 +293,9 @@ is an array of length `K`. This is the "per-Planet-type batching"
 convention; heterogeneous planets (different physical-model classes)
 go into `System.planets` as a tuple of `Planet` instances.
 
-```python
+Requires the remaining user-supplied orbital elements.
+
+```python notest
 # Two planets sharing a Lambertian physical model
 two_planet = Planet(
     Rp_Rearth=jnp.array([1.0, 11.2]),
@@ -331,7 +337,9 @@ non-differentiable through the disk's morphology. Parametric disks
 (`GraterDisk`, `ExovistaParametricDisk`) are fully differentiable --
 you can take gradients of observables with respect to disk parameters.
 
-```python
+Requires a user-supplied disk flux normalization.
+
+```python notest
 from skyscapes.disk import GraterDisk
 
 disk = GraterDisk(
@@ -364,7 +372,9 @@ Three Zodi variants (each implements `spec_flux_density`):
 | `LeinertZodi` | Full Leinert+1998 position-dependent model: surface brightness varies with ecliptic latitude and solar longitude. Use when telescope-orbit geometry matters. |
 | `PrecomputedZodi` | Wraps an externally computed photon-flux array (e.g. from EXOSIMS) for fast lookup. Position arguments accepted but ignored. |
 
-```python
+Requires user-supplied zodiacal flux arrays and a configured system.
+
+```python notest
 from skyscapes.background import AYOZodi, LeinertZodi, PrecomputedZodi
 import jax.numpy as jnp
 
@@ -411,7 +421,9 @@ separately -- see [physical models](physical_models).
 The same `Scene` is consumed by every downstream tool. Build it once,
 use it everywhere:
 
-```python
+Requires a user-supplied FITS file, source models, and configured optical path.
+
+```python notest
 from skyscapes import Scene, System, from_exovista
 
 # From ExoVista

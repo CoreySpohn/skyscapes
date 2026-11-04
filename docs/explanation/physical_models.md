@@ -67,7 +67,9 @@ the interpolation. `from_exovista` uses this model for legacy files
 under `planet_spectra="auto"`, or for any supported layout when
 `planet_spectra="phase"` is explicitly selected.
 
-```python
+Requires a user-supplied contrast grid.
+
+```python notest
 import jax.numpy as jnp
 from skyscapes.physical_model import GridPhysicalModel
 
@@ -146,7 +148,9 @@ first principles given molecular mass mixing ratios (H2O, CO2, CH4,
 O2, O3, ...). The full constructor exposes a lot of knobs; the
 ergonomic entry point is `ExoJaxPhysicalModel.from_default_setup`:
 
-```python
+Requires locally configured HITRAN line lists for the opacity engines.
+
+```python notest
 import jax.numpy as jnp
 from skyscapes.physical_model import ExoJaxPhysicalModel
 
@@ -227,7 +231,9 @@ Wraps an ExoJax model's full per-planet reflectivity grid as a fast
 lookup. Once you've built the underlying `ExoJaxPhysicalModel`,
 freeze it for inner-loop reuse:
 
-```python
+Requires a configured radiative-transfer model and its opacity data.
+
+```python notest
 from skyscapes.physical_model import ExoJaxPhysicalModel, PrecomputedPhysicalModel
 
 # One-shot RT computation
@@ -283,7 +289,9 @@ planet = Planet(
 Heterogeneous physical models compose at the `System.planets` level
 -- one `Planet` per model type, each batching its own `K` planets:
 
-```python
+Requires user-supplied orbits, stellar data, and physical models.
+
+```python notest
 lambertian_planet = Planet(
     Rp_Rearth=..., Mp_Mearth=...,
     orbit=lambertian_orbit,
@@ -323,7 +331,9 @@ For an IFS-style spectral cube, map over wavelengths to obtain shape
 `(W, K, T)`. The time-aware hook works with both phase-dependent and
 time-series models:
 
-```python
+Requires a configured physical model with the desired wavelength coverage.
+
+```python notest
 import jax
 import jax.numpy as jnp
 

@@ -33,7 +33,9 @@ $T(P) = \sum_i a_i (\log_{10} P[\mathrm{bar}])^i$ of
 {class}`~skyscapes.physical_model.exojax.PolynomialTPProfile`; the
 coefficients below describe a cloud-free Earth twin (Alei et al. 2024).
 
-```python
+Requires locally configured HITRAN line lists for the opacity engines.
+
+```python notest
 import jax
 import jax.numpy as jnp
 
@@ -70,7 +72,9 @@ CIA is optional: `cia_pairs=()` leaves the line-only spectrum unchanged.
 To include the O2-O2 fundamental near 6.4 microns and N2-N2 absorption, add
 these arguments to `from_default_setup` above:
 
-```python
+Keyword fragment to insert into the configured model above.
+
+```python notest
 cia_pairs=("O2-O2", "N2-N2"),
 cia_vmr={"N2": 0.78, "O2": 0.21},
 mean_molecular_weight=28.97,

@@ -102,7 +102,9 @@ Every leaf is an `eqx.Module` PyTree, so JAX transforms (`jit`, `vmap`,
 
 The easiest path is loading an ExoVista FITS file:
 
-```python
+Requires a user-supplied ExoVista FITS file.
+
+```python notest
 import jax
 
 jax.config.update("jax_enable_x64", True)

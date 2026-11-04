@@ -39,7 +39,9 @@ Both angles are read off the L2-halo geometry by
 {class}`orbix.observatory.ObservatoryL2Halo`, which exposes them as
 methods with consistent `(mjd, ra_rad, dec_rad)` argument order:
 
-```python
+Requires user-supplied target coordinates, epochs, and wavelengths.
+
+```python notest
 from orbix.observatory import ObservatoryL2Halo
 from skyscapes.background import LeinertZodi
 
