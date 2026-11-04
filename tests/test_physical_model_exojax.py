@@ -20,6 +20,7 @@ import numpy as np
 import pytest
 from exojax.database.multimol import database_path_hitran12
 
+import skyscapes.physical_model.exojax.components.species as species_pm
 import skyscapes.physical_model.exojax.physical_model as exojax_pm
 from skyscapes.physical_model import (
     AbstractPhysicalModel,
@@ -165,6 +166,67 @@ def make_physical_model(K: int = 2, n_nu: int = 100, n_layers: int = 20):
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("failure", [None, "no-lines", "activation", "opacity"])
+def test_hitran_reader_closes_after_extraction(monkeypatch, failure):
+    """The lazy reader closes on success, empty selections, and build failures."""
+    events = []
+    opacity = object()
+
+    class Frame:
+        def close(self):
+            events.append("close")
+
+    class Database:
+        engine = "vaex"
+        molmass = 32.0
+
+        def __init__(self, *args, activation, **kwargs):
+            assert activation is False
+            self.df = Frame()
+
+        def activate(self, frame):
+            assert frame is self.df
+            events.append("extract")
+            if failure == "no-lines":
+                raise ValueError("No line found")
+            if failure == "activation":
+                raise RuntimeError("activation failed")
+
+    def build_opacity(*, mdb, **kwargs):
+        assert events == ["extract", "close"]
+        assert not hasattr(mdb, "df")
+        if failure == "opacity":
+            raise RuntimeError("opacity failed")
+        return opacity
+
+    monkeypatch.setattr(species_pm, "MdbHitran", Database)
+    monkeypatch.setattr(species_pm, "OpaPremodit", build_opacity)
+
+    def build():
+        return species_pm.build_species_prebuilt(
+            name="O2",
+            nu_grid=jnp.array([13000.0, 13100.0]),
+            nu_min=13000.0,
+            nu_max=13100.0,
+            databases_dir=".",
+            crit=0.0,
+            rayleigh=False,
+        )
+
+    if failure == "no-lines":
+        with pytest.warns(UserWarning, match="has no HITRAN lines"):
+            _, opa, _ = build()
+        assert opa is None
+    elif failure is not None:
+        with pytest.raises(RuntimeError, match=f"{failure} failed"):
+            build()
+    else:
+        molmass, opa, _ = build()
+        assert molmass == 32.0
+        assert opa is opacity
+    assert events == ["extract", "close"]
 
 
 def test_default_grid_resolving_power():

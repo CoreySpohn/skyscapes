@@ -253,7 +253,16 @@ def build_species_prebuilt(
                 nurange=[float(nu_min), float(nu_max)],
                 isotope=1,
                 crit=crit,
+                activation=False,
             )
+            try:
+                # Extract the same line arrays before releasing the lazy reader.
+                # Deferred activation also lets us close empty line selections.
+                mdb.activate(mdb.df)
+            finally:
+                if mdb.engine == "vaex":
+                    mdb.df.close()
+                del mdb.df
         except ValueError as e:
             # HITRAN has no lines for this molecule in the requested
             # range (e.g. SO2 in the visible -- its strong bands are
