@@ -447,8 +447,12 @@ def _load_disk(hdul: fits.HDUList, fits_ext: int) -> ExovistaDisk:
     header = hdul[fits_ext].header
     wavelengths_um = hdul[fits_ext - 1].data
 
-    wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
-    contrast_cube = jnp.asarray(obj_data[:-1].astype(np.float32))
+    # The cube keeps its float32-rounded stored values but is carried in the
+    # active float dtype, so wavelength interpolation never casts float64
+    # values into a float32 buffer when x64 is enabled.
+    active = jnp.result_type(float)
+    wavelengths_nm = jnp.asarray(wavelengths_um * um2nm, dtype=active)
+    contrast_cube = jnp.asarray(obj_data[:-1].astype(np.float32), dtype=active)
     pixel_scale_arcsec = header["PXSCLMAS"] * mas2arcsec
 
     return ExovistaDisk(
