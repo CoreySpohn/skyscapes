@@ -26,7 +26,6 @@ dependencies = [
     "jaxlib>=0.8.1",
     "jaxtyping",
     "numpy",
-    "optixstuff",
     "orbix>=3.0.0",
     "pooch",
     "scipy",
@@ -54,11 +53,16 @@ docs = [
 # viz extra: without it those modules fail to import on a clean runner and the
 # viz suite silently does not run.
 test = [
-    "nox",
     "pytest",
     "hypothesis",
     "ineedvalidation",
     "pytest-cov",
+    "pytest-xdist",
+    "pytest-testmon",
+    "pytest-markdown-docs",
+    "pytest-timeout",
+    "pytest-fail-slow",
+    "packaging",
     "orbix>=3.0.0",
     "exoverses",
     "skyscapes[viz]",
@@ -66,7 +70,7 @@ test = [
 # skyscapes.viz draws through eyepiece (imshow_log, PlotResult, SourceStyles,
 # ARTIST_KEYS) and resolves brand colors from hwostyle's Roles, which ship
 # from hwostyle 1.4.0.
-viz = ["eyepiece>=0.4.0", "hwostyle>=1.4.0"]
+viz = ["eyepiece>=0.4.0", "hwostyle>=1.4.0", "matplotlib"]
 
 [project.urls]
 Homepage = "https://github.com/CoreySpohn/skyscapes"
@@ -87,6 +91,9 @@ path = "README.md"
 [tool.ruff.lint]
 select = ["B", "D", "E", "F", "I", "UP", "RUF"]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]  # test functions / fixtures do not need docstrings
+
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
@@ -95,3 +102,31 @@ packages = ["src/skyscapes"]
 
 [tool.hatch.build.targets.sdist]
 exclude = ["/scripts", "/docs", "/tests", "/.github"]
+
+[tool.pytest.ini_options]
+markers = [
+    "medium: tests with a 30-second default time budget",
+    "slow: tests with a 300-second default time budget, run nightly",
+]
+
+[tool.testbudget]
+library = "skyscapes"
+mode = "report"
+unit_s = 5
+medium_s = 30
+slow_s = 300
+
+[tool.deptry]
+known_first_party = ["skyscapes"]
+optional_dependencies_dev_groups = ["dev", "docs", "test"]
+
+[tool.deptry.per_rule_ignores]
+# JAX loads its compiled backend; keep the explicit minimum version constraint.
+# vaex-core is constrained for exojax's transitive dependency to have Python 3.12 wheels.
+DEP002 = ["jaxlib", "vaex-core"]
+
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.ty.src]
+include = ["src/skyscapes"]
