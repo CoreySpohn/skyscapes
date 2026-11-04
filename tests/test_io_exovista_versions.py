@@ -1,6 +1,7 @@
 """Import contracts for the legacy and spotted-star ExoVista layouts."""
 
 import warnings
+from types import SimpleNamespace
 
 import jax
 import jax.numpy as jnp
@@ -22,7 +23,7 @@ from hwoutils.constants import (
 )
 from hwoutils.conversions import flux_jy_to_mag
 
-from skyscapes.io import from_exovista, get_earth_like_planet_indices
+from skyscapes.io import exovista, from_exovista, get_earth_like_planet_indices
 
 
 @pytest.fixture
@@ -183,12 +184,23 @@ def test_imported_positive_flux_cannot_overshoot_below_zero(scene_file):
     assert np.all(np.asarray(scene.planet_flux_densities(600.0, midpoint)) > 0)
 
 
-def test_import_requires_precision_for_absolute_julian_dates(scene_file):
+@pytest.mark.parametrize("enable_x64", [False, True])
+def test_import_requires_precision_for_absolute_julian_dates(
+    scene_file, monkeypatch, enable_x64
+):
     """Fail explicitly instead of silently merging closely spaced epochs."""
     path = scene_file()
-    with jax.enable_x64(False):
-        with pytest.raises(ValueError, match="jax_enable_x64"):
-            from_exovista(path, load_disk=False)
+    # Only expose the supported config API to the loader.
+    monkeypatch.setattr(
+        exovista, "jax", SimpleNamespace(config=SimpleNamespace(read=jax.config.read))
+    )
+    with jax.enable_x64(enable_x64):
+        if enable_x64:
+            scene = from_exovista(path, load_disk=False)
+            assert scene.star._times_jd.dtype == jnp.float64
+        else:
+            with pytest.raises(ValueError, match="jax_enable_x64"):
+                from_exovista(path, load_disk=False)
 
 
 def _writer_mask_area(mapsize=512, u1=0.0473, u2=0.0841):

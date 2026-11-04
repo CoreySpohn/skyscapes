@@ -525,7 +525,7 @@ def from_exovista(
             a finite positive ``DIST``, or a planet selection or spectra mode
             is invalid.
     """
-    if not jax.config.x64_enabled:
+    if not jax.config.read("jax_enable_x64"):
         raise ValueError(
             "ExoVista import requires jax_enable_x64 for Julian Date precision. "
             'Set jax.config.update("jax_enable_x64", True) before loading.'
