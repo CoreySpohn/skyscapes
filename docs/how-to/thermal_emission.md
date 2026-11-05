@@ -75,9 +75,9 @@ these arguments to `from_default_setup` above:
 Keyword fragment to insert into the configured model above.
 
 ```python notest
-cia_pairs=("O2-O2", "N2-N2"),
-cia_vmr={"N2": 0.78, "O2": 0.21},
-mean_molecular_weight=28.97,
+cia_pairs = (("O2-O2", "N2-N2"),)
+cia_vmr = ({"N2": 0.78, "O2": 0.21},)
+mean_molecular_weight = (28.97,)
 ```
 
 `cia_vmr` specifies constant **volume** mixing ratios for partners absent

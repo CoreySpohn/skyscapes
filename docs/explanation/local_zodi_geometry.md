@@ -48,8 +48,10 @@ from skyscapes.background import LeinertZodi
 obs = ObservatoryL2Halo.from_default()
 zodi = LeinertZodi(reference_mag_arcsec2=22.0)
 
-ecl_lat = obs.ecliptic_latitude_deg(mjd, ra_rad, dec_rad)         # ~constant in time
-helio_lon = obs.helio_ecliptic_longitude_deg(mjd, ra_rad, dec_rad)  # sweeps 0 -> 180 per year
+ecl_lat = obs.ecliptic_latitude_deg(mjd, ra_rad, dec_rad)  # ~constant in time
+helio_lon = obs.helio_ecliptic_longitude_deg(
+    mjd, ra_rad, dec_rad
+)  # sweeps 0 -> 180 per year
 
 flux = zodi.spec_flux_density(
     wavelength_nm,

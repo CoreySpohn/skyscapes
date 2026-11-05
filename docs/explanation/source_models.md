@@ -39,8 +39,9 @@ Interface sketch; the concrete classes are defined in the package.
 
 ```python notest
 class Scene(eqx.Module):
-    system: System              # required
-    zodi: Zodi | None = None    # optional
+    system: System  # required
+    zodi: Zodi | None = None  # optional
+
 
 class System(eqx.Module):
     star: AbstractStar
@@ -401,6 +402,7 @@ The `Zodi` union type covers all three:
 
 ```python
 from skyscapes.background import Zodi
+
 
 def my_function(zodi: Zodi):
     # accepts any concrete Zodi variant

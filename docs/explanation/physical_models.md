@@ -74,9 +74,9 @@ import jax.numpy as jnp
 from skyscapes.physical_model import GridPhysicalModel
 
 model = GridPhysicalModel(
-    wavelengths_nm=jnp.linspace(400, 1000, 60),     # (n_wl,)
-    phase_angle_deg=jnp.linspace(0, 180, 19),       # (n_phase,)
-    contrast_grid=...,                              # (K, n_wl, n_phase)
+    wavelengths_nm=jnp.linspace(400, 1000, 60),  # (n_wl,)
+    phase_angle_deg=jnp.linspace(0, 180, 19),  # (n_phase,)
+    contrast_grid=...,  # (K, n_wl, n_phase)
 )
 ```
 
@@ -242,10 +242,10 @@ cached = PrecomputedPhysicalModel.from_physical_model(ej)
 
 # Use as a drop-in physical model
 contrast = cached.contrast(
-    phase_angle_rad=jnp.array([[jnp.pi / 3]]),   # (K, T)
-    dist_AU=jnp.array([[1.0]]),                  # (K, T)
+    phase_angle_rad=jnp.array([[jnp.pi / 3]]),  # (K, T)
+    dist_AU=jnp.array([[1.0]]),  # (K, T)
     wavelength_nm=550.0,
-    Rp_Rearth=jnp.array([1.0]),                  # (K,)
+    Rp_Rearth=jnp.array([1.0]),  # (K,)
 )
 ```
 
@@ -293,12 +293,14 @@ Requires user-supplied orbits, stellar data, and physical models.
 
 ```python notest
 lambertian_planet = Planet(
-    Rp_Rearth=..., Mp_Mearth=...,
+    Rp_Rearth=...,
+    Mp_Mearth=...,
     orbit=lambertian_orbit,
     physical_model=LambertianPhysicalModel(...),
 )
 cached_planet = Planet(
-    Rp_Rearth=..., Mp_Mearth=...,
+    Rp_Rearth=...,
+    Mp_Mearth=...,
     orbit=cached_orbit,
     physical_model=PrecomputedPhysicalModel.from_physical_model(...),
 )
@@ -339,9 +341,9 @@ import jax.numpy as jnp
 
 wavelengths = jnp.linspace(500, 600, 100)
 times_jd = jnp.array([2451545.0])
-phase = jnp.array([[jnp.pi / 3]])    # (K=1, T=1)
-dist  = jnp.array([[1.0]])           # (K=1, T=1)
-Rp    = jnp.array([1.0])             # (K=1,)
+phase = jnp.array([[jnp.pi / 3]])  # (K=1, T=1)
+dist = jnp.array([[1.0]])  # (K=1, T=1)
+Rp = jnp.array([1.0])  # (K=1,)
 
 contrast_spectrum = jax.vmap(
     lambda wl: model.contrast_at_time(phase, dist, wl, Rp, time_jd=times_jd),
