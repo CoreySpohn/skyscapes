@@ -46,6 +46,13 @@
   observer on the left at -z, with z labelled away from the observer. The
   scattering diagram labels the illumination angle beta.
 
+## [2.2.0](https://github.com/CoreySpohn/skyscapes/compare/v2.1.0...v2.2.0) (2026-11-06)
+
+
+### Features
+
+* **scene:** add diameter_arcsec to FlatStar and BlackbodyStar ([bf22955](https://github.com/CoreySpohn/skyscapes/commit/bf229556edfde721a127afd335ca4277bf51a698))
+
 ## [2.1.0](https://github.com/CoreySpohn/skyscapes/compare/v2.0.0...v2.1.0) (2026-11-05)
 
 
