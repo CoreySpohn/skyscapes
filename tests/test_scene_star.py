@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import pytest
+from astropy import units as u
 from hwoutils.constants import Msun2kg, c, h, k_B, pc2m, sigma_SB
 from hwoutils.conversions import jy_to_photons_per_nm_per_m2
 
@@ -12,11 +14,45 @@ from skyscapes.scene import AbstractStar, BlackbodyStar, FlatStar, Star
 
 
 def test_simple_star_fields():
-    """FlatStar stores Ms_kg / dist_pc and is an AbstractStar."""
+    """Fails if FlatStar lacks the point-star default or breaks positional use."""
     s = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     assert s.Ms_kg == 1.989e30
     assert s.dist_pc == 10.0
     assert isinstance(s, AbstractStar)
+    assert s.diameter_arcsec == 0.0
+    positional = FlatStar(1.989e30, 10.0, 1e9)
+    assert positional.flux_phot_per_nm_m2 == 1e9
+    assert positional.diameter_arcsec == 0.0
+
+
+@pytest.mark.parametrize("diameter_arcsec", [0.0, 0.003])
+def test_flat_star_diameter_pytree(diameter_arcsec):
+    """Fails if explicit diameters are lost or excluded from JAX leaves."""
+    star = FlatStar(
+        Ms_kg=Msun2kg,
+        dist_pc=10.0,
+        flux_phot_per_nm_m2=1e9,
+        diameter_arcsec=diameter_arcsec,
+    )
+    assert star.diameter_arcsec == diameter_arcsec
+    assert FlatStar(Msun2kg, 10.0, 1e9, diameter_arcsec).diameter_arcsec == (
+        diameter_arcsec
+    )
+    leaves, treedef = jax.tree_util.tree_flatten(star)
+    restored = jax.tree_util.tree_unflatten(treedef, leaves)
+    updated = eqx.tree_at(lambda s: s.flux_phot_per_nm_m2, restored, 2e9)
+    assert updated.diameter_arcsec == diameter_arcsec
+    dynamic = jax.tree_util.tree_map(jnp.asarray, updated)
+    compiled = eqx.filter_jit(lambda s: s.diameter_arcsec * 2.0)
+    assert float(compiled(dynamic)) == 2.0 * diameter_arcsec
+    doubled = eqx.tree_at(
+        lambda s: s.diameter_arcsec, dynamic, jnp.asarray(2.0 * diameter_arcsec)
+    )
+    assert float(compiled(doubled)) == 4.0 * diameter_arcsec
+    diameter_text = f", diam={diameter_arcsec:.3g} arcsec" if diameter_arcsec else ""
+    assert repr(star) == (
+        f"FlatStar(M=1.000 Msun, dist=10 pc, flux=1e+09 ph/s/m^2/nm{diameter_text})"
+    )
 
 
 def test_simple_star_flux_is_flat():
@@ -35,12 +71,19 @@ def blackbody_star():
 
 
 def test_blackbody_star_fields(blackbody_star):
-    """BlackbodyStar satisfies the stellar interface and stores physical inputs."""
+    """Fails if blackbody angular diameter is missing or has incorrect units."""
     assert isinstance(blackbody_star, AbstractStar)
     assert blackbody_star.Ms_kg == Msun2kg
     assert blackbody_star.dist_pc == 10.0
     assert blackbody_star.teff_K == 5772.0
     assert blackbody_star.radius_m == 6.957e8
+    expected = (2.0 * blackbody_star.radius_m * u.m / (10.0 * u.pc)).to_value(
+        u.arcsec, equivalencies=u.dimensionless_angles()
+    )
+    assert blackbody_star.diameter_arcsec == pytest.approx(expected, rel=1e-12)
+    dynamic = jax.tree_util.tree_map(jnp.asarray, blackbody_star)
+    compiled = eqx.filter_jit(lambda s: s.diameter_arcsec)
+    assert float(compiled(dynamic)) == pytest.approx(expected, rel=1e-12)
 
 
 def test_blackbody_star_integrated_energy_flux(blackbody_star):
@@ -70,7 +113,7 @@ def test_blackbody_star_photon_peak(blackbody_star):
 def test_blackbody_star_scaling(
     blackbody_star, radius_factor, distance_factor, flux_factor
 ):
-    """Doubling radius or distance gives the exact geometric flux scaling."""
+    """Fails if radius or distance updates leave flux or angular size stale."""
     scaled = BlackbodyStar(
         Ms_kg=blackbody_star.Ms_kg,
         dist_pc=blackbody_star.dist_pc * distance_factor,
@@ -82,6 +125,16 @@ def test_blackbody_star_scaling(
     assert jnp.array_equal(
         scaled.spec_flux_density(wavelength_nm, 0.0), baseline * flux_factor
     )
+    updated = eqx.tree_at(
+        lambda s: (s.radius_m, s.dist_pc),
+        blackbody_star,
+        (scaled.radius_m, scaled.dist_pc),
+    )
+    expected = (2.0 * scaled.radius_m * u.m / (scaled.dist_pc * u.pc)).to_value(
+        u.arcsec, equivalencies=u.dimensionless_angles()
+    )
+    assert scaled.diameter_arcsec == pytest.approx(expected, rel=1e-12)
+    assert updated.diameter_arcsec == pytest.approx(expected, rel=1e-12)
 
 
 @pytest.mark.parametrize(
