@@ -132,6 +132,8 @@ pip install skyscapes
 
 **Loaders**:
 - `from_exovista` (top-level) -- one-call ingestion of ExoVista FITS
+- [`from_phoenix`](how-to/phoenix_star) -- a `Star` from a PHOENIX model
+  atmosphere by Teff and `logg`
 
 **Habitable zone**:
 - [`skyscapes.habitable_zone`](how-to/habitable_zone) -- `eeid_au`,
@@ -164,6 +166,7 @@ explanation/scene_geometry
 :hidden:
 
 how-to/habitable_zone
+how-to/phoenix_star
 how-to/thermal_emission
 ```
 
