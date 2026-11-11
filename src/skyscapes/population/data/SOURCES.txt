@@ -1,0 +1,31 @@
+Sources of the files in this directory
+
+NominalOcc_Mass.csv.gz, NominalOcc_Radius.csv.gz
+    The nominal occurrence-rate tables of Dulz, Plavchan, Crepp and Mamajek
+    (2020, ApJ 893, 122), as shipped in ExoVista (src/exovista/data/occurrence_rates/,
+    ExoVista commit 11cff79) and in EXOSIMS. Gzipped without other change.
+    sha256 of the uncompressed files:
+      NominalOcc_Mass.csv    f9802a3dbb6f30cbe5821f194721875b5d1ca488f1c7d38a29b3ec3ad7a2ece0
+      NominalOcc_Radius.csv  dc0a3e00862a3440bed141be38d11c329426ddfda2263015b53e011c3fdcfae4
+    The copy of the radius table in the ExoVista clone it was taken from differs in
+    modification date from the mass table (a local re-export); the values are used as given.
+
+planetbins.dat
+    ExoVista src/exovista/data/planetbins.dat: radius bin edges and, for each radius
+    bin, the stellar-flux edges (in Earth units) of the sub-bins that the occurrence
+    grid is split on. sha256 2d91c81da273c3a787c0981829d52039ca4006578d5a4668bb757231c9dd15aa
+    of the original; this copy has a final newline added.
+
+albedo_list.csv
+    ExoVista src/exovista/data/albedo_list.csv: the planet types, their radius and
+    scaled-semi-major-axis ranges, selection weights and the exoEarth-candidate flag.
+    sha256 9483794586ef151ac6b44d7d774a88ae268976e517f251a02adc548c857360c9
+    of the original; this copy has a final newline added.
+
+albedo_spectra.npz
+    Geometric albedo spectra of the planet types of albedo_list.csv on a 1 nm grid
+    from 300 to 2500 nm, written by tools/build_albedo_table.py from
+    ExoVista src/exovista/data/geometric_albedo_files/.
+
+ExoVista is distributed under the NASA Open Source Agreement 1.3; the tables are
+public and are used here with that attribution.
