@@ -46,6 +46,20 @@
   observer on the left at -z, with z labelled away from the observer. The
   scattering diagram labels the illumination angle beta.
 
+## [2.2.0](https://github.com/CoreySpohn/skyscapes/compare/v2.1.0...v2.2.0) (2026-11-12)
+
+
+### Features
+
+* **io:** add PHOENIX model-atmosphere loader from_phoenix with a hash-registered STScI grid ([6791b70](https://github.com/CoreySpohn/skyscapes/commit/6791b702c3416f632c44b4ceabb60fc9348a86f3))
+* **scene:** add diameter_arcsec to FlatStar and BlackbodyStar ([bf22955](https://github.com/CoreySpohn/skyscapes/commit/bf229556edfde721a127afd335ca4277bf51a698))
+* **skyscapes:** add occurrence-rate planet population draw ([83c500f](https://github.com/CoreySpohn/skyscapes/commit/83c500f6f9e66aab7d29ef75d5824284bb7a8689))
+
+
+### Bug Fixes
+
+* **skyscapes:** delegate zodi tables and color to zodi, fixing the AYO default color in AB ([591365d](https://github.com/CoreySpohn/skyscapes/commit/591365daf35500db4145f0992d3b190795ee7cc1))
+
 ## [2.1.0](https://github.com/CoreySpohn/skyscapes/compare/v2.0.0...v2.1.0) (2026-11-05)
 
 
