@@ -2,6 +2,7 @@
 
 import jax
 import jax.numpy as jnp
+import pytest
 from hwoutils.conversions import flux_jy_to_mag, mag_to_flux_jy
 
 from skyscapes.background.leinert import (
@@ -99,3 +100,28 @@ def test_near_sun_and_out_of_range_queries_are_finite():
         leinert_zodi_factor(7.0, 12.0)
     )  # near-Sun exclusion cell; pre-fix NaN
     assert jnp.isfinite(zodi_color_correction(100.0))  # out-of-range wavelength
+
+
+@pytest.mark.parametrize("wavelength_nm", [500.0, 910.0])
+def test_ayo_default_color_matches_leinert_path_color(wavelength_nm):
+    """AYO default and position-dependent zodi carry the same AB color.
+
+    Both are AB magnitudes, so the magnitude difference to V must agree.
+    A Table 19 F_lambda color applied to an AB magnitude without the
+    (lambda / lambda_V)**2 factor misses by 2.5 * log10((lambda / 550)**2)
+    mag, 1.09 mag at 910 nm. Tolerance basis: the two routes share one
+    set of tables, so agreement is limited by float rounding.
+    """
+    ayo = ayo_default_zodi_mag(wavelength_nm) - ayo_default_zodi_mag(550.0)
+    path = leinert_zodi_mag(wavelength_nm, 0.0, 135.0) - leinert_zodi_mag(
+        550.0, 0.0, 135.0
+    )
+    assert jnp.isclose(ayo, path, atol=2e-5)
+
+
+def test_ayo_default_flux_matches_spectrum_helper():
+    """The AYO flux and the Jy spectrum helper describe the same spectrum."""
+    wavelengths = jnp.array([500.0, 910.0])
+    spectrum = create_zodi_spectrum_jax(wavelengths)
+    expected = jnp.array([float(ayo_default_zodi_flux_jy(w)) for w in wavelengths])
+    assert jnp.allclose(spectrum, expected, rtol=1e-5)

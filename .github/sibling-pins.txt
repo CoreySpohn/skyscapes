@@ -2,3 +2,4 @@
 # commit whatever version bounds other packages declare (a breaking change waiting for its
 # release tag reports the old major version). Move a pin deliberately; drop it once PyPI covers it.
 exoverses @ git+https://github.com/CoreySpohn/exoverses@932d309a3b1bab0a32deb3eab7bdb8471c2aba69
+zodi @ git+https://github.com/CoreySpohn/zodi@afce5db3a8f955a85833236ed1f6e9c5a3e27cb6

@@ -1,125 +1,42 @@
 """Zodiacal light model based on Leinert et al. (1998).
 
-All functions are pure JAX and JIT-compatible.  Provides both position-dependent
-(Leinert Table 17) and wavelength-dependent (Table 19) zodiacal brightness.
-
-Migrated from orbix.observatory.zodiacal -- see that module's history for
-full references.
+All functions are pure JAX and JIT-compatible. The tables, interpolation and
+color conventions live in the ``zodi`` library; this module keeps the
+skyscapes function names and argument order as thin wrappers over it.
+Provides both position-dependent (Leinert Table 17) and wavelength-dependent
+(Table 19) zodiacal brightness.
 """
 
 from __future__ import annotations
 
-import interpax
 import jax.numpy as jnp
-from hwoutils.constants import c
-from hwoutils.conversions import flux_jy_to_mag, mag_to_flux_jy
+import zodi
+from hwoutils.conversions import mag_to_flux_jy
+from zodi import tables
 
 # =============================================================================
 # Constants
 # =============================================================================
 
 # AYO default: 22 mag/arcsec^2 at V-band (ETC calibration paper, 135 deg solar lon)
-AYO_DEFAULT_ZODI_MAG_V = 22.0
-V_BAND_WAVELENGTH_NM = 550.0
+AYO_DEFAULT_ZODI_MAG_V = zodi.AYO_DEFAULT_ZODI_MAG_V
+V_BAND_WAVELENGTH_NM = zodi.V_BAND_WAVELENGTH_NM
 
 # =============================================================================
-# Leinert et al. (1998) tables
+# Leinert et al. (1998) tables, as JAX arrays
 # =============================================================================
 
-# Table 17: Zodiacal brightness in S10 units
-# Rows: solar longitude, Columns: ecliptic latitude
-LEINERT_BETA_DEG = jnp.array([0.0, 5, 10, 15, 20, 25, 30, 45, 60, 75, 90])
-LEINERT_SOLAR_LON_DEG = jnp.array(
-    [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180]
+# Table 17 in S10 units; rows are solar longitude, columns ecliptic latitude.
+# Near-Sun exclusion cells carry the sentinel -1 here (nan in ``zodi.tables``).
+LEINERT_BETA_DEG = jnp.asarray(tables.BETA_GRID_DEG)
+LEINERT_SOLAR_LON_DEG = jnp.asarray(tables.LON_GRID_DEG)
+LEINERT_TABLE17 = jnp.where(
+    jnp.isnan(jnp.asarray(tables.TABLE17_RAW)), -1.0, jnp.asarray(tables.TABLE17_RAW)
 )
 
-LEINERT_TABLE17 = jnp.array(
-    [
-        [-1, -1, -1, 3140, 1610, 985, 640, 275, 150, 100, 77],
-        [-1, -1, -1, 2940, 1540, 945, 625, 271, 150, 100, 77],
-        [-1, -1, 4740, 2470, 1370, 865, 590, 264, 148, 100, 77],
-        [11500, 6780, 3440, 1860, 1110, 755, 525, 251, 146, 100, 77],
-        [6400, 4480, 2410, 1410, 910, 635, 454, 237, 141, 99, 77],
-        [3840, 2830, 1730, 1100, 749, 545, 410, 223, 136, 97, 77],
-        [2480, 1870, 1220, 845, 615, 467, 365, 207, 131, 95, 77],
-        [1650, 1270, 910, 680, 510, 397, 320, 193, 125, 93, 77],
-        [1180, 940, 700, 530, 416, 338, 282, 179, 120, 92, 77],
-        [910, 730, 555, 442, 356, 292, 250, 166, 116, 90, 77],
-        [505, 442, 352, 292, 243, 209, 183, 134, 104, 86, 77],
-        [338, 317, 269, 227, 196, 172, 151, 116, 93, 82, 77],
-        [259, 251, 225, 193, 166, 147, 132, 104, 86, 79, 77],
-        [212, 210, 197, 170, 150, 133, 119, 96, 82, 77, 77],
-        [188, 186, 177, 154, 138, 125, 113, 90, 77, 74, 77],
-        [179, 178, 166, 147, 134, 122, 110, 90, 77, 73, 77],
-        [179, 178, 165, 148, 137, 127, 116, 96, 79, 72, 77],
-        [196, 192, 179, 165, 151, 141, 131, 104, 82, 72, 77],
-        [230, 212, 195, 178, 163, 148, 134, 105, 83, 72, 77],
-    ],
-)
-
-# Table 19: Wavelength dependence (spectral radiance at 90 deg solar elongation)
-LEINERT_WAVELENGTH_UM = jnp.array(
-    [0.2, 0.3, 0.4, 0.5, 0.7, 0.9, 1.0, 1.2, 2.2, 3.5, 4.8, 12, 25, 60, 100, 140]
-)
-
-LEINERT_B_LAMBDA = jnp.array(
-    [
-        2.5e-8,
-        5.3e-7,
-        2.2e-6,
-        2.6e-6,
-        2.0e-6,
-        1.3e-6,
-        1.2e-6,
-        8.1e-7,
-        1.7e-7,
-        5.2e-8,
-        1.2e-7,
-        7.5e-7,
-        3.2e-7,
-        1.8e-8,
-        3.2e-9,
-        6.9e-10,
-    ]
-)
-
-_LOG_WAVELENGTH_UM = jnp.log10(LEINERT_WAVELENGTH_UM)
-_LOG_B_LAMBDA = jnp.log10(LEINERT_B_LAMBDA)
-
-
-def _clamped_log10_um(wavelength_nm):
-    """Log10(wavelength in um), clamped to the tabulated Table 19 range.
-
-    interpax.interp1d defaults to extrap=False (NaN outside the knot range);
-    clamping the query wavelength to the table's domain before interpolating
-    means a wavelength outside Table 19's 0.2-140 um span resolves to the
-    nearest tabulated edge value instead of NaN.
-    """
-    log_um = jnp.log10(wavelength_nm / 1000.0)
-    return jnp.clip(log_um, _LOG_WAVELENGTH_UM[0], _LOG_WAVELENGTH_UM[-1])
-
-
-def _fill_sentinels(table):
-    """Fill near-Sun exclusion cells with the nearest valid value.
-
-    Sentinel cells (-1) are filled along the elongation axis so lookups
-    clamp instead of returning NaN.
-    """
-    import numpy as np
-
-    t = np.asarray(table, dtype=float)
-    for row in t:
-        valid = np.where(row > 0)[0]
-        for j in np.where(row <= 0)[0]:
-            row[j] = row[valid[np.argmin(np.abs(valid - j))]]
-    return jnp.asarray(t)
-
-
-_LEINERT_TABLE17_FILLED = _fill_sentinels(LEINERT_TABLE17)
-
-_REF_IDX = jnp.argmin(jnp.abs(LEINERT_SOLAR_LON_DEG - 90.0))
-_REFERENCE_VALUE = LEINERT_TABLE17[_REF_IDX, 0]
-_NORMALIZED_TABLE17 = _LEINERT_TABLE17_FILLED / _REFERENCE_VALUE
+# Table 19: spectral radiance at 90 deg solar elongation (W m-2 sr-1 um-1).
+LEINERT_WAVELENGTH_UM = jnp.asarray(tables.TABLE19_WAVELENGTH_UM)
+LEINERT_B_LAMBDA = jnp.asarray(tables.TABLE19_RADIANCE_W_M2_SR_UM)
 
 
 # =============================================================================
@@ -134,6 +51,10 @@ def zodi_color_correction(
 ) -> float:
     """Wavelength-dependent color correction from Leinert Table 19.
 
+    This is the ratio of spectral radiance per unit wavelength (or per
+    photon, with ``photon_units``). It is not an AB (per unit frequency)
+    ratio; see :func:`zodi.ab_color_correction` for that.
+
     Args:
         wavelength_nm: Target wavelength in nm.
         reference_wavelength_nm: Reference wavelength in nm.
@@ -142,19 +63,9 @@ def zodi_color_correction(
     Returns:
         Flux ratio (target / reference).
     """
-    target_log = interpax.interp1d(
-        _clamped_log10_um(wavelength_nm),
-        _LOG_WAVELENGTH_UM,
-        _LOG_B_LAMBDA,
-        method="linear",
-    )
-    ref_log = interpax.interp1d(
-        _clamped_log10_um(reference_wavelength_nm),
-        _LOG_WAVELENGTH_UM,
-        _LOG_B_LAMBDA,
-        method="linear",
-    )
-    power_correction = 10.0 ** (target_log - ref_log)
+    wavelength_nm = jnp.asarray(wavelength_nm)
+    reference_wavelength_nm = jnp.asarray(reference_wavelength_nm)
+    power_correction = zodi.color_correction(wavelength_nm, reference_wavelength_nm)
     photon_factor = jnp.where(
         photon_units,
         wavelength_nm / reference_wavelength_nm,
@@ -181,15 +92,9 @@ def leinert_zodi_factor(
     Returns:
         Dimensionless brightness factor.
     """
-    factor = interpax.interp2d(
-        solar_lon_deg,
-        jnp.abs(ecliptic_lat_deg),
-        LEINERT_SOLAR_LON_DEG,
-        LEINERT_BETA_DEG,
-        _NORMALIZED_TABLE17,
-        method="linear",
+    return zodi.position_factor(
+        jnp.asarray(solar_lon_deg), jnp.asarray(ecliptic_lat_deg)
     )
-    return factor
 
 
 def leinert_zodi_spectral_radiance(
@@ -207,15 +112,12 @@ def leinert_zodi_spectral_radiance(
     Returns:
         Spectral radiance in W/(m^2 sr um).
     """
-    log_radiance = interpax.interp1d(
-        _clamped_log10_um(wavelength_nm),
-        _LOG_WAVELENGTH_UM,
-        _LOG_B_LAMBDA,
-        method="linear",
+    return zodi.specific_intensity(
+        jnp.asarray(solar_lon_deg),
+        jnp.asarray(ecliptic_lat_deg),
+        jnp.asarray(wavelength_nm),
+        anchor="table19",
     )
-    base_radiance = 10.0**log_radiance
-    position_factor = leinert_zodi_factor(ecliptic_lat_deg, solar_lon_deg)
-    return base_radiance * position_factor
 
 
 def leinert_zodi_mag(
@@ -231,22 +133,21 @@ def leinert_zodi_mag(
         solar_lon_deg: Solar longitude in degrees.
 
     Returns:
-        Surface brightness in mag/arcsec^2.
+        Surface brightness in mag/arcsec^2 (AB).
     """
-    radiance = leinert_zodi_spectral_radiance(
-        wavelength_nm, ecliptic_lat_deg, solar_lon_deg
+    return zodi.surface_brightness_ab_mag(
+        jnp.asarray(solar_lon_deg),
+        jnp.asarray(ecliptic_lat_deg),
+        jnp.asarray(wavelength_nm),
+        anchor="table19",
     )
-    arcsec2_per_sr = (180.0 / jnp.pi * 3600.0) ** 2
-    radiance_per_arcsec2 = radiance / arcsec2_per_sr
-    wavelength_um = wavelength_nm / 1000.0
-    c_um_per_s = c * 1e6  # m/s -> um/s
-    flux_per_hz = radiance_per_arcsec2 * (wavelength_um**2) / c_um_per_s
-    flux_jy = flux_per_hz * 1e26
-    return flux_jy_to_mag(flux_jy)
 
 
 def ayo_default_zodi_mag(wavelength_nm: float) -> float:
     """AYO-default zodiacal brightness: 22 mag/arcsec^2 at V with color correction.
+
+    The color is the Leinert Table 19 ratio applied in AB (per unit
+    frequency), the same color as :func:`leinert_zodi_mag`.
 
     Args:
         wavelength_nm: Observation wavelength in nm.
@@ -254,12 +155,7 @@ def ayo_default_zodi_mag(wavelength_nm: float) -> float:
     Returns:
         Surface brightness in mag/arcsec^2.
     """
-    color_correction = zodi_color_correction(
-        wavelength_nm,
-        V_BAND_WAVELENGTH_NM,
-        photon_units=False,
-    )
-    return AYO_DEFAULT_ZODI_MAG_V - 2.5 * jnp.log10(color_correction)
+    return zodi.ayo_default_ab_mag(jnp.asarray(wavelength_nm))
 
 
 def ayo_default_zodi_flux_jy(wavelength_nm: float) -> float:
@@ -296,20 +192,6 @@ def create_zodi_spectrum_jax(
     """
     if reference_flux_jy is None:
         reference_flux_jy = mag_to_flux_jy(AYO_DEFAULT_ZODI_MAG_V)
-
-    target_log = interpax.interp1d(
-        _clamped_log10_um(wavelengths_nm),
-        _LOG_WAVELENGTH_UM,
-        _LOG_B_LAMBDA,
-        method="linear",
+    return reference_flux_jy * zodi.ab_color_correction(
+        jnp.asarray(wavelengths_nm), jnp.asarray(reference_wavelength_nm)
     )
-    ref_log = interpax.interp1d(
-        _clamped_log10_um(reference_wavelength_nm),
-        _LOG_WAVELENGTH_UM,
-        _LOG_B_LAMBDA,
-        method="linear",
-    )
-
-    power_corrections = 10.0 ** (target_log - ref_log)
-    jy_corrections = power_corrections * (wavelengths_nm / reference_wavelength_nm) ** 2
-    return reference_flux_jy * jy_corrections
