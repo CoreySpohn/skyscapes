@@ -96,8 +96,8 @@ def test_planet_contrast_wavelength_agnostic_for_lambertian():
     star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     p = _single_planet()
     time_jd = jnp.array([0.0])
-    c_blue = p.contrast(SOLVER, jnp.array([400.0]), time_jd, star=star)
-    c_red = p.contrast(SOLVER, jnp.array([800.0]), time_jd, star=star)
+    c_blue = p.contrast(SOLVER, jnp.array(400.0), time_jd, star=star)
+    c_red = p.contrast(SOLVER, jnp.array(800.0), time_jd, star=star)
     assert jnp.allclose(c_blue, c_red, rtol=1e-6)
 
 
@@ -106,7 +106,7 @@ def test_planet_spec_flux_density_equals_contrast_times_star():
     star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     p = _single_planet()
     time_jd = jnp.array([0.0])
-    wl = jnp.array([600.0])
+    wl = jnp.array(600.0)
     c = p.contrast(SOLVER, wl, time_jd, star=star)
     f = p.spec_flux_density(SOLVER, wl, time_jd, star=star)
     assert jnp.allclose(f, c * 1e9, rtol=1e-6)

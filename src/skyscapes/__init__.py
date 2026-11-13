@@ -10,6 +10,9 @@ Public API:
 - :mod:`skyscapes.background` -- field-of-view background sources (zodi, ...).
 - :mod:`skyscapes.io` -- data loaders (e.g. ExoVista FITS).
 - :mod:`skyscapes.habitable_zone` -- habitable-zone edges for a host star.
+- :mod:`skyscapes.population` -- planet occurrence tables and population draws.
+- :mod:`skyscapes.datasets` -- cached reference and example data.
+- :mod:`skyscapes.viz` -- optional plotting with lazily loaded dependencies.
 
 For convenience, ``Scene``, ``System``, and ``from_exovista`` are hoisted to
 the top level, so common flows can write
@@ -26,7 +29,17 @@ try:
 except ImportError:
     __version__ = "unknown"
 
-from . import background, disk, habitable_zone, io, physical_model, scene
+from . import (
+    background,
+    datasets,
+    disk,
+    habitable_zone,
+    io,
+    physical_model,
+    population,
+    scene,
+    viz,
+)
 from .io import from_exovista
 from .scene import Scene, System
 
@@ -35,10 +48,13 @@ __all__ = [
     "System",
     "__version__",
     "background",
+    "datasets",
     "disk",
     "from_exovista",
     "habitable_zone",
     "io",
     "physical_model",
+    "population",
     "scene",
+    "viz",
 ]

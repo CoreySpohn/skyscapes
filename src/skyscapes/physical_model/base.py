@@ -42,7 +42,8 @@ class AbstractPhysicalModel(eqx.Module):
             phase_angle_rad: Star-planet-observer phase angle ``beta``,
                 shape ``(K, T)`` (matching ``AbstractOrbit.propagate``).
             dist_AU: Star-planet distance, shape ``(K, T)``.
-            wavelength_nm: Wavelength, scalar or shape ``(W,)``.
+            wavelength_nm: Scalar wavelength [nm]. Use ``System.contrast_cube``
+                to evaluate an array of wavelengths.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``,
                 supplied by the host ``Planet``.
 
@@ -71,7 +72,7 @@ class AbstractPhysicalModel(eqx.Module):
         Args:
             phase_angle_rad: Phase angle [rad], shape ``(K, T)``.
             dist_AU: Star-planet distance [AU], shape ``(K, T)``.
-            wavelength_nm: Wavelength [nm], as accepted by ``contrast``.
+            wavelength_nm: Scalar wavelength [nm], as accepted by ``contrast``.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
             time_jd: Observation Julian Dates, shape ``(T,)``.
             star: The host ``AbstractStar``; ``Planet`` always supplies it.

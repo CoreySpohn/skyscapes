@@ -64,7 +64,9 @@ class System(eqx.Module):
         return jnp.concatenate(per_planet, axis=1)
 
     def contrasts(self, wavelength_nm: Array, time_jd: Array) -> Array:
-        """Per-planet contrast, shape ``(K_total, T)``."""
+        """Per-planet contrast at a scalar wavelength [nm], shape ``(K_total, T)``."""
+        if jnp.ndim(wavelength_nm) != 0:
+            raise ValueError("wavelength_nm must be scalar; use contrast_cube")
         per_planet = [
             p.contrast(self.trig_solver, wavelength_nm, time_jd, star=self.star)
             for p in self.planets
@@ -144,10 +146,17 @@ class System(eqx.Module):
         ]
         return jnp.concatenate(per_planet, axis=0)
 
-    def alpha_dMag(self, time_jd: Array) -> tuple[Array, Array]:
-        """Per-planet projected separation + dMag, each shape ``(K_total, T)``."""
+    def alpha_dMag(
+        self, time_jd: Array, *, wavelength_nm: float = 600.0
+    ) -> tuple[Array, Array]:
+        """Per-planet separation + dMag at wavelength_nm (default 600 nm).
+
+        Each result has shape ``(K_total, T)``; wavelength_nm is scalar.
+        """
         per_planet = [
-            p.alpha_dMag(self.trig_solver, time_jd, star=self.star)
+            p.alpha_dMag(
+                self.trig_solver, time_jd, star=self.star, wavelength_nm=wavelength_nm
+            )
             for p in self.planets
         ]
         alpha = jnp.concatenate([a for a, _ in per_planet], axis=0)

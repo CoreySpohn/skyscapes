@@ -15,9 +15,8 @@ Use cases:
 Not for HMC retrievals where parameters vary -- the underlying
 expensive model is the right tool there.
 
-The cache file format is a NumPy ``.npz`` with two keyword arrays
-(``reflectivity``, ``nu_grid``) and a small JSON-style header tag for
-version-tracking.
+The cache file format is a NumPy ``.npz`` containing ``reflectivity``,
+``nu_grid``, and an integer ``cache_format_version`` array checked on load.
 """
 
 from __future__ import annotations

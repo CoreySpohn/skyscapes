@@ -1,11 +1,10 @@
 """Blackbody thermal emission: a planet that shines by its own temperature."""
 
-from math import pi, sqrt
-
 import jax.numpy as jnp
-from hwoutils.constants import Rearth2m, c, h, k_B, nm2m, nm2um, pc2m, um2m
+from hwoutils.constants import Rearth2m, c, h, k_B, nm2um, um2m
 from jaxtyping import Array
 
+from .._planck import _planck_photon_flux
 from .._repr import fmt_scalar_or_array
 from .base import AbstractPhysicalModel
 
@@ -38,13 +37,9 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
         Returns:
             Flux density, shape ``(K,)``.
         """
-        wavelength_um = jnp.asarray(wavelength_nm) * nm2um
-        exponent = (h * c / (k_B * um2m)) / (wavelength_um * self.teff_K)
-        # Fold radiance, dilution and per-nm conversion into one moderate scale.
-        # Separate huge/tiny factors lose float32 second derivatives under JIT.
-        amplitude = sqrt(2.0 * pi * c * nm2m) * Rearth2m / (um2m**2 * pc2m)
-        scale = (amplitude * Rp_Rearth / dist_pc) ** 2
-        return scale / (wavelength_um**4 * jnp.expm1(exponent))
+        return _planck_photon_flux(
+            wavelength_nm, self.teff_K, Rp_Rearth, dist_pc, radius_unit_m=Rearth2m
+        )
 
     def contrast(
         self,

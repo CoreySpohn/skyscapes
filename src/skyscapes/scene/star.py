@@ -3,9 +3,9 @@
 ``AbstractStar`` declares ``Ms_kg``, ``dist_pc``, ``diameter_arcsec``, and the
 ``spec_flux_density`` hook. ``FlatStar`` is a flat-spectrum stand-in
 useful for ETC runs. ``BlackbodyStar`` supplies a diluted Planck spectrum.
-``Star`` wraps an ``interpax.Interpolator2D``
-over (wavelength, time) built from Jansky flux data, matching the legacy
-``skyscapes._legacy.Star`` semantics.
+``Star`` converts Jansky flux data to photons and interpolates over
+wavelength alone for a single epoch, or (wavelength, time) for multiple
+epochs, with optional surface metadata.
 
 Note: ``from __future__ import annotations`` is deliberately NOT used
 here -- it stringifies annotations, which breaks Equinox's metaclass
@@ -13,7 +13,6 @@ handling of ``AbstractVar`` type parameters.
 """
 
 from abc import abstractmethod
-from math import pi, sqrt
 from typing import Literal
 
 import equinox as eqx
@@ -21,11 +20,12 @@ import interpax
 import jax
 import jax.numpy as jnp
 from equinox import AbstractVar
-from hwoutils.constants import Msun2kg, c, h, k_B, nm2m, nm2um, pc2m, rad2arcsec, um2m
+from hwoutils.constants import Msun2kg, pc2m, rad2arcsec
 from hwoutils.conversions import jy_to_photons_per_nm_per_m2
 from jaxtyping import Array
 from numpy.polynomial.legendre import leggauss
 
+from .._planck import _planck_photon_flux
 from .spots import StarSpots
 
 
@@ -160,12 +160,9 @@ class BlackbodyStar(AbstractStar):
         The result has wavelength_nm's shape. ``time_jd`` is part of
         the AbstractStar interface but ignored here.
         """
-        wavelength_um = jnp.asarray(wavelength_nm) * nm2um
-        exponent = (h * c / (k_B * um2m)) / (wavelength_um * self.teff_K)
-        # Combine radiance and dilution before squaring to preserve float32 HVPs.
-        amplitude = sqrt(2.0 * pi * c * nm2m) / (um2m**2 * pc2m)
-        scale = (amplitude * self.radius_m / self.dist_pc) ** 2
-        return scale / (wavelength_um**4 * jnp.expm1(exponent))
+        return _planck_photon_flux(
+            wavelength_nm, self.teff_K, self.radius_m, self.dist_pc
+        )
 
     def __repr__(self) -> str:
         """Compact one-line summary of mass, distance, temperature, and radius."""

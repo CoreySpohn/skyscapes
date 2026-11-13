@@ -160,7 +160,12 @@ class Planet(eqx.Module):
         *,
         star: AbstractStar,
     ) -> Array:
-        """Planet-to-star contrast at (wavelength, time), shape ``(K, T)``."""
+        """Planet-to-star contrast at a scalar wavelength [nm], shape ``(K, T)``.
+
+        Use ``System.contrast_cube`` for an array of wavelengths.
+        """
+        if jnp.ndim(wavelength_nm) != 0:
+            raise ValueError("wavelength_nm must be scalar; use System.contrast_cube")
         _, phase_angle_rad, dist_AU = self.propagate(trig_solver, time_jd, star=star)
         return self.physical_model.contrast_at_time(
             phase_angle_rad=phase_angle_rad,

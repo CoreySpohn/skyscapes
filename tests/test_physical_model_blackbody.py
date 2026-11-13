@@ -107,6 +107,17 @@ def test_system_contrast_cube_stacks_wavelengths():
     assert cube.shape == (3, 1, 2)
     for k in range(3):
         assert jnp.allclose(cube[k], system.contrasts(wl[k], T_JD), rtol=1e-6, atol=0.0)
+        alpha, dmag = system.alpha_dMag(T_JD, wavelength_nm=wl[k])
+        np.testing.assert_allclose(dmag, -2.5 * jnp.log10(cube[k]), rtol=1e-12)
+        np.testing.assert_allclose(
+            alpha, jnp.linalg.norm(system.positions(T_JD), axis=0), rtol=1e-12
+        )
+    for default, explicit in zip(
+        system.alpha_dMag(T_JD),
+        system.alpha_dMag(T_JD, wavelength_nm=600.0),
+        strict=True,
+    ):
+        np.testing.assert_array_equal(default, explicit)
     assert cube[2, 0, 0] > cube[0, 0, 0]  # a cool planet is redder than a hot star
 
 

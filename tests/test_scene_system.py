@@ -75,7 +75,7 @@ def test_system_contrasts_stacks_planets():
     p1 = _make_planet(1.0, 0.3, 1.0)
     p2 = _make_planet(5.0, 0.5, 2.0)
     sys_obj = System(star=star, planets=(p1, p2), disk=None, trig_solver=SOLVER)
-    c = sys_obj.contrasts(jnp.array([600.0]), jnp.array([0.0]))
+    c = sys_obj.contrasts(jnp.array(600.0), jnp.array([0.0]))
     assert c.shape == (2, 1)
     assert jnp.all(c >= 0.0)
 
@@ -86,10 +86,30 @@ def test_system_spec_flux_density_per_planet():
     p1 = _make_planet(1.0, 0.3, 1.0)
     p2 = _make_planet(5.0, 0.5, 2.0)
     sys_obj = System(star=star, planets=(p1, p2), disk=None, trig_solver=SOLVER)
-    f = sys_obj.planet_flux_densities(jnp.array([600.0]), jnp.array([0.0]))
+    f = sys_obj.planet_flux_densities(jnp.array(600.0), jnp.array([0.0]))
     assert f.shape == (2, 1)
-    c = sys_obj.contrasts(jnp.array([600.0]), jnp.array([0.0]))
+    c = sys_obj.contrasts(jnp.array(600.0), jnp.array([0.0]))
     assert jnp.allclose(f, c * 1e9, rtol=1e-6)
+
+
+@pytest.mark.parametrize("target", ["planet", "system"])
+@pytest.mark.parametrize("wavelength", [[600.0], [500.0, 600.0], [[600.0]]])
+@pytest.mark.parametrize("traced", [False, True])
+def test_contrast_rejects_wavelength_arrays(target, wavelength, traced):
+    """Reject nonscalar wavelengths eagerly and at JIT trace time."""
+    star = FlatStar(Msun2kg, 10.0, 1e9)
+    planet = _make_planet(1.0, 0.3, 1.0)
+    system = System(star, (planet,), SOLVER)
+    times = jnp.array([0.0, 100.0])
+
+    def evaluate(wavelength_nm):
+        if target == "planet":
+            return planet.contrast(SOLVER, wavelength_nm, times, star=star)
+        return system.contrasts(wavelength_nm, times)
+
+    evaluate = jax.jit(evaluate) if traced else evaluate
+    with pytest.raises(ValueError, match=r"scalar.*contrast_cube"):
+        evaluate(jnp.asarray(wavelength))
 
 
 @pytest.mark.parametrize("tabulated", [False, True])
