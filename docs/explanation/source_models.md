@@ -127,6 +127,9 @@ default; stars imported with `from_exovista` use linear interpolation
 samples. Multi-epoch tables return NaN outside their time range.
 A single-epoch table is static at any
 time, while the wavelength range remains bounded.
+`Star.wavelengths_nm` exposes the tabulated wavelength grid in nm without
+copying it. `Star.wavelength_range_nm` returns its minimum and maximum
+as a tuple of Python floats. Both properties are read-only.
 
 ### Imported starspots and metadata
 

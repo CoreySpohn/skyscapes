@@ -219,3 +219,22 @@ def test_spectrum_star_isinstance():
         flux_density_jy=jnp.zeros((wl.size, t.size)),
     )
     assert isinstance(s, AbstractStar)
+
+
+@pytest.mark.parametrize("n_epochs", [1, 5])
+def test_spectrum_star_wavelength_coverage(n_epochs):
+    """Fails if either epoch path loses the grid or returns non-float bounds."""
+    wl = jnp.linspace(500.0, 1000.0, 7)
+    t = jnp.linspace(0.0, 10.0, n_epochs)
+    s = Star(
+        Ms_kg=1.989e30,
+        dist_pc=10.0,
+        wavelengths_nm=wl,
+        times_jd=t,
+        flux_density_jy=jnp.ones((wl.size, t.size)),
+    )
+    assert s.wavelengths_nm is wl
+    assert jnp.array_equal(s.wavelengths_nm, wl)
+    bounds = s.wavelength_range_nm
+    assert bounds == (500.0, 1000.0)
+    assert all(isinstance(bound, float) for bound in bounds)

@@ -214,6 +214,19 @@ class Star(AbstractStar):
                 method=interpolation_method,
             )
 
+    @property
+    def wavelengths_nm(self) -> Array:
+        """Tabulated wavelength grid in nm, returned without copying."""
+        return self._wavelengths_nm
+
+    @property
+    def wavelength_range_nm(self) -> tuple[float, float]:
+        """Minimum and maximum tabulated wavelengths in nm as Python floats."""
+        return (
+            float(jnp.min(self._wavelengths_nm)),
+            float(jnp.max(self._wavelengths_nm)),
+        )
+
     def spec_flux_density(
         self,
         wavelength_nm: Array,
