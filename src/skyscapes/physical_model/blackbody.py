@@ -1,7 +1,9 @@
 """Blackbody thermal emission: a planet that shines by its own temperature."""
 
+from math import pi, sqrt
+
 import jax.numpy as jnp
-from hwoutils.constants import Rearth2m, c, h, k_B, nm2m, pc2m
+from hwoutils.constants import Rearth2m, c, h, k_B, nm2m, nm2um, pc2m, um2m
 from jaxtyping import Array
 
 from .._repr import fmt_scalar_or_array
@@ -36,13 +38,13 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
         Returns:
             Flux density, shape ``(K,)``.
         """
-        # Grouped so no intermediate (or its square, in a derivative) leaves the
-        # single-precision range: h c / k is 0.014 m K, 1 / lambda about 1e6 per m.
-        inverse_m = 1.0 / (jnp.asarray(wavelength_nm) * nm2m)
-        exponent = (h * c / k_B) * inverse_m / self.teff_K
-        photon_radiance = 2.0 * c * inverse_m**4 / jnp.expm1(exponent)
-        dilution = (Rp_Rearth * Rearth2m / (dist_pc * pc2m)) ** 2
-        return jnp.pi * photon_radiance * dilution * nm2m  # per m to per nm
+        wavelength_um = jnp.asarray(wavelength_nm) * nm2um
+        exponent = (h * c / (k_B * um2m)) / (wavelength_um * self.teff_K)
+        # Fold radiance, dilution and per-nm conversion into one moderate scale.
+        # Separate huge/tiny factors lose float32 second derivatives under JIT.
+        amplitude = sqrt(2.0 * pi * c * nm2m) * Rearth2m / (um2m**2 * pc2m)
+        scale = (amplitude * Rp_Rearth / dist_pc) ** 2
+        return scale / (wavelength_um**4 * jnp.expm1(exponent))
 
     def contrast(
         self,
@@ -80,10 +82,21 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
         Returns:
             Contrast, shape ``(K, T)``.
         """
+        # scene.Planet imports physical_model, so defer this circular dependency.
+        from ..scene.star import BlackbodyStar
+
         if star is None:
             raise ValueError("BlackbodyPhysicalModel needs the host star")
-        planet = self.spec_flux_density(wavelength_nm, Rp_Rearth, star.dist_pc)
-        ratio = planet[:, None] / star.spec_flux_density(wavelength_nm, time_jd)
+        if isinstance(star, BlackbodyStar):
+            wavelength_um = jnp.asarray(wavelength_nm) * nm2um
+            c2 = h * c / (k_B * um2m)
+            x_star = c2 / (wavelength_um * star.teff_K)
+            x_planet = c2 / (wavelength_um * self.teff_K)
+            area = (Rp_Rearth * Rearth2m / star.radius_m) ** 2
+            ratio = (area * jnp.expm1(x_star) / jnp.expm1(x_planet))[:, None]
+        else:
+            planet = self.spec_flux_density(wavelength_nm, Rp_Rearth, star.dist_pc)
+            ratio = planet[:, None] / star.spec_flux_density(wavelength_nm, time_jd)
         return ratio * jnp.ones_like(phase_angle_rad)
 
     def __repr__(self) -> str:

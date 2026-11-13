@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
 from hwoutils.constants import Msun2kg, Rearth2m, Rsun2m
 from orbix.kepler.shortcuts.grid import get_grid_solver
@@ -36,19 +37,31 @@ def _system(model, star=STAR, rp=15.7):
     return System(star=star, planets=(planet,), trig_solver=SOLVER)
 
 
-def test_contrast_matches_planck_ratio():
-    """Contrast = (Rp / Rs)^2 expm1(x / Ts) / expm1(x / Tp), x = h c / (lambda k)."""
-    model = BlackbodyPhysicalModel(teff_K=jnp.array([1560.0]))
-    wl = 4400.0
-    got = model.contrast_at_time(
-        *ARGS, jnp.asarray(wl), jnp.array([15.7]), time_jd=T_JD, star=STAR
-    )
-    x = H * C / (wl * 1e-9 * KB)
-    area = (15.7 * 6.3781e6 / (1.77 * 6.957e8)) ** 2
-    expected = area * jnp.expm1(x / 8840.0) / jnp.expm1(x / 1560.0)
-    assert got.shape == (1, 2)
-    # float32: relative round-off of the two Planck factors.
-    assert jnp.allclose(got, expected, rtol=2e-5, atol=0.0)
+@pytest.mark.parametrize(
+    "temperature, wavelength", [(1560.0, 4400.0), (150.0, 10000.0)]
+)
+@pytest.mark.parametrize("x64", [False, True])
+def test_contrast_matches_planck_ratio(temperature, wavelength, x64):
+    """Fails if the direct ratio or generic stellar-flux division changes units."""
+    with jax.enable_x64(x64):
+        model = BlackbodyPhysicalModel(teff_K=jnp.array([temperature]))
+        wl, rp = jnp.asarray(wavelength), jnp.array([15.7])
+        args = (jnp.zeros((1, 2)), jnp.ones((1, 2)))
+        times = jnp.array([0.0, 1.0])
+        got = model.contrast_at_time(*args, wl, rp, time_jd=times, star=STAR)
+        flat = FlatStar(
+            Ms_kg=STAR.Ms_kg,
+            dist_pc=STAR.dist_pc,
+            flux_phot_per_nm_m2=STAR.spec_flux_density(wl, times),
+        )
+        generic = model.contrast_at_time(*args, wl, rp, time_jd=times, star=flat)
+        x = H * C / (wavelength * 1e-9 * KB)
+        area = (15.7 * 6.3781e6 / (1.77 * 6.957e8)) ** 2
+        expected = area * jnp.expm1(x / 8840.0) / jnp.expm1(x / temperature)
+        assert got.shape == (1, 2)
+        rtol = 1e-12 if x64 else 1e-5
+        assert jnp.allclose(got, expected, rtol=rtol, atol=0.0)
+        assert jnp.allclose(got, generic, rtol=rtol, atol=0.0)
     assert Rearth2m == pytest.approx(6.3781e6, rel=1e-4)
     assert Rsun2m == pytest.approx(6.957e8, rel=1e-4)
 
@@ -120,24 +133,63 @@ def test_temperature_gradient_matches_finite_difference():
     assert jnp.allclose(auto, expected, rtol=1e-4, atol=0.0)
 
 
-def test_temperature_gradient_is_finite_in_single_precision():
-    """The same derivative in float32: ``lambda k T`` squared would underflow."""
+@pytest.mark.parametrize(
+    "temperature, wavelength", [(1560.0, 4400.0), (150.0, 10000.0)]
+)
+@pytest.mark.parametrize("quantity", ["log_contrast", "planet_flux", "star_flux"])
+def test_temperature_gradient_is_finite_in_single_precision(
+    temperature, wavelength, quantity
+):
+    """Fails if unbalanced Planck factors corrupt float32 gradients or HVPs."""
+
+    def reference(teff):
+        x = H * C / (wavelength * 1e-9 * KB)
+        if quantity == "log_contrast":
+            area = (15.7 * 6.3781e6 / STAR.radius_m) ** 2
+            return jnp.log(area * jnp.expm1(x / STAR.teff_K) / jnp.expm1(x / teff[0]))
+        radius = STAR.radius_m if quantity == "star_flux" else 15.7 * 6.3781e6
+        dilution = (radius / (STAR.dist_pc * 3.085677581491367e16)) ** 2
+        return (
+            2
+            * jnp.pi
+            * C
+            / (wavelength * 1e-9) ** 4
+            * dilution
+            * 1e-9
+            / jnp.expm1(x / teff[0])
+        )
+
+    with jax.enable_x64(True):
+        t64 = jnp.array([temperature], jnp.float64)
+        expected_value = reference(t64)
+        expected_grad, expected_hvp = jax.jvp(
+            jax.grad(reference), (t64,), (jnp.ones_like(t64),)
+        )
+
     with jax.enable_x64(False):
-        wl = jnp.asarray(4400.0, jnp.float32)
+        wl = jnp.asarray(wavelength, jnp.float32)
         args = (jnp.zeros((1, 2), jnp.float32), jnp.ones((1, 2), jnp.float32))
         t_jd = jnp.array([0.0, 1.0], jnp.float32)
         rp = jnp.array([15.7], jnp.float32)
 
-        def log_contrast(teff):
+        def observable(teff):
             model = BlackbodyPhysicalModel(teff_K=teff)
+            if quantity == "planet_flux":
+                return model.spec_flux_density(wl, rp, STAR.dist_pc)[0]
+            if quantity == "star_flux":
+                star = BlackbodyStar(STAR.Ms_kg, STAR.dist_pc, teff[0], STAR.radius_m)
+                return star.spec_flux_density(wl, t_jd)
             out = model.contrast_at_time(*args, wl, rp, time_jd=t_jd, star=STAR)
             return jnp.log(out)[0, 0]
 
-        t0 = jnp.array([1560.0], jnp.float32)
-        auto = jax.grad(log_contrast)(t0)[0]
-        curvature = jax.hessian(log_contrast)(t0)[0, 0]
-        assert auto.dtype == jnp.float32
-    x = H * C / (4400.0e-9 * KB)
-    expected = x / 1560.0**2 / (1.0 - jnp.exp(-x / 1560.0))
-    assert jnp.allclose(auto, expected, rtol=1e-4, atol=0.0)
-    assert jnp.isfinite(curvature) and curvature < 0.0
+        def derivatives(teff):
+            grad, hvp = jax.jvp(jax.grad(observable), (teff,), (jnp.ones_like(teff),))
+            return observable(teff), grad, hvp
+
+        t0 = jnp.array([temperature], jnp.float32)
+        for evaluate in (derivatives, jax.jit(derivatives)):
+            value, auto, curvature = evaluate(t0)
+            assert auto.dtype == curvature.dtype == jnp.float32
+            np.testing.assert_allclose(value, expected_value, rtol=1e-5, atol=0.0)
+            np.testing.assert_allclose(auto, expected_grad, rtol=1e-4, atol=0.0)
+            np.testing.assert_allclose(curvature, expected_hvp, rtol=1e-3, atol=0.0)
