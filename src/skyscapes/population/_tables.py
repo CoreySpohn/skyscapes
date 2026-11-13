@@ -54,14 +54,16 @@ def radius_to_mass(radius_Rearth):
 
     The Jovian branch is not monotonic; like the generator this returns the
     lower-mass branch, and it is only used for radius bin edges below 10 Earth radii.
+    Accepts NumPy or JAX input and returns the same kind.
     """
-    r = np.asarray(radius_Rearth, float)
+    xp = jnp if isinstance(radius_Rearth, jax.Array) else np
+    r = xp.asarray(radius_Rearth, float)
     mass = (r / 1.008) ** (1.0 / 0.279)
-    mass = np.where(
+    mass = xp.where(
         r > _R_AT_BREAK_1, (r / _R_AT_BREAK_1) ** (1.0 / 0.589) * _M_BREAK_1, mass
     )
     top = _R_AT_BREAK_1 * 131.6**0.589
-    return np.where(r > top, (r / _R_AT_BREAK_2) ** (1.0 / -0.044) * _M_BREAK_2, mass)
+    return xp.where(r > top, (r / _R_AT_BREAK_2) ** (1.0 / -0.044) * _M_BREAK_2, mass)
 
 
 def _read_gz_csv(name):
@@ -325,6 +327,8 @@ def load_occurrence_table():
 class PlanetTypes(eqx.Module):
     """Planet types, the ranges that select them and their albedo spectra.
 
+    The loader clips negative tabulated albedos to zero.
+
     Attributes:
         names: One name per type.
         radius_min_Rearth: ``[n_types]`` lower radius edge; for exoEarth-candidate
@@ -332,7 +336,8 @@ class PlanetTypes(eqx.Module):
         radius_max_Rearth: ``[n_types]`` upper radius edge.
         a_min_AU: ``[n_types]`` lower edge of the scaled semi-major axis.
         a_max_AU: ``[n_types]`` upper edge of the scaled semi-major axis.
-        weight: ``[n_types]`` selection weight among the types that fit a planet.
+        weight: ``[n_types]`` conditional selection weight among types eligible
+            at a planet's radius and separation, not a marginal frequency.
         earth_candidate: ``bool[n_types]`` whether the type is an exoEarth candidate.
         wavelength_nm: ``[n_wavelengths]`` common wavelength grid of the spectra.
         albedo: ``[n_types, n_wavelengths]`` geometric albedo spectra.
@@ -357,7 +362,7 @@ class PlanetTypes(eqx.Module):
 
 
 def load_planet_types():
-    """The planet types of the ExoVista albedo list with their albedo spectra."""
+    """Load ExoVista planet types, clipping negative tabulated albedos to zero."""
     rows = list(csv.reader(io.StringIO(_read_text("albedo_list.csv"))))
     rows = [[field.strip() for field in row] for row in rows[1:] if row]
     names = tuple(row[0] for row in rows)
@@ -379,5 +384,5 @@ def load_planet_types():
         weight=column(5),
         earth_candidate=jnp.asarray([row[6] == "True" for row in rows]),
         wavelength_nm=jnp.asarray(spectra["wavelength_nm"]),
-        albedo=jnp.asarray(spectra["albedo"]),
+        albedo=jnp.asarray(np.maximum(spectra["albedo"], 0.0)),
     )

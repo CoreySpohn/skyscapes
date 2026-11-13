@@ -160,6 +160,7 @@ def test_planet_types_cover_every_drawn_planet_and_albedo_is_tabulated(tables, w
     at 1000 nm is 0.108) or a planet falls outside every type range.
     """
     _, types = tables
+    assert np.all(np.asarray(types.albedo) >= 0.0)
     index = np.asarray(world.type_index)[np.asarray(world.present)]
     assert index.min() >= 0 and index.max() < len(types.names)
     jupiter = types.names.index("Jupiter")
@@ -180,3 +181,8 @@ def test_occurrence_grid_total_and_mass_radius_inverse(tables):
     np.testing.assert_allclose(
         mass_to_radius(radius_to_mass(radius)), radius, rtol=1e-9
     )
+    radius_jax = jnp.asarray(radius)
+    mass_jax = jax.jit(jax.vmap(radius_to_mass))(radius_jax)
+    assert isinstance(radius_to_mass(radius_jax), jax.Array)
+    np.testing.assert_allclose(mass_jax, radius_to_mass(radius), rtol=1e-12)
+    np.testing.assert_allclose(jax.jit(mass_to_radius)(mass_jax), radius, rtol=1e-9)
