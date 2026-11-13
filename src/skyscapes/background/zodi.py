@@ -175,6 +175,10 @@ class LeinertZodi(eqx.Module):
     ) -> float:
         """Return surface brightness in ph/s/m^2/nm per arcsec^2.
 
+        Leinert et al. (1998), A&AS 127, 1, Table 19 gives energy radiance
+        per wavelength. Its color ratio needs (lambda/lambda_ref)**2 to
+        scale Jy, then division by h * lambda to obtain photons per nm.
+
         Args:
             wavelength_nm: Scalar wavelength in nm.
             time_jd: Scalar time in Julian days (ignored).
@@ -186,7 +190,7 @@ class LeinertZodi(eqx.Module):
         )
         flux_jy_ref = mag_to_flux_jy(position_mag)
         color_correction = zodi_color_correction(
-            wavelength_nm, self._reference_wavelength_nm, photon_units=True
+            wavelength_nm, self._reference_wavelength_nm, photon_units=False
         )
         flux_jy = (
             flux_jy_ref

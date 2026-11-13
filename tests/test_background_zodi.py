@@ -1,6 +1,7 @@
 """Tests for zodiacal light background sources in skyscapes.background."""
 
 import jax.numpy as jnp
+import numpy as np
 import pytest
 
 from skyscapes.background import (
@@ -277,6 +278,21 @@ class TestZodiSourcePhotonFlux:
 
 class TestZodiSourceComparison:
     """Cross-model comparison tests."""
+
+    def test_ayo_leinert_spectral_shape(self):
+        """Shared Table 19 colors give a wavelength-independent flux ratio.
+
+        Evaluate AYO at its grid knots to exclude interpolation error;
+        rtol=1e-12 allows float64 rounding in the equivalent conversions.
+        """
+        wavelengths = jnp.linspace(400.0, 1800.0, 29)
+        ayo = AYOZodi(wavelengths)
+        leinert = LeinertZodi()
+        position = {"ecliptic_lat_deg": 0.0, "solar_lon_deg": 135.0}
+        ratio = leinert.spec_flux_density(wavelengths, 0.0, **position) / (
+            ayo.spec_flux_density(wavelengths, 0.0, **position)
+        )
+        np.testing.assert_allclose(ratio, ratio[0], rtol=1e-12, atol=0.0)
 
     def test_ayo_leinert_similar_at_default_position(self):
         """AYO and Leinert should give similar results at ~135 deg solar lon."""
