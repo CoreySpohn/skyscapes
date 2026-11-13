@@ -8,10 +8,10 @@ import pytest
 
 from skyscapes.datasets import (
     PIKACHU,
-    fetch_ck04,
+    fetch_castelli_kurucz,
     fetch_phoenix,
     fetch_scene,
-    list_ck04,
+    list_castelli_kurucz,
     list_phoenix,
 )
 
@@ -27,7 +27,7 @@ def test_fetch_scene_returns_existing_fits():
     "list_nodes, fetch_node, prefix, first, last",
     [
         (list_phoenix, fetch_phoenix, "phoenixm00", 2000, 12000),
-        (list_ck04, fetch_ck04, "ckp00", 3500, 50000),
+        (list_castelli_kurucz, fetch_castelli_kurucz, "ckp00", 3500, 50000),
     ],
 )
 def test_phoenix_registry_is_complete_and_hashed(

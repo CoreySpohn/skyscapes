@@ -120,7 +120,9 @@ def phoenix_surface_flux(
     if mh != 0.0:
         raise ValueError("Only solar metallicity ([M/H] = 0) is registered.")
     if teff_k > PHOENIX_TEFF_K[-1]:
-        raise ValueError("PHOENIX ends at 12000 K; use from_ck04 for hotter stars.")
+        raise ValueError(
+            "PHOENIX ends at 12000 K; use from_castelli_kurucz for hotter stars."
+        )
     return _surface_flux(teff_k, logg, PHOENIX_TEFF_K, fetch)
 
 

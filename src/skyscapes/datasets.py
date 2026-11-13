@@ -189,7 +189,7 @@ _CK04_HASHES = {
     49000: "sha256:9ba2eb9f8ccdd0b5d375ab263e60ec997b26c3eb4634dc6f99ae5be6b8e869cd",
     50000: "sha256:ca4eed9e57aeafd4ac91d6cfd353b40f3986a96cbff6b1876e535a6b8d45d962",
 }
-CK04_TEFF_K = tuple(_CK04_HASHES)
+CASTELLI_KURUCZ_TEFF_K = tuple(_CK04_HASHES)
 _CK04_URL = (
     "https://archive.stsci.edu/hlsps/reference-atlases/cdbs/grid/ck04models/"
     "ckp00/ckp00_{teff_k}.fits"
@@ -256,16 +256,16 @@ def fetch_phoenix(teff_k: int) -> str:
     return str(PIKACHU.fetch(_phoenix_name(teff_k)))
 
 
-def list_ck04() -> list[int]:
+def list_castelli_kurucz() -> list[int]:
     """List solar-metallicity ATLAS9 Teff nodes [K], from 3500 to 50000."""
-    return list(CK04_TEFF_K)
+    return list(CASTELLI_KURUCZ_TEFF_K)
 
 
-def fetch_ck04(teff_k: int) -> str:
+def fetch_castelli_kurucz(teff_k: int) -> str:
     """Fetch a hash-verified Castelli and Kurucz (2004) ATLAS9 FITS node.
 
     Each file contains all gravity columns, including zero-filled columns
-    for gravities unavailable at this temperature. See ``list_ck04`` for
+    for gravities unavailable at this temperature. See ``list_castelli_kurucz`` for
     registered temperatures in kelvin. Downloads are cached by pooch.
     """
     if teff_k not in _CK04_HASHES:

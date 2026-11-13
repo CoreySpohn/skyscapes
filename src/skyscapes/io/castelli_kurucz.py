@@ -11,17 +11,17 @@ from collections.abc import Callable
 
 import numpy as np
 
-from ..datasets import CK04_TEFF_K, fetch_ck04
+from ..datasets import CASTELLI_KURUCZ_TEFF_K, fetch_castelli_kurucz
 from ..scene.star import Star
 from .phoenix import _from_surface_flux, _surface_flux
 
 
-def ck04_surface_flux(
+def castelli_kurucz_surface_flux(
     teff_k: float,
     logg: float,
     mh: float = 0.0,
     *,
-    fetch: Callable[[int], str] = fetch_ck04,
+    fetch: Callable[[int], str] = fetch_castelli_kurucz,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return wavelength [nm] and ATLAS9 surface flux [W/m^2/nm].
 
@@ -32,10 +32,10 @@ def ck04_surface_flux(
     """
     if mh != 0.0:
         raise ValueError("Only solar metallicity ([M/H] = 0) is registered.")
-    return _surface_flux(teff_k, logg, CK04_TEFF_K, fetch)
+    return _surface_flux(teff_k, logg, CASTELLI_KURUCZ_TEFF_K, fetch)
 
 
-def from_ck04(
+def from_castelli_kurucz(
     teff_k: float,
     logg: float,
     *,
@@ -46,7 +46,7 @@ def from_ck04(
     wavelength_range_nm: tuple[float, float] | None = (100.0, 30000.0),
     ra_deg: float = 0.0,
     dec_deg: float = 0.0,
-    fetch: Callable[[int], str] = fetch_ck04,
+    fetch: Callable[[int], str] = fetch_castelli_kurucz,
 ) -> Star:
     """Build a static linear-spectrum Star from solar-metallicity ATLAS9.
 
@@ -56,7 +56,9 @@ def from_ck04(
     evaluates photon flux in ph/s/m^2/nm and supports exact linear-table
     bin means. Downloads are lazy, cached, and SHA-256 verified.
     """
-    wavelength_nm, surface_flux = ck04_surface_flux(teff_k, logg, mh, fetch=fetch)
+    wavelength_nm, surface_flux = castelli_kurucz_surface_flux(
+        teff_k, logg, mh, fetch=fetch
+    )
     return _from_surface_flux(
         wavelength_nm,
         surface_flux,

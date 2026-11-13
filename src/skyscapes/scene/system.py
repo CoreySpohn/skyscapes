@@ -80,7 +80,7 @@ class System(eqx.Module):
         """
         return jax.vmap(lambda w: self.contrasts(w, t_jd))(jnp.asarray(wavelengths_nm))
 
-    def bin_contrast_cube(
+    def bin_mean_contrast_cube(
         self, centers_nm: Array, widths_nm: Array, t_jd: Array, *, n_nodes: int = 4
     ) -> Array:
         """Ratio of bin-integrated planet and star photons, ``(W, K_total, T)``.
@@ -120,7 +120,9 @@ class System(eqx.Module):
             )
             numerator = jnp.einsum("n,wnkt->wkt", weights, flux)
         denominator = jax.vmap(
-            lambda t: self.star.bin_flux_density(centers, widths, t, n_nodes=n_nodes),
+            lambda t: self.star.bin_mean_flux_density(
+                centers, widths, t, n_nodes=n_nodes
+            ),
             out_axes=1,
         )(t_jd)
         point_bin = centers - widths / 2 == centers + widths / 2

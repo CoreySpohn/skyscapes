@@ -251,15 +251,15 @@ def test_bin_flux_blackbody_quadrature_and_gradients(blackbody_star):
     """
     centers = jnp.geomspace(400.0, 5000.0, 16)
     widths = centers * 0.2
-    mean = eqx.filter_jit(blackbody_star.bin_flux_density)(centers, widths, 0.0)
-    reference = blackbody_star.bin_flux_density(centers, widths, 0.0, n_nodes=16)
+    mean = eqx.filter_jit(blackbody_star.bin_mean_flux_density)(centers, widths, 0.0)
+    reference = blackbody_star.bin_mean_flux_density(centers, widths, 0.0, n_nodes=16)
     print(
         "Blackbody maximum relative quadrature error:",
         float(jnp.max(jnp.abs(mean / reference - 1))),
     )
     assert jnp.allclose(mean, reference, rtol=1e-8, atol=0)
     assert jnp.allclose(
-        blackbody_star.bin_flux_density(centers, jnp.zeros_like(widths), 0.0),
+        blackbody_star.bin_mean_flux_density(centers, jnp.zeros_like(widths), 0.0),
         blackbody_star.spec_flux_density(centers, 0.0),
         rtol=1e-14,
     )
@@ -268,7 +268,7 @@ def test_bin_flux_blackbody_quadrature_and_gradients(blackbody_star):
     def flux(parameters):
         star = eqx.tree_at(lambda s: s.teff_K, blackbody_star, parameters[0] * 5772.0)
         return (
-            star.bin_flux_density(
+            star.bin_mean_flux_density(
                 jnp.array([parameters[1] * 550.0]),
                 jnp.array([parameters[2] * 100.0]),
                 0.0,
@@ -304,14 +304,14 @@ def test_bin_flux_linear_partial_intervals(n_epochs):
     centers = jnp.array([550.0, 650.0, 575.0])
     widths = jnp.array([200.0, 200.0, 0.0])
     epoch = jnp.array(0.5 if n_epochs == 2 else 0.0)
-    actual = eqx.filter_jit(star.bin_flux_density)(centers, widths, epoch)
+    actual = eqx.filter_jit(star.bin_mean_flux_density)(centers, widths, epoch)
     # Exact areas: 50*(3+2)/2 + 100*(2+6)/2 + 50*(6+6.5)/2.
     expected = jnp.array([4.1875, 6.3125, 5.0]) * (1 + epoch)
     assert jnp.allclose(actual, expected, rtol=1e-13)
-    narrow = star.bin_flux_density(centers, jnp.full_like(widths, 1e-14), epoch)
+    narrow = star.bin_mean_flux_density(centers, jnp.full_like(widths, 1e-14), epoch)
     assert jnp.allclose(narrow, star.spec_flux_density(centers, epoch), rtol=1e-13)
     assert jnp.isnan(
-        star.bin_flux_density(jnp.array([410.0]), jnp.array([40.0]), epoch)[0]
+        star.bin_mean_flux_density(jnp.array([410.0]), jnp.array([40.0]), epoch)[0]
     )
 
     @eqx.filter_jit
@@ -319,7 +319,7 @@ def test_bin_flux_linear_partial_intervals(n_epochs):
         scaled = eqx.tree_at(
             lambda model: model._flux_interp.f, star, star._flux_interp.f * p[2]
         )
-        return scaled.bin_flux_density(
+        return scaled.bin_mean_flux_density(
             jnp.array([p[0] * 550]), jnp.array([p[1] * 200]), epoch
         )[0]
 
@@ -331,6 +331,6 @@ def test_bin_flux_linear_partial_intervals(n_epochs):
     assert jnp.isclose(gradient[2], expected[0], rtol=1e-13)
 
     def zero(w):
-        return star.bin_flux_density(jnp.array([575.0]), jnp.array([w]), epoch)[0]
+        return star.bin_mean_flux_density(jnp.array([575.0]), jnp.array([w]), epoch)[0]
 
     assert float(jax.grad(zero)(0.0)) == 0.0

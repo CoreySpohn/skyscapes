@@ -62,7 +62,7 @@ class AbstractStar(eqx.Module):
     ) -> Array:
         """Return spectral flux density in ph/s/m^2/nm."""
 
-    def bin_flux_density(
+    def bin_mean_flux_density(
         self, centers_nm: Array, widths_nm: Array, time_jd: Array, *, n_nodes: int = 4
     ) -> Array:
         """Mean photon flux density per bin [ph/s/m^2/nm], shape ``(W,)``.
@@ -295,7 +295,7 @@ class Star(AbstractStar):
         covered = (low >= self._wavelengths_nm[0]) & (high <= self._wavelengths_nm[-1])
         return jnp.where(covered[:, None], weights, jnp.nan)
 
-    def bin_flux_density(
+    def bin_mean_flux_density(
         self, centers_nm: Array, widths_nm: Array, time_jd: Array, *, n_nodes: int = 4
     ) -> Array:
         """Mean photon flux [ph/s/m^2/nm], shape ``(W,)``, at scalar time.
@@ -306,7 +306,7 @@ class Star(AbstractStar):
         ``AbstractStar``. Width zero returns ``spec_flux_density``.
         """
         if self._interpolation_method != "linear":
-            return super().bin_flux_density(
+            return super().bin_mean_flux_density(
                 centers_nm, widths_nm, time_jd, n_nodes=n_nodes
             )
         weights = self._bin_weights(centers_nm, widths_nm)

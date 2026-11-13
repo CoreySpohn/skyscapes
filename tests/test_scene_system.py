@@ -121,20 +121,20 @@ def test_bin_contrast_weights_flux_and_has_point_limit(tabulated):
     centers = jnp.array([550.0, 650.0, 575.0])
     widths = jnp.array([200.0, 100.0, 0.0])
     times = jnp.array([0.0, 100.0])
-    actual = eqx.filter_jit(system.bin_contrast_cube)(centers, widths, times)
+    actual = eqx.filter_jit(system.bin_mean_contrast_cube)(centers, widths, times)
     expected = (centers + (widths**2 / (12 * centers) if tabulated else 0)) / 500
     np.testing.assert_allclose(
         actual, jnp.broadcast_to(expected[:, None, None], (3, 2, 2)), rtol=1e-12
     )
     for width in (1e-5, 1e-14):
-        tiny = system.bin_contrast_cube(centers, jnp.full(3, width), times)
+        tiny = system.bin_mean_contrast_cube(centers, jnp.full(3, width), times)
         np.testing.assert_allclose(
             tiny, system.contrast_cube(centers, times), rtol=1e-8
         )
 
     @eqx.filter_jit
     def mean(p):
-        return system.bin_contrast_cube(
+        return system.bin_mean_contrast_cube(
             jnp.array([550.0 * p[0]]), jnp.array([200.0 * p[1]]), times
         )[0, 0, 0]
 

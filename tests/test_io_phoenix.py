@@ -21,10 +21,10 @@ from astropy.io import fits
 from hwoutils.constants import Msun2kg, Rsun2m, h, k_B, nm2m, pc2m, sigma_SB
 from hwoutils.constants import c as c_si
 
-from skyscapes.datasets import fetch_ck04, fetch_phoenix
+from skyscapes.datasets import fetch_castelli_kurucz, fetch_phoenix
 from skyscapes.io import (
-    ck04_surface_flux,
-    from_ck04,
+    castelli_kurucz_surface_flux,
+    from_castelli_kurucz,
     from_phoenix,
     phoenix_surface_flux,
 )
@@ -257,7 +257,9 @@ def test_archive_node_matches_vendored_copy():
 @pytest.mark.parametrize(
     "teff_k, logg, factor", [(12000.0, 4.0, 1.0), (12125.0, 4.25, 4.0)]
 )
-def test_ck04_synthetic_units_and_missing_gravity(tmp_path, teff_k, logg, factor):
+def test_castelli_kurucz_synthetic_units_and_missing_gravity(
+    tmp_path, teff_k, logg, factor
+):
     """Fails if CK04 columns, missing gravities, log blends, or units are misread."""
     wave_angstrom = np.array([9000.0, 10000.0, 20000.0, 40000.0, 60000.0])
     paths = {}
@@ -276,7 +278,7 @@ def test_ck04_synthetic_units_and_missing_gravity(tmp_path, teff_k, logg, factor
         path = tmp_path / f"ckp00_{temperature}.fits"
         fits.HDUList([primary, fits.BinTableHDU.from_columns(columns)]).writeto(path)
         paths[temperature] = str(path)
-    star = from_ck04(
+    star = from_castelli_kurucz(
         teff_k,
         logg,
         Ms_kg=Msun2kg,
@@ -289,21 +291,23 @@ def test_ck04_synthetic_units_and_missing_gravity(tmp_path, teff_k, logg, factor
     surface = (factor * u.erg / u.cm**2 / u.s / u.AA).to_value(u.W / u.m**2 / u.nm)
     expected = surface * (Rsun2m / (10 * pc2m)) ** 2 * centers * nm2m / (h * c_si)
     np.testing.assert_allclose(
-        star.bin_flux_density(centers, widths, 0.0), expected, rtol=1e-12
+        star.bin_mean_flux_density(centers, widths, 0.0), expected, rtol=1e-12
     )
     for bad_temperature, bad_gravity in ((12000, 0.0), (51000, 4.0)):
         with pytest.raises(ValueError):
-            ck04_surface_flux(bad_temperature, bad_gravity, fetch=paths.__getitem__)
+            castelli_kurucz_surface_flux(
+                bad_temperature, bad_gravity, fetch=paths.__getitem__
+            )
     with pytest.raises(ValueError, match="metallicity"):
-        ck04_surface_flux(12000, 4.0, mh=-0.5, fetch=paths.__getitem__)
-    with pytest.raises(ValueError, match="from_ck04"):
+        castelli_kurucz_surface_flux(12000, 4.0, mh=-0.5, fetch=paths.__getitem__)
+    with pytest.raises(ValueError, match="from_castelli_kurucz"):
         from_phoenix(12500, 4.0, Ms_kg=Msun2kg, dist_pc=10, radius_m=Rsun2m)
 
 
 @pytest.mark.slow(
     reason="Downloads two public atmosphere grids for independent model comparison"
 )
-def test_ck04_phoenix_overlap_bin_flux():
+def test_castelli_kurucz_phoenix_overlap_bin_flux():
     """Fails if ATLAS9 and PHOENIX disagree by more than 5 percent at 1-5 micron.
 
     These independent atmosphere models need not agree at individual lines.
@@ -311,7 +315,7 @@ def test_ck04_phoenix_overlap_bin_flux():
     10000 K and logg 4.0, using identical radius and distance.
     """
     try:
-        ck_path, ph_path = fetch_ck04(10000), fetch_phoenix(10000)
+        ck_path, ph_path = fetch_castelli_kurucz(10000), fetch_phoenix(10000)
     except OSError as error:
         if REQUIRE_DATA:
             raise
@@ -324,11 +328,11 @@ def test_ck04_phoenix_overlap_bin_flux():
         radius_m=Rsun2m,
         wavelength_range_nm=(900.0, 5100.0),
     )
-    ck = from_ck04(10000, 4.0, fetch=lambda _: ck_path, **kwargs)
+    ck = from_castelli_kurucz(10000, 4.0, fetch=lambda _: ck_path, **kwargs)
     ph = from_phoenix(10000, 4.0, fetch=lambda _: ph_path, **kwargs)
     centers = jnp.arange(1250.0, 5000.0, 500.0)
     widths = jnp.full_like(centers, 500.0)
-    evaluate = eqx.filter_jit(lambda s: s.bin_flux_density(centers, widths, 0.0))
+    evaluate = eqx.filter_jit(lambda s: s.bin_mean_flux_density(centers, widths, 0.0))
     ck_flux = evaluate(ck)
     ph_flux = evaluate(ph)
     print("CK04/PHOENIX bin ratios:", np.asarray(ck_flux / ph_flux))
