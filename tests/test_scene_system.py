@@ -93,10 +93,10 @@ def test_system_spec_flux_density_per_planet():
 
 
 @pytest.mark.parametrize("target", ["planet", "system"])
-@pytest.mark.parametrize("wavelength", [[600.0], [500.0, 600.0], [[600.0]]])
+@pytest.mark.parametrize("wavelength", [[500.0, 600.0], [[500.0, 600.0]]])
 @pytest.mark.parametrize("traced", [False, True])
 def test_contrast_rejects_wavelength_arrays(target, wavelength, traced):
-    """Reject nonscalar wavelengths eagerly and at JIT trace time."""
+    """Reject several wavelengths eagerly and at JIT trace time."""
     star = FlatStar(Msun2kg, 10.0, 1e9)
     planet = _make_planet(1.0, 0.3, 1.0)
     system = System(star, (planet,), SOLVER)
@@ -108,7 +108,7 @@ def test_contrast_rejects_wavelength_arrays(target, wavelength, traced):
         return system.contrasts(wavelength_nm, times)
 
     evaluate = jax.jit(evaluate) if traced else evaluate
-    with pytest.raises(ValueError, match=r"scalar.*contrast_cube"):
+    with pytest.raises(ValueError, match=r"one wavelength.*contrast_cube"):
         evaluate(jnp.asarray(wavelength))
 
 

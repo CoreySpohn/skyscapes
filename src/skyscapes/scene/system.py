@@ -65,8 +65,8 @@ class System(eqx.Module):
 
     def contrasts(self, wavelength_nm: Array, time_jd: Array) -> Array:
         """Per-planet contrast at a scalar wavelength [nm], shape ``(K_total, T)``."""
-        if jnp.ndim(wavelength_nm) != 0:
-            raise ValueError("wavelength_nm must be scalar; use contrast_cube")
+        if jnp.size(wavelength_nm) != 1:
+            raise ValueError("need one wavelength; use contrast_cube")
         per_planet = [
             p.contrast(self.trig_solver, wavelength_nm, time_jd, star=self.star)
             for p in self.planets
