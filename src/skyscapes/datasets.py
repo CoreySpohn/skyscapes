@@ -4,7 +4,7 @@ Pooch-managed fetchers for test/example FITS fixtures. Mirrors the
 ``scenes.zip`` entry from ``coronagraphoto.datasets`` (same file, hash,
 and URL) but caches under its own ``skyscapes`` directory.
 
-The PHOENIX stellar model atmospheres are the one exception to the
+The PHOENIX and ATLAS9 stellar model atmospheres are exceptions to the
 "hosted in the owning repository" rule: the grid is an upstream STScI
 reference-atlas product (about 11.5 MB per Teff node, 76 nodes), so every node
 is registered with its SHA-256 hash and fetched lazily from the archive when
@@ -109,12 +109,106 @@ def _phoenix_name(teff_k: int) -> str:
     return f"phoenixm00-{teff_k}-v1.fits"
 
 
+# Castelli and Kurucz (2004), solar metallicity, STScI cdbs ck04models.
+# SHA-256 computed from all 76 served FITS files on 2026-11-13.
+_CK04_HASHES = {
+    3500: "sha256:6e87996333f01b9635d413adc6bb5b894deb875c79d823881ef03604e4f3f561",
+    3750: "sha256:465386dc35a1107595216b91c148bb0fc4500bb247216a29260f126a9078b735",
+    4000: "sha256:9c070d9b356aafd71384a6ec726ffe07de26c8cd5bc5bd6b22f4ac9418ddbfa7",
+    4250: "sha256:7288ee6f093ab496ccb5e1420de8d22245fd5ae40ed7a34131b639ed9ab592c2",
+    4500: "sha256:f8d3ed91b1a676a019ed46b2154c22dd30900fe26e550f0fb389629ddbe413a0",
+    4750: "sha256:4774d088b744f61684b4f678370340959618b0037ba9b5af61605f63e82623fc",
+    5000: "sha256:d217b79d347b0b1b96b8e4f8e2524340db2daf626c20750ba9c127c11172e1e3",
+    5250: "sha256:9ef26e45b90cdccd5e14e03253661d711a5f3142dd647bbd75e4165e7db8662f",
+    5500: "sha256:f291fd041added7ab06537a34f6d8c618db923d77f4d86b680040b7aeae9d4ac",
+    5750: "sha256:d9de1de06b7cb9d5737f8217f3fa0bb615154c609bd56a602aafa71fad6942da",
+    6000: "sha256:169117c6be4d758c982fe729526f65f8351ef49945be5a9e58a0a7aba6f00852",
+    6250: "sha256:51a7422935fa74c8cd2330a02c1633c9ffff5afc80543be6d79e4720d4e77de4",
+    6500: "sha256:504003ffc4d7242924277c496565cc81808353e4adbc75dd70bb09587fce0099",
+    6750: "sha256:40482a32699b621d46d3363b55f96888b2c904659279fde9c551eccd4210302f",
+    7000: "sha256:a17c7b197f571e5a23db6d147a291f001a41b07c11a586b96e75005e6667629e",
+    7250: "sha256:9c478414db3a136a02abfdb731e52cd09ed88967498f8ca16f6a07def1429dd2",
+    7500: "sha256:0966d8130ab6c45b23ab28cb0e25f3dcb80ba8481a0523ec03724cb2872b8a07",
+    7750: "sha256:77db5b29cf65767255d4b5e502b6e322d7a3ee6ef92aa1a4ae07a845154cd687",
+    8000: "sha256:f96da709fbc367921dbaa6b702880cff24ceec8d31f65e186047cbd489ddd7a0",
+    8250: "sha256:484850229fcdfe400067622035a0de6dd07183b9604e8a16a2927205b333d231",
+    8500: "sha256:5ab66f780fb72257080c3f22e5ba507d004d8d658a5edbaca1727e351d373086",
+    8750: "sha256:516e87362384d4231d6d3dfe4489b2aa0cf6ad298464cfff0a4040027ab72734",
+    9000: "sha256:4abc7d3f0ace3a112ca456b2e2590aa5f72521fbe7988ad166945e5d89535cdd",
+    9250: "sha256:f5d32be427bc4ee1a2d6d40dfd0dafaac81817ca02a811898342cb582afbec51",
+    9500: "sha256:767f961858d2914dfb6b8d29a6d34cdd9072434c26880ff0358fab673fbae28b",
+    9750: "sha256:df73614cd64919340df4c31a1fa38b28b445e94aba5da462aa0107ddedd00bd8",
+    10000: "sha256:cfc559b8d6477d12de8eeb67f40ebad6f004a92e842c9e2f3347c73e4ba39274",
+    10250: "sha256:49216e4fef46fe5e021ea0adfd0c2e07f33fd7bdf2961433ccd2b5b9fd1ee360",
+    10500: "sha256:559079b91c2ed75da441eb6e23a174cf7193a3fc436a5a2a450ca90b50cf3641",
+    10750: "sha256:051d5089fae652bb82b3d55cefb29dad0661d7e4a7c6ca043726f0475599921d",
+    11000: "sha256:10e42e149de04fab123061c8aab26bbd9bfa04aed031cd8b0fb298a15d7b6a4e",
+    11250: "sha256:e5023c8212340d65455c7467e0f7d23dfc4930b05b64e045c4f898b502211253",
+    11500: "sha256:eca05c9542a0e2d6861c50a15b2d08b226ee47d3aef84c090f214efcd20e89dc",
+    11750: "sha256:7330026b6a75915098dead4077266cd20d0e8b3c4b2abef48a83766c85d7407f",
+    12000: "sha256:394bc4f5be96c232df0b5d711800dd58bb5b0d4675928764864a9b7b8861b4f2",
+    12250: "sha256:8ec98f312ba900ff88c97e65562ecc0f7424d3ae9d0ed3d911fe56ad193f9084",
+    12500: "sha256:5da5c270aa0af8483317174f019c0784729a168cf474599ddebde036caf50a11",
+    12750: "sha256:96bfa0d2cffd0e57206207aa0dfe7aa5d3235c63db6ac17432ec206d7a83d070",
+    13000: "sha256:ebbf70268670478dab763a950bf14417f8bbf30ec919202eececbb7610241acf",
+    14000: "sha256:2c7d9fba357a5d75586e301982aaf6bcab0ca87b764db9f4fa546efcffac9f16",
+    15000: "sha256:ea89f7543809cb6bf00f2b7acd42d1716011ebff404e8b2bb9568d58c57bbe6c",
+    16000: "sha256:486d987717aa08ada3505156a48a9f055b2244e0272c83ffc96d0965bcd14ebc",
+    17000: "sha256:e763af21554f044dc267f74e41a8ba68b877275521ae26e9a393cb7c54572509",
+    18000: "sha256:4fb9a644814cf7e7311b03f7f49c302c5bae0f4a06c47c5e9222c354aa90ac35",
+    19000: "sha256:987e3364cb5cfea7710d5cca9cee4f8b44890cbb1e12d5de5b847162965e47e1",
+    20000: "sha256:94df493d3d3e5a08a4cf8a078cae3a2c184c8641756e40bf1df43a98fc0477ce",
+    21000: "sha256:8440d1b7e57a0488207e966e78bc67aa79b04f03196cb75db00e1ba4bd2ab745",
+    22000: "sha256:8f40213b19ba9d251920b5f8e5fd363da46e1669304bc8abd6bf0cffe5d005d0",
+    23000: "sha256:f51d9c9b134322da773b35e1a0aec4eff333255ba8e2db122068954b15034ec8",
+    24000: "sha256:d10ed8be5d042d594fe207035cf70173eef84f3a9931222c447bab81d60001b9",
+    25000: "sha256:5b0a4340c7784a543c262b3dc026b288e8ccffecab12dc410740f2d04ff1c89f",
+    26000: "sha256:168305b2e273feb2d9a78f43b6bc33b4fb27ee61767012db9f0b74b3b4e1daa0",
+    27000: "sha256:717fe9d714214e42d1d62badfb8d386fdc690c0ecdcb17c133dcd257ea01809f",
+    28000: "sha256:ad5eac453fdd3cc60901fec865aa07d092696e6dee1ee5a2f2fee680a567f9e7",
+    29000: "sha256:4ec55e8912fa9f3ae18190bb36027ef087a4e6f822b56fa0b6c2d292447392f7",
+    30000: "sha256:ed4342e808e91b2552a2752d5bda8410ce465c14733e05b5b4ad6d9083850da6",
+    31000: "sha256:16f700f110f4ce2db8a426e1ee2425f73e2d4c110620ed65b7bbf41862ce04a4",
+    32000: "sha256:ce0dba35565af890d821296551494040c0e3d9a16643143c515c727037d53e8c",
+    33000: "sha256:642222e40991bfc06402a6946927c7c38a420572d93f3e379008d7dc1db662cc",
+    34000: "sha256:56cf5df03a94dce4d261c2f8dc85198112b51b133a796627466b79847f53143d",
+    35000: "sha256:932f203f0b3d68e85af5f859210790d696603bcb5492a986ca97408b4da5fb43",
+    36000: "sha256:8f4acc056dcbd67004f13f8dae17df0fb9fbb614ef2951af13904e6dd435a399",
+    37000: "sha256:505fc5a387c66abbc25fa5f6186eab6465cf9e2a06143596c8ce08bfe8291617",
+    38000: "sha256:7cc9366b3ab3f9201ea6b043023585bccf72358d5d30bc76e8e8922dad1f1da0",
+    39000: "sha256:c291213a0a41a6a1f3aca7fae9a18e8ef44ddd9af267a879e9f5d821fa2cfea3",
+    40000: "sha256:fef387c0d694570190c97af692ce7b547caa2174c94eef9ae958a66851e8dfde",
+    41000: "sha256:d8a33e4437eadd95a4d47eb80254063404bfa5e8090e2ae61462de94fb85aace",
+    42000: "sha256:07bf78d8cde2df00967be9569cde5e211df7d342cec8b4125487de3d4b2a364e",
+    43000: "sha256:da2353eddd59fb819b7e374f53175774e53f29a6d41297c375c3f18e5dfa021e",
+    44000: "sha256:40177255ed85117fa899a30f8e4767c7d60bde8f91f1227759ef55eea07828fa",
+    45000: "sha256:a0534dc9f7f8393d9d5e4507c9e423d27e2d73e7eaff78a14a81aa2b41cb0529",
+    46000: "sha256:755d4c3049bf5be3ef0ef188f20b834b7c275d5038ce8d897ca8287e0e1cd2b7",
+    47000: "sha256:fcc6f71813e2c325dfed03825af33c3f8b2033f3b2cd648f3ffc20fb2f8616db",
+    48000: "sha256:c924da5074b1308a59ead17405a914f529de1cdf8cd5f0eff25d3de2cec0fc30",
+    49000: "sha256:9ba2eb9f8ccdd0b5d375ab263e60ec997b26c3eb4634dc6f99ae5be6b8e869cd",
+    50000: "sha256:ca4eed9e57aeafd4ac91d6cfd353b40f3986a96cbff6b1876e535a6b8d45d962",
+}
+CK04_TEFF_K = tuple(_CK04_HASHES)
+_CK04_URL = (
+    "https://archive.stsci.edu/hlsps/reference-atlases/cdbs/grid/ck04models/"
+    "ckp00/ckp00_{teff_k}.fits"
+)
+
+
+def _ck04_name(teff_k: int) -> str:
+    return f"ckp00-{teff_k}-v1.fits"
+
+
 REGISTRY = {
+    **{_ck04_name(t): h for t, h in _CK04_HASHES.items()},
     "scenes.zip": "md5:c777aefb65887249892093b1aba6d86a",
     **{_phoenix_name(t): h for t, h in _PHOENIX_HASHES.items()},
 }
 
 _URLS = {_phoenix_name(t): _PHOENIX_URL.format(teff_k=t) for t in _PHOENIX_HASHES}
+
+_URLS.update({_ck04_name(t): _CK04_URL.format(teff_k=t) for t in _CK04_HASHES})
 
 PIKACHU = pooch.create(
     path=pooch.os_cache("skyscapes"),
@@ -160,3 +254,20 @@ def fetch_phoenix(teff_k: int) -> str:
     if teff_k not in _PHOENIX_HASHES:
         raise ValueError(f"teff_k = {teff_k} is not a registered PHOENIX node.")
     return str(PIKACHU.fetch(_phoenix_name(teff_k)))
+
+
+def list_ck04() -> list[int]:
+    """List solar-metallicity ATLAS9 Teff nodes [K], from 3500 to 50000."""
+    return list(CK04_TEFF_K)
+
+
+def fetch_ck04(teff_k: int) -> str:
+    """Fetch a hash-verified Castelli and Kurucz (2004) ATLAS9 FITS node.
+
+    Each file contains all gravity columns, including zero-filled columns
+    for gravities unavailable at this temperature. See ``list_ck04`` for
+    registered temperatures in kelvin. Downloads are cached by pooch.
+    """
+    if teff_k not in _CK04_HASHES:
+        raise ValueError(f"teff_k = {teff_k} is not a registered CK04 node.")
+    return str(PIKACHU.fetch(_ck04_name(teff_k)))

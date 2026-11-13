@@ -41,10 +41,10 @@ _TEFF_SUN_K = 5772.0
 
 
 def _read_model(path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
-    """Read one PHOENIX FITS file in SI-derived units.
+    """Read one STScI model-atmosphere FITS file in SI-derived units.
 
     Args:
-        path: Path to a ``phoenixm00_<Teff>.fits`` file.
+        path: Path to a PHOENIX or ATLAS9 STScI FITS table.
 
     Returns:
         ``(wavelength_nm, logg, flux_w_m2_nm, teff_k)`` where ``flux_w_m2_nm``
@@ -119,7 +119,14 @@ def phoenix_surface_flux(
     """
     if mh != 0.0:
         raise ValueError("Only solar metallicity ([M/H] = 0) is registered.")
-    nodes = np.asarray(PHOENIX_TEFF_K, dtype=float)
+    if teff_k > PHOENIX_TEFF_K[-1]:
+        raise ValueError("PHOENIX ends at 12000 K; use from_ck04 for hotter stars.")
+    return _surface_flux(teff_k, logg, PHOENIX_TEFF_K, fetch)
+
+
+def _surface_flux(teff_k, logg, temperatures, fetch):
+    """Interpolate an STScI atmosphere grid, excluding absent gravity columns."""
+    nodes = np.asarray(temperatures, dtype=float)
     lo, hi, t_weight = _bracket(float(teff_k), nodes, "teff_k")
 
     # Each entry is (weight, log10 flux or the node flux itself for an exact
@@ -129,16 +136,22 @@ def phoenix_surface_flux(
         if weight == 0.0:
             continue
         wavelength_nm, logg_nodes, flux, _ = _read_model(fetch(int(nodes[index])))
+        available = np.any(flux > 0, axis=1)
+        logg_nodes, flux = logg_nodes[available], flux[available]
+        order = np.argsort(logg_nodes)
+        logg_nodes, flux = logg_nodes[order], flux[order]
         g_lo, g_hi, g_weight = _bracket(float(logg), logg_nodes, "logg")
         if g_weight == 0.0:
             parts.append((weight, flux[g_lo]))
         else:
-            log_flux = (1.0 - g_weight) * np.log10(flux[g_lo])
-            log_flux = log_flux + g_weight * np.log10(flux[g_hi])
+            with np.errstate(divide="ignore"):
+                log_flux = (1.0 - g_weight) * np.log10(flux[g_lo])
+                log_flux = log_flux + g_weight * np.log10(flux[g_hi])
             parts.append((weight, 10.0**log_flux))
     if len(parts) == 1:
         return wavelength_nm, parts[0][1]
-    log_blend = sum(weight * np.log10(flux) for weight, flux in parts)
+    with np.errstate(divide="ignore"):
+        log_blend = sum(weight * np.log10(flux) for weight, flux in parts)
     return wavelength_nm, 10.0**log_blend
 
 
@@ -181,6 +194,38 @@ def from_phoenix(
         ph/s/m^2/nm.
     """
     wavelength_nm, surface_flux = phoenix_surface_flux(teff_k, logg, mh, fetch=fetch)
+    return _from_surface_flux(
+        wavelength_nm,
+        surface_flux,
+        teff_k=teff_k,
+        logg=logg,
+        mh=mh,
+        Ms_kg=Ms_kg,
+        dist_pc=dist_pc,
+        radius_m=radius_m,
+        wavelength_range_nm=wavelength_range_nm,
+        ra_deg=ra_deg,
+        dec_deg=dec_deg,
+        source="PHOENIX BT-Settl (STScI cdbs phoenixm00)",
+    )
+
+
+def _from_surface_flux(
+    wavelength_nm,
+    surface_flux,
+    *,
+    teff_k,
+    logg,
+    mh,
+    Ms_kg,
+    dist_pc,
+    radius_m,
+    wavelength_range_nm,
+    ra_deg,
+    dec_deg,
+    source,
+):
+    """Dilute an atmosphere surface spectrum and construct its linear Star."""
     if wavelength_range_nm is not None:
         keep = (wavelength_nm >= wavelength_range_nm[0]) & (
             wavelength_nm <= wavelength_range_nm[1]
@@ -201,7 +246,7 @@ def from_phoenix(
         diameter_arcsec=2.0 * radius_m / (dist_pc * pc2m) * rad2arcsec,
         luminosity_lsun=(radius_m / Rsun2m) ** 2 * (teff_k / _TEFF_SUN_K) ** 4,
         metadata={
-            "source": "PHOENIX BT-Settl (STScI cdbs phoenixm00)",
+            "source": source,
             "teff_k": float(teff_k),
             "logg": float(logg),
             "mh": float(mh),

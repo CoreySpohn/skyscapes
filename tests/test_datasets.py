@@ -6,7 +6,14 @@ import os
 
 import pytest
 
-from skyscapes.datasets import PIKACHU, fetch_phoenix, fetch_scene, list_phoenix
+from skyscapes.datasets import (
+    PIKACHU,
+    fetch_ck04,
+    fetch_phoenix,
+    fetch_scene,
+    list_ck04,
+    list_phoenix,
+)
 
 
 def test_fetch_scene_returns_existing_fits():
@@ -16,18 +23,27 @@ def test_fetch_scene_returns_existing_fits():
     assert path.endswith("solar_system_mod.fits")
 
 
-def test_phoenix_registry_is_complete_and_hashed():
-    """All 76 PHOENIX nodes carry a SHA-256 hash and an archive URL.
+@pytest.mark.parametrize(
+    "list_nodes, fetch_node, prefix, first, last",
+    [
+        (list_phoenix, fetch_phoenix, "phoenixm00", 2000, 12000),
+        (list_ck04, fetch_ck04, "ckp00", 3500, 50000),
+    ],
+)
+def test_phoenix_registry_is_complete_and_hashed(
+    list_nodes, fetch_node, prefix, first, last
+):
+    """All 76 nodes of each atmosphere grid carry a SHA-256 hash and an archive URL.
 
     Fails if a node is registered without a hash (pooch would then accept any
     bytes) or points at a host other than the STScI archive.
     """
-    nodes = list_phoenix()
+    nodes = list_nodes()
     assert len(nodes) == 76
-    assert nodes[0] == 2000 and nodes[-1] == 12000
+    assert nodes[0] == first and nodes[-1] == last
     for teff_k in nodes:
-        name = f"phoenixm00-{teff_k}-v1.fits"
+        name = f"{prefix}-{teff_k}-v1.fits"
         assert PIKACHU.registry[name].startswith("sha256:")
         assert PIKACHU.get_url(name).startswith("https://archive.stsci.edu/")
-    with pytest.raises(ValueError, match="registered PHOENIX node"):
-        fetch_phoenix(3550)
+    with pytest.raises(ValueError, match="registered"):
+        fetch_node(3550)
