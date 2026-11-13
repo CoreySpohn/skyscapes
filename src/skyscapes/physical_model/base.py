@@ -58,12 +58,15 @@ class AbstractPhysicalModel(eqx.Module):
         Rp_Rearth: Array,
         *,
         time_jd: Array,
+        star=None,
     ) -> Array:
-        """Return contrast with the physical observation epochs available.
+        """Return contrast with the observation epochs and the host star available.
 
         The default forwards the four radiative arguments to ``contrast``
-        and ignores ``time_jd``. Existing phase-dependent models therefore
-        keep their behavior without implementing another method.
+        and ignores ``time_jd`` and ``star``. Existing phase-dependent models
+        therefore keep their behavior without implementing another method.
+        A model whose planet flux does not scale with the star's (thermal
+        emission) overrides this method and divides by the star's flux.
 
         Args:
             phase_angle_rad: Phase angle [rad], shape ``(K, T)``.
@@ -71,6 +74,7 @@ class AbstractPhysicalModel(eqx.Module):
             wavelength_nm: Wavelength [nm], as accepted by ``contrast``.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
             time_jd: Observation Julian Dates, shape ``(T,)``.
+            star: The host ``AbstractStar``; ``Planet`` always supplies it.
 
         Returns:
             Planet-to-star flux ratio, shape ``(K, T)``.

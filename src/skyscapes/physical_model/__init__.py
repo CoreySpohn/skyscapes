@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .base import AbstractPhysicalModel
+from .blackbody import BlackbodyPhysicalModel
 from .cached import PrecomputedPhysicalModel
 from .exojax import ExoJaxEmissionModel, ExoJaxPhysicalModel
 from .grid import GridPhysicalModel
@@ -11,6 +12,7 @@ from .time_series import TimeSeriesPhysicalModel
 
 __all__ = [
     "AbstractPhysicalModel",
+    "BlackbodyPhysicalModel",
     "ExoJaxEmissionModel",
     "ExoJaxPhysicalModel",
     "GridPhysicalModel",

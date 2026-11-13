@@ -146,6 +146,7 @@ class Planet(eqx.Module):
             wavelength_nm=jnp.asarray(wavelength_nm),
             Rp_Rearth=self.Rp_Rearth,
             time_jd=t_jd,
+            star=star,
         )
         eps = jnp.finfo(contrast.dtype).tiny
         dMag = -2.5 * jnp.log10(contrast + eps)
@@ -167,6 +168,7 @@ class Planet(eqx.Module):
             wavelength_nm=wavelength_nm,
             Rp_Rearth=self.Rp_Rearth,
             time_jd=t_jd,
+            star=star,
         )
 
     def spec_flux_density(

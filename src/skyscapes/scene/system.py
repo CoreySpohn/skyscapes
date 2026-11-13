@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
@@ -69,6 +70,15 @@ class System(eqx.Module):
             for p in self.planets
         ]
         return jnp.concatenate(per_planet, axis=0)
+
+    def contrast_cube(self, wavelengths_nm: Array, t_jd: Array) -> Array:
+        """Per-planet contrast at each wavelength, shape ``(W, K_total, T)``.
+
+        Args:
+            wavelengths_nm: Wavelengths [nm], shape ``(W,)``.
+            t_jd: Observation Julian Dates, shape ``(T,)``.
+        """
+        return jax.vmap(lambda w: self.contrasts(w, t_jd))(jnp.asarray(wavelengths_nm))
 
     def planet_flux_densities(self, wavelength_nm: Array, t_jd: Array) -> Array:
         """Per-planet flux density [ph/s/m^2/nm], shape ``(K_total, T)``."""
