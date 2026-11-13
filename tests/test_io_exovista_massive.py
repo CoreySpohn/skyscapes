@@ -105,7 +105,7 @@ def _write_fits(path, m_planet_earth):
     m_star = Msun2kg
     m_planet = m_planet_earth * Mearth2kg
     r_p, r_s, v_p, v_s = _integrate_two_bodies(m_star, m_planet)
-    to_au = 1.0 / AU2m
+    to_AU = 1.0 / AU2m
     to_au_yr = yr2s / AU2m
 
     wavelengths = np.array([0.5, 0.6, 0.7], dtype=np.float32)
@@ -114,12 +114,12 @@ def _write_fits(path, m_planet_earth):
     n_t = len(EPOCH_YEARS)
     star = np.zeros((n_t, 19), dtype=np.float32)
     star[:, 0] = EPOCH_YEARS
-    star[:, 9:12] = r_s * to_au
+    star[:, 9:12] = r_s * to_AU
     star[:, 12:15] = v_s * to_au_yr
     star[:, 16:] = 1.0
     planet = np.zeros_like(star)
     planet[:, 0] = EPOCH_YEARS
-    planet[:, 9:12] = r_p * to_au
+    planet[:, 9:12] = r_p * to_AU
     planet[:, 12:15] = v_p * to_au_yr
     planet[:, 16:] = 1e-10
     star_header = fits.Header(
@@ -147,7 +147,7 @@ def _write_fits(path, m_planet_earth):
     ]
     fits.HDUList(hdus).writeto(path)
     # Sky offsets of the planet from the star: (east, north) = (-x, y).
-    rel = (r_p - r_s) * to_au
+    rel = (r_p - r_s) * to_AU
     return np.stack([-rel[:, 0], rel[:, 1]]) / DIST_PC
 
 

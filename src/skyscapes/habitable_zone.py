@@ -58,27 +58,27 @@ from the recent-Venus limit to the early-Mars limit.
 """
 
 
-def eeid_au(luminosity_lsun: ArrayLike) -> Array:
+def eeid_AU(luminosity_Lsun: ArrayLike) -> Array:
     """Earth-equivalent insolation distance of a star.
 
     The distance at which a planet receives the bolometric flux the Earth
     receives from the Sun, ``sqrt(L / L_sun)`` AU.
 
     Args:
-        luminosity_lsun: Stellar bolometric luminosity in solar luminosities.
+        luminosity_Lsun: Stellar bolometric luminosity in solar luminosities.
 
     Returns:
-        The EEID in AU, with the shape of ``luminosity_lsun``.
+        The EEID in AU, with the shape of ``luminosity_Lsun``.
 
     Example::
 
-        eeid_au(4.0)  # 2.0 AU
+        eeid_AU(4.0)  # 2.0 AU
     """
-    return jnp.sqrt(jnp.asarray(luminosity_lsun))
+    return jnp.sqrt(jnp.asarray(luminosity_Lsun))
 
 
-def habitable_zone_au(
-    luminosity_lsun: ArrayLike, optimistic: bool = False
+def habitable_zone_AU(
+    luminosity_Lsun: ArrayLike, optimistic: bool = False
 ) -> tuple[Array, Array]:
     """Inner and outer habitable-zone edges scaled by the EEID.
 
@@ -88,27 +88,27 @@ def habitable_zone_au(
     with ``sqrt(L / L_sun)`` and do not depend on the host temperature.
 
     Args:
-        luminosity_lsun: Stellar bolometric luminosity in solar luminosities.
+        luminosity_Lsun: Stellar bolometric luminosity in solar luminosities.
         optimistic: Return the optimistic zone instead of the conservative
             one. A Python bool, static under ``jit``.
 
     Returns:
-        ``(inner_au, outer_au)``, each with the shape of ``luminosity_lsun``.
+        ``(inner_AU, outer_AU)``, each with the shape of ``luminosity_Lsun``.
 
     Example::
 
-        inner_au, outer_au = habitable_zone_au(1.0)  # 0.95, 1.67
-        inner_au, outer_au = jax.vmap(habitable_zone_au)(luminosities_lsun)
+        inner_AU, outer_AU = habitable_zone_AU(1.0)  # 0.95, 1.67
+        inner_AU, outer_AU = jax.vmap(habitable_zone_AU)(luminosities_Lsun)
     """
     if optimistic:
         inner_eeid, outer_eeid = OPTIMISTIC_HZ_INNER_EEID, OPTIMISTIC_HZ_OUTER_EEID
     else:
         inner_eeid, outer_eeid = HZ_INNER_EEID, HZ_OUTER_EEID
-    eeid = eeid_au(luminosity_lsun)
+    eeid = eeid_AU(luminosity_Lsun)
     return inner_eeid * eeid, outer_eeid * eeid
 
 
-def kopparapu_effective_flux(teff_k: ArrayLike, limit: str) -> Array:
+def kopparapu_effective_flux(teff_K: ArrayLike, limit: str) -> Array:
     """Stellar flux at a habitable-zone limit, relative to the flux at Earth.
 
     Evaluates the parametric fit of Kopparapu et al. (2014),
@@ -117,22 +117,22 @@ def kopparapu_effective_flux(teff_k: ArrayLike, limit: str) -> Array:
     Table 1. Valid for 2600 K <= Teff <= 7200 K.
 
     Args:
-        teff_k: Stellar effective temperature in K.
+        teff_K: Stellar effective temperature in K.
         limit: One of ``"recent_venus"``, ``"runaway_greenhouse"``,
             ``"maximum_greenhouse"`` or ``"early_mars"``. A Python string,
             static under ``jit`` (bind it in a closure or pass it through
             ``static_argnames``).
 
     Returns:
-        The effective flux, dimensionless, with the shape of ``teff_k``.
+        The effective flux, dimensionless, with the shape of ``teff_K``.
     """
     s_sun, a, b, c, d = KOPPARAPU_SEFF_COEFFICIENTS[limit]
-    t = jnp.asarray(teff_k) - KOPPARAPU_REFERENCE_TEFF_K
+    t = jnp.asarray(teff_K) - KOPPARAPU_REFERENCE_TEFF_K
     return s_sun + a * t + b * t**2 + c * t**3 + d * t**4
 
 
-def kopparapu_habitable_zone_au(
-    luminosity_lsun: ArrayLike, teff_k: ArrayLike, optimistic: bool = False
+def kopparapu_habitable_zone_AU(
+    luminosity_Lsun: ArrayLike, teff_K: ArrayLike, optimistic: bool = False
 ) -> tuple[Array, Array]:
     """Inner and outer habitable-zone edges from the effective-flux limits.
 
@@ -143,27 +143,27 @@ def kopparapu_habitable_zone_au(
     0.95 to 1.68 AU and 0.75 to 1.77 AU. Valid for 2600 K <= Teff <= 7200 K.
 
     Args:
-        luminosity_lsun: Stellar bolometric luminosity in solar luminosities.
-        teff_k: Stellar effective temperature in K, broadcast against
-            ``luminosity_lsun``.
+        luminosity_Lsun: Stellar bolometric luminosity in solar luminosities.
+        teff_K: Stellar effective temperature in K, broadcast against
+            ``luminosity_Lsun``.
         optimistic: Return the optimistic zone instead of the conservative
             one. A Python bool, static under ``jit``.
 
     Returns:
-        ``(inner_au, outer_au)``, each with the broadcast shape of the inputs.
+        ``(inner_AU, outer_AU)``, each with the broadcast shape of the inputs.
 
     Example::
 
-        inner_au, outer_au = kopparapu_habitable_zone_au(0.08, 3800.0)
+        inner_AU, outer_AU = kopparapu_habitable_zone_AU(0.08, 3800.0)
     """
     if optimistic:
         inner_limit, outer_limit = "recent_venus", "early_mars"
     else:
         inner_limit, outer_limit = "runaway_greenhouse", "maximum_greenhouse"
-    luminosity_lsun = jnp.asarray(luminosity_lsun)
-    inner_au = jnp.sqrt(luminosity_lsun / kopparapu_effective_flux(teff_k, inner_limit))
-    outer_au = jnp.sqrt(luminosity_lsun / kopparapu_effective_flux(teff_k, outer_limit))
-    return inner_au, outer_au
+    luminosity_Lsun = jnp.asarray(luminosity_Lsun)
+    inner_AU = jnp.sqrt(luminosity_Lsun / kopparapu_effective_flux(teff_K, inner_limit))
+    outer_AU = jnp.sqrt(luminosity_Lsun / kopparapu_effective_flux(teff_K, outer_limit))
+    return inner_AU, outer_AU
 
 
 __all__ = [
@@ -173,8 +173,8 @@ __all__ = [
     "KOPPARAPU_SEFF_COEFFICIENTS",
     "OPTIMISTIC_HZ_INNER_EEID",
     "OPTIMISTIC_HZ_OUTER_EEID",
-    "eeid_au",
-    "habitable_zone_au",
+    "eeid_AU",
+    "habitable_zone_AU",
     "kopparapu_effective_flux",
-    "kopparapu_habitable_zone_au",
+    "kopparapu_habitable_zone_AU",
 ]

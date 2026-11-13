@@ -17,7 +17,7 @@ from .phoenix import _from_surface_flux, _surface_flux
 
 
 def castelli_kurucz_surface_flux(
-    teff_k: float,
+    teff_K: float,
     logg: float,
     mh: float = 0.0,
     *,
@@ -32,11 +32,11 @@ def castelli_kurucz_surface_flux(
     """
     if mh != 0.0:
         raise ValueError("Only solar metallicity ([M/H] = 0) is registered.")
-    return _surface_flux(teff_k, logg, CASTELLI_KURUCZ_TEFF_K, fetch)
+    return _surface_flux(teff_K, logg, CASTELLI_KURUCZ_TEFF_K, fetch)
 
 
 def from_castelli_kurucz(
-    teff_k: float,
+    teff_K: float,
     logg: float,
     *,
     Ms_kg: float,
@@ -50,19 +50,19 @@ def from_castelli_kurucz(
 ) -> Star:
     """Build a static linear-spectrum Star from solar-metallicity ATLAS9.
 
-    Parameters and units match ``from_phoenix``. ``teff_k`` spans
+    Parameters and units match ``from_phoenix``. ``teff_K`` spans
     3500-50000 K; ``logg`` is log10 of cgs gravity. The surface flux is
     diluted by ``(radius_m / (dist_pc * pc2m))**2``. The returned Star
     evaluates photon flux in ph/s/m^2/nm and supports exact linear-table
     bin means. Downloads are lazy, cached, and SHA-256 verified.
     """
     wavelength_nm, surface_flux = castelli_kurucz_surface_flux(
-        teff_k, logg, mh, fetch=fetch
+        teff_K, logg, mh, fetch=fetch
     )
     return _from_surface_flux(
         wavelength_nm,
         surface_flux,
-        teff_k=teff_k,
+        teff_K=teff_K,
         logg=logg,
         mh=mh,
         Ms_kg=Ms_kg,

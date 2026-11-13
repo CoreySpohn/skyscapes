@@ -130,9 +130,9 @@ def test_grid_equals_the_exovista_occurrence_grid():
     occurrence = load_occurrence_table()
     np.testing.assert_allclose(np.asarray(occurrence.rate), rate, rtol=0, atol=1e-15)
     np.testing.assert_allclose(
-        np.asarray(occurrence.mass_edges_mearth), m_edge, rtol=1e-14
+        np.asarray(occurrence.mass_edges_Mearth), m_edge, rtol=1e-14
     )
-    np.testing.assert_allclose(np.asarray(occurrence.a_edges_au), a_edge, rtol=1e-14)
+    np.testing.assert_allclose(np.asarray(occurrence.a_edges_AU), a_edge, rtol=1e-14)
 
 
 def test_distributions_match_the_exovista_generator(exovista_worlds, drawn):
@@ -145,23 +145,23 @@ def test_distributions_match_the_exovista_generator(exovista_worlds, drawn):
     ev = _exovista_arrays(exovista_worlds)
     occurrence = load_occurrence_table()
     present = drawn.present
-    a_scaled = drawn.a_au / np.sqrt(LUMINOSITY)[None, :, None]
+    a_scaled = drawn.a_AU / np.sqrt(LUMINOSITY)[None, :, None]
     ev_count, my_count = ev["present"].sum(2).ravel(), present.sum(2).ravel()
     counts = [np.bincount(c, minlength=31) for c in (ev_count, my_count)]
     assert _two_sample_chi2(*counts) > P_MIN
 
     for ev_x, my_x in (
         (np.log(ev["a_scaled"]), np.log(a_scaled[present])),
-        (np.log(ev["mass"]), np.log(drawn.mass_mearth[present])),
+        (np.log(ev["mass"]), np.log(drawn.mass_Mearth[present])),
         (ev["inc"], drawn.inc_deg[present]),
     ):
         assert stats.ks_2samp(ev_x, my_x).pvalue > P_MIN
 
     # planets per planet bin
     def bin_counts(a, m):
-        ia = np.clip(np.searchsorted(np.asarray(occurrence.a_edges_au), a) - 1, 0, None)
+        ia = np.clip(np.searchsorted(np.asarray(occurrence.a_edges_AU), a) - 1, 0, None)
         im = np.clip(
-            np.searchsorted(np.asarray(occurrence.mass_edges_mearth), m) - 1, 0, None
+            np.searchsorted(np.asarray(occurrence.mass_edges_Mearth), m) - 1, 0, None
         )
         b = np.asarray(occurrence.bin_id)[ia, im]
         return np.bincount(b[b >= 0], minlength=occurrence.n_bins)
@@ -169,7 +169,7 @@ def test_distributions_match_the_exovista_generator(exovista_worlds, drawn):
     assert (
         _two_sample_chi2(
             bin_counts(ev["a_scaled"], ev["mass"]),
-            bin_counts(a_scaled[present], drawn.mass_mearth[present]),
+            bin_counts(a_scaled[present], drawn.mass_Mearth[present]),
         )
         > P_MIN
     )
@@ -184,7 +184,7 @@ def test_distributions_match_the_exovista_generator(exovista_worlds, drawn):
     my_class1 = (
         (
             np.asarray(
-                earth_like(drawn.a_au, drawn.radius_rearth, LUMINOSITY[None, :, None])
+                earth_like(drawn.a_AU, drawn.radius_Rearth, LUMINOSITY[None, :, None])
             )
             & present
         )

@@ -47,11 +47,11 @@ def _read_model(path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
         path: Path to a PHOENIX or ATLAS9 STScI FITS table.
 
     Returns:
-        ``(wavelength_nm, logg, flux_w_m2_nm, teff_k)`` where ``flux_w_m2_nm``
+        ``(wavelength_nm, logg, flux_w_m2_nm, teff_K)`` where ``flux_w_m2_nm``
         has shape ``(n_logg, n_wavelength)`` and is the surface flux density.
     """
     with fits.open(path) as hdul:
-        teff_k = float(hdul[0].header["TEFF"])
+        teff_K = float(hdul[0].header["TEFF"])
         table = hdul[1].data
         header = hdul[1].header
         columns = [name for name in table.columns.names if name != "WAVELENGTH"]
@@ -74,7 +74,7 @@ def _read_model(path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
             flux[i] = (
                 np.asarray(table[name], dtype=float) * _FLUX_UNITS[unit_key]
             ).to_value(_SURFACE_FLUX_UNIT)
-    return wavelength_nm, logg, flux, teff_k
+    return wavelength_nm, logg, flux, teff_K
 
 
 def _bracket(value: float, nodes: np.ndarray, name: str) -> tuple[int, int, float]:
@@ -91,7 +91,7 @@ def _bracket(value: float, nodes: np.ndarray, name: str) -> tuple[int, int, floa
 
 
 def phoenix_surface_flux(
-    teff_k: float,
+    teff_K: float,
     logg: float,
     mh: float = 0.0,
     *,
@@ -99,12 +99,12 @@ def phoenix_surface_flux(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Surface flux density of a PHOENIX model at the requested parameters.
 
-    Interpolates log flux bilinearly in ``teff_k`` and ``logg`` (module
+    Interpolates log flux bilinearly in ``teff_K`` and ``logg`` (module
     docstring). The result is the emergent flux per unit stellar surface
     area; multiply by ``(radius / distance)**2`` for the flux at the observer.
 
     Args:
-        teff_k: Effective temperature in kelvin, within the registered grid.
+        teff_K: Effective temperature in kelvin, within the registered grid.
         logg: Surface gravity, log10 of cgs gravity in cm/s^2.
         mh: Metallicity [M/H] in dex. Only 0.0 is registered.
         fetch: Callable mapping a node Teff in kelvin to a local FITS path.
@@ -119,17 +119,17 @@ def phoenix_surface_flux(
     """
     if mh != 0.0:
         raise ValueError("Only solar metallicity ([M/H] = 0) is registered.")
-    if teff_k > PHOENIX_TEFF_K[-1]:
+    if teff_K > PHOENIX_TEFF_K[-1]:
         raise ValueError(
             "PHOENIX ends at 12000 K; use from_castelli_kurucz for hotter stars."
         )
-    return _surface_flux(teff_k, logg, PHOENIX_TEFF_K, fetch)
+    return _surface_flux(teff_K, logg, PHOENIX_TEFF_K, fetch)
 
 
-def _surface_flux(teff_k, logg, temperatures, fetch):
+def _surface_flux(teff_K, logg, temperatures, fetch):
     """Interpolate an STScI atmosphere grid, excluding absent gravity columns."""
     nodes = np.asarray(temperatures, dtype=float)
-    lo, hi, t_weight = _bracket(float(teff_k), nodes, "teff_k")
+    lo, hi, t_weight = _bracket(float(teff_K), nodes, "teff_K")
 
     # Each entry is (weight, log10 flux or the node flux itself for an exact
     # logg node); a lone weight-one entry returns the node bytes unchanged.
@@ -158,7 +158,7 @@ def _surface_flux(teff_k, logg, temperatures, fetch):
 
 
 def from_phoenix(
-    teff_k: float,
+    teff_K: float,
     logg: float,
     *,
     Ms_kg: float,
@@ -179,7 +179,7 @@ def from_phoenix(
     luminosity is ``4 pi R^2 sigma Teff^4`` in solar units.
 
     Args:
-        teff_k: Effective temperature in kelvin.
+        teff_K: Effective temperature in kelvin.
         logg: Surface gravity, log10 of cgs gravity in cm/s^2.
         Ms_kg: Stellar mass in kilograms.
         dist_pc: Distance in parsecs.
@@ -195,11 +195,11 @@ def from_phoenix(
         A ``Star`` whose ``spec_flux_density`` is the observer flux in
         ph/s/m^2/nm.
     """
-    wavelength_nm, surface_flux = phoenix_surface_flux(teff_k, logg, mh, fetch=fetch)
+    wavelength_nm, surface_flux = phoenix_surface_flux(teff_K, logg, mh, fetch=fetch)
     return _from_surface_flux(
         wavelength_nm,
         surface_flux,
-        teff_k=teff_k,
+        teff_K=teff_K,
         logg=logg,
         mh=mh,
         Ms_kg=Ms_kg,
@@ -216,7 +216,7 @@ def _from_surface_flux(
     wavelength_nm,
     surface_flux,
     *,
-    teff_k,
+    teff_K,
     logg,
     mh,
     Ms_kg,
@@ -246,10 +246,10 @@ def _from_surface_flux(
         ra_deg=ra_deg,
         dec_deg=dec_deg,
         diameter_arcsec=2.0 * radius_m / (dist_pc * pc2m) * rad2arcsec,
-        luminosity_lsun=(radius_m / Rsun2m) ** 2 * (teff_k / _TEFF_SUN_K) ** 4,
+        luminosity_Lsun=(radius_m / Rsun2m) ** 2 * (teff_K / _TEFF_SUN_K) ** 4,
         metadata={
             "source": source,
-            "teff_k": float(teff_k),
+            "teff_K": float(teff_K),
             "logg": float(logg),
             "mh": float(mh),
         },

@@ -109,8 +109,8 @@ def test_new_layout_preserves_spot_history_and_stellar_metadata(scene_file):
     np.testing.assert_array_equal(spots.longitude_deg, 25.0)
     np.testing.assert_allclose(spots.area_m2, 1e14, rtol=1e-7, atol=0)
     np.testing.assert_array_equal(spots.area_ratio, 5.0)
-    assert spots.umbra_temperature_k == 2500
-    assert spots.penumbra_temperature_k == 2700
+    assert spots.umbra_temperature_K == 2500
+    assert spots.penumbra_temperature_K == 2700
     assert scene.star.metadata["TEFF"] == 5778
 
 
@@ -243,14 +243,14 @@ def _writer_mask_area(mapsize=512, u1=0.0473, u2=0.0841):
     return np.nan_to_num(mask).sum() * 4 / np.pi / mapsize**2
 
 
-def _blackbody_surface_flux(wavelength_um, temperature_k):
+def _blackbody_surface_flux(wavelength_um, temperature_K):
     """Emergent surface flux pi B_lambda in W m^-2 m^-1."""
     lam = wavelength_um * 1e-6
-    x = h * c / (lam * k_B * temperature_k)
+    x = h * c / (lam * k_B * temperature_K)
     return np.pi * 2 * h * c**2 / lam**5 / np.expm1(x)
 
 
-_PHOENIX_STAR = {"temperature_k": 5800.0, "radius_rsun": 1.2, "dist_pc": 15.0}
+_PHOENIX_STAR = {"temperature_K": 5800.0, "radius_Rsun": 1.2, "dist_pc": 15.0}
 
 
 def _write_phoenix_star(path, header_updates=None):
@@ -262,11 +262,11 @@ def _write_phoenix_star(path, header_updates=None):
     star = _PHOENIX_STAR
     with fits.open(path, mode="update") as hdul:
         wave_um = np.asarray(hdul[0].data, dtype=np.float64)
-        surface_cgs = _blackbody_surface_flux(wave_um, star["temperature_k"]) * 10.0
+        surface_cgs = _blackbody_surface_flux(wave_um, star["temperature_K"]) * 10.0
         hdul[5].data[:, 16:] = _writer_mask_area() * surface_cgs[None, :]
         header = hdul[5].header
         del header["SPECUNIT"]
-        header["RSTAR"] = star["radius_rsun"]
+        header["RSTAR"] = star["radius_Rsun"]
         header["DIST"] = star["dist_pc"]
         for key, value in (header_updates or {}).items():
             if value is None:
@@ -281,9 +281,9 @@ def _phoenix_star_observer_jy(wave_um):
     """Observer flux density in Jy of the blackbody star at each wavelength."""
     star = _PHOENIX_STAR
     lam = wave_um * 1e-6
-    radius_m = star["radius_rsun"] * R_sun.to_value("m")
+    radius_m = star["radius_Rsun"] * R_sun.to_value("m")
     dilution = (radius_m / (star["dist_pc"] * pc2m)) ** 2
-    f_nu_jy = _blackbody_surface_flux(wave_um, star["temperature_k"]) * lam**2 / c
+    f_nu_jy = _blackbody_surface_flux(wave_um, star["temperature_K"]) * lam**2 / c
     return f_nu_jy * dilution / Jy
 
 

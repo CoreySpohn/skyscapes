@@ -55,33 +55,35 @@ class System(eqx.Module):
         """Total number of planets across all composed ``Planet`` modules."""
         return sum(p.n_planets for p in self.planets)
 
-    def positions(self, t_jd: Array) -> Array:
+    def positions(self, time_jd: Array) -> Array:
         """Concatenated on-sky positions, shape ``(2, K_total, T)``."""
         per_planet = [
-            p.position_arcsec(self.trig_solver, t_jd, star=self.star)
+            p.position_arcsec(self.trig_solver, time_jd, star=self.star)
             for p in self.planets
         ]
         return jnp.concatenate(per_planet, axis=1)
 
-    def contrasts(self, wavelength_nm: Array, t_jd: Array) -> Array:
+    def contrasts(self, wavelength_nm: Array, time_jd: Array) -> Array:
         """Per-planet contrast, shape ``(K_total, T)``."""
         per_planet = [
-            p.contrast(self.trig_solver, wavelength_nm, t_jd, star=self.star)
+            p.contrast(self.trig_solver, wavelength_nm, time_jd, star=self.star)
             for p in self.planets
         ]
         return jnp.concatenate(per_planet, axis=0)
 
-    def contrast_cube(self, wavelengths_nm: Array, t_jd: Array) -> Array:
+    def contrast_cube(self, wavelengths_nm: Array, time_jd: Array) -> Array:
         """Per-planet contrast at each wavelength, shape ``(W, K_total, T)``.
 
         Args:
             wavelengths_nm: Wavelengths [nm], shape ``(W,)``.
-            t_jd: Observation Julian Dates, shape ``(T,)``.
+            time_jd: Observation Julian Dates, shape ``(T,)``.
         """
-        return jax.vmap(lambda w: self.contrasts(w, t_jd))(jnp.asarray(wavelengths_nm))
+        return jax.vmap(lambda w: self.contrasts(w, time_jd))(
+            jnp.asarray(wavelengths_nm)
+        )
 
     def bin_mean_contrast_cube(
-        self, centers_nm: Array, widths_nm: Array, t_jd: Array, *, n_nodes: int = 4
+        self, centers_nm: Array, widths_nm: Array, time_jd: Array, *, n_nodes: int = 4
     ) -> Array:
         """Ratio of bin-integrated planet and star photons, ``(W, K_total, T)``.
 
@@ -106,7 +108,7 @@ class System(eqx.Module):
                 hi = jnp.clip(grid[1:], low, high)
                 nodes, weights = _bin_nodes((lo + hi) / 2, hi - lo, n_nodes)
                 flux = jax.vmap(
-                    jax.vmap(lambda w: self.planet_flux_densities(w, t_jd))
+                    jax.vmap(lambda w: self.planet_flux_densities(w, time_jd))
                 )(nodes)
                 span = high - low
                 lengths = (hi - lo) / jnp.where(span == 0, 1.0, span)
@@ -115,7 +117,7 @@ class System(eqx.Module):
             numerator = jax.lax.map(integrate_bin, (centers, widths))
         else:
             nodes, weights = _bin_nodes(centers, widths, n_nodes)
-            flux = jax.vmap(jax.vmap(lambda w: self.planet_flux_densities(w, t_jd)))(
+            flux = jax.vmap(jax.vmap(lambda w: self.planet_flux_densities(w, time_jd)))(
                 nodes
             )
             numerator = jnp.einsum("n,wnkt->wkt", weights, flux)
@@ -124,26 +126,29 @@ class System(eqx.Module):
                 centers, widths, t, n_nodes=n_nodes
             ),
             out_axes=1,
-        )(t_jd)
+        )(time_jd)
         point_bin = centers - widths / 2 == centers + widths / 2
         safe_denominator = jnp.where(point_bin[:, None], 1.0, denominator)
         ratio = numerator / safe_denominator[:, None, :]
         return jnp.where(
-            point_bin[:, None, None], self.contrast_cube(centers, t_jd), ratio
+            point_bin[:, None, None], self.contrast_cube(centers, time_jd), ratio
         )
 
-    def planet_flux_densities(self, wavelength_nm: Array, t_jd: Array) -> Array:
+    def planet_flux_densities(self, wavelength_nm: Array, time_jd: Array) -> Array:
         """Per-planet flux density [ph/s/m^2/nm], shape ``(K_total, T)``."""
         per_planet = [
-            p.spec_flux_density(self.trig_solver, wavelength_nm, t_jd, star=self.star)
+            p.spec_flux_density(
+                self.trig_solver, wavelength_nm, time_jd, star=self.star
+            )
             for p in self.planets
         ]
         return jnp.concatenate(per_planet, axis=0)
 
-    def alpha_dMag(self, t_jd: Array) -> tuple[Array, Array]:
+    def alpha_dMag(self, time_jd: Array) -> tuple[Array, Array]:
         """Per-planet projected separation + dMag, each shape ``(K_total, T)``."""
         per_planet = [
-            p.alpha_dMag(self.trig_solver, t_jd, star=self.star) for p in self.planets
+            p.alpha_dMag(self.trig_solver, time_jd, star=self.star)
+            for p in self.planets
         ]
         alpha = jnp.concatenate([a for a, _ in per_planet], axis=0)
         dMag = jnp.concatenate([m for _, m in per_planet], axis=0)

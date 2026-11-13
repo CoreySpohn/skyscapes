@@ -23,5 +23,5 @@ class StarSpots(eqx.Module):
     longitude_deg: Array
     area_m2: Array
     area_ratio: Array
-    umbra_temperature_k: float | None = None
-    penumbra_temperature_k: float | None = None
+    umbra_temperature_K: float | None = None
+    penumbra_temperature_K: float | None = None

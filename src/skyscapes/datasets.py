@@ -101,12 +101,12 @@ _PHOENIX_HASHES = {
 PHOENIX_TEFF_K = tuple(_PHOENIX_HASHES)
 _PHOENIX_URL = (
     "https://archive.stsci.edu/hlsps/reference-atlases/cdbs/grid/phoenix/"
-    "phoenixm00/phoenixm00_{teff_k}.fits"
+    "phoenixm00/phoenixm00_{teff_K}.fits"
 )
 
 
-def _phoenix_name(teff_k: int) -> str:
-    return f"phoenixm00-{teff_k}-v1.fits"
+def _phoenix_name(teff_K: int) -> str:
+    return f"phoenixm00-{teff_K}-v1.fits"
 
 
 # Castelli and Kurucz (2004), solar metallicity, STScI cdbs ck04models.
@@ -192,12 +192,12 @@ _CK04_HASHES = {
 CASTELLI_KURUCZ_TEFF_K = tuple(_CK04_HASHES)
 _CK04_URL = (
     "https://archive.stsci.edu/hlsps/reference-atlases/cdbs/grid/ck04models/"
-    "ckp00/ckp00_{teff_k}.fits"
+    "ckp00/ckp00_{teff_K}.fits"
 )
 
 
-def _ck04_name(teff_k: int) -> str:
-    return f"ckp00-{teff_k}-v1.fits"
+def _ck04_name(teff_K: int) -> str:
+    return f"ckp00-{teff_K}-v1.fits"
 
 
 REGISTRY = {
@@ -206,9 +206,9 @@ REGISTRY = {
     **{_phoenix_name(t): h for t, h in _PHOENIX_HASHES.items()},
 }
 
-_URLS = {_phoenix_name(t): _PHOENIX_URL.format(teff_k=t) for t in _PHOENIX_HASHES}
+_URLS = {_phoenix_name(t): _PHOENIX_URL.format(teff_K=t) for t in _PHOENIX_HASHES}
 
-_URLS.update({_ck04_name(t): _CK04_URL.format(teff_k=t) for t in _CK04_HASHES})
+_URLS.update({_ck04_name(t): _CK04_URL.format(teff_K=t) for t in _CK04_HASHES})
 
 PIKACHU = pooch.create(
     path=pooch.os_cache("skyscapes"),
@@ -235,25 +235,25 @@ def list_phoenix() -> list[int]:
     return list(PHOENIX_TEFF_K)
 
 
-def fetch_phoenix(teff_k: int) -> str:
+def fetch_phoenix(teff_K: int) -> str:
     """Fetch one PHOENIX model-atmosphere node from the STScI archive.
 
     The file holds every tabulated ``logg`` for that Teff. It is downloaded on
     first use, verified against the registry hash, and cached.
 
     Args:
-        teff_k: Node effective temperature in kelvin; one of
+        teff_K: Node effective temperature in kelvin; one of
             ``list_phoenix()``.
 
     Returns:
-        Absolute path to ``phoenixm00_<teff_k>.fits`` in the cache.
+        Absolute path to ``phoenixm00_<teff_K>.fits`` in the cache.
 
     Raises:
-        ValueError: If ``teff_k`` is not a registered node.
+        ValueError: If ``teff_K`` is not a registered node.
     """
-    if teff_k not in _PHOENIX_HASHES:
-        raise ValueError(f"teff_k = {teff_k} is not a registered PHOENIX node.")
-    return str(PIKACHU.fetch(_phoenix_name(teff_k)))
+    if teff_K not in _PHOENIX_HASHES:
+        raise ValueError(f"teff_K = {teff_K} is not a registered PHOENIX node.")
+    return str(PIKACHU.fetch(_phoenix_name(teff_K)))
 
 
 def list_castelli_kurucz() -> list[int]:
@@ -261,13 +261,13 @@ def list_castelli_kurucz() -> list[int]:
     return list(CASTELLI_KURUCZ_TEFF_K)
 
 
-def fetch_castelli_kurucz(teff_k: int) -> str:
+def fetch_castelli_kurucz(teff_K: int) -> str:
     """Fetch a hash-verified Castelli and Kurucz (2004) ATLAS9 FITS node.
 
     Each file contains all gravity columns, including zero-filled columns
     for gravities unavailable at this temperature. See ``list_castelli_kurucz`` for
     registered temperatures in kelvin. Downloads are cached by pooch.
     """
-    if teff_k not in _CK04_HASHES:
-        raise ValueError(f"teff_k = {teff_k} is not a registered CK04 node.")
-    return str(PIKACHU.fetch(_ck04_name(teff_k)))
+    if teff_K not in _CK04_HASHES:
+        raise ValueError(f"teff_K = {teff_K} is not a registered CK04 node.")
+    return str(PIKACHU.fetch(_ck04_name(teff_K)))

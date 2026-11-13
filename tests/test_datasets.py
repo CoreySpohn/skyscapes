@@ -41,8 +41,8 @@ def test_phoenix_registry_is_complete_and_hashed(
     nodes = list_nodes()
     assert len(nodes) == 76
     assert nodes[0] == first and nodes[-1] == last
-    for teff_k in nodes:
-        name = f"{prefix}-{teff_k}-v1.fits"
+    for teff_K in nodes:
+        name = f"{prefix}-{teff_K}-v1.fits"
         assert PIKACHU.registry[name].startswith("sha256:")
         assert PIKACHU.get_url(name).startswith("https://archive.stsci.edu/")
     with pytest.raises(ValueError, match="registered"):

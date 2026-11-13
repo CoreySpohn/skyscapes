@@ -136,8 +136,8 @@ pip install skyscapes
   atmosphere by Teff and `logg`
 
 **Habitable zone**:
-- [`skyscapes.habitable_zone`](how-to/habitable_zone) -- `eeid_au`,
-  `habitable_zone_au`, `kopparapu_habitable_zone_au`
+- [`skyscapes.habitable_zone`](how-to/habitable_zone) -- `eeid_AU`,
+  `habitable_zone_AU`, `kopparapu_habitable_zone_AU`
 
 **See also**:
 - [Source models](explanation/source_models) -- what each source type

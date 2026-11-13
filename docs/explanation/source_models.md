@@ -142,7 +142,7 @@ arrays with shape `(n_times, n_spots)`:
 | `latitude_deg`, `longitude_deg` | Recorded positions in the source's stellar coordinate convention |
 | `area_m2` | Total spot area, including the umbra, converted from the FITS area units |
 | `area_ratio` | Total spot area divided by umbra area |
-| `umbra_temperature_k`, `penumbra_temperature_k` | Component temperatures from the stellar header, or `None` when absent |
+| `umbra_temperature_K`, `penumbra_temperature_K` | Component temperatures from the stellar header, or `None` when absent |
 
 `Star.metadata` retains the stellar FITS header values under uppercase
 keys, excluding blank, `COMMENT`, and `HISTORY` cards. These records
@@ -347,11 +347,11 @@ Requires a user-supplied disk flux normalization.
 from skyscapes.disk import GraterDisk
 
 disk = GraterDisk(
-    sma_inner_au=2.0,
-    sma_outer_au=10.0,
+    sma_inner_AU=2.0,
+    sma_outer_AU=10.0,
     alpha_in=2.0,
     alpha_out=-2.0,
-    scale_height_au=0.1,
+    scale_height_AU=0.1,
     flux_density_at_1au_jy_per_arcsec2=...,
     g_hg=0.3,
 )

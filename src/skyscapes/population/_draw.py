@@ -75,9 +75,9 @@ class PlanetPopulation(eqx.Module):
 
     Attributes:
         present: Whether the slot holds a planet.
-        mass_mearth: Planet mass in Earth masses.
-        radius_rearth: Planet radius in Earth radii.
-        a_au: Semi-major axis in AU.
+        mass_Mearth: Planet mass in Earth masses.
+        radius_Rearth: Planet radius in Earth radii.
+        a_AU: Semi-major axis in AU.
         e: Eccentricity.
         inc_deg: Inclination to the system midplane.
         node_deg: Longitude of the ascending node in the midplane frame.
@@ -89,9 +89,9 @@ class PlanetPopulation(eqx.Module):
     """
 
     present: jnp.ndarray
-    mass_mearth: jnp.ndarray
-    radius_rearth: jnp.ndarray
-    a_au: jnp.ndarray
+    mass_Mearth: jnp.ndarray
+    radius_Rearth: jnp.ndarray
+    a_AU: jnp.ndarray
     e: jnp.ndarray
     inc_deg: jnp.ndarray
     node_deg: jnp.ndarray
@@ -103,9 +103,9 @@ class PlanetPopulation(eqx.Module):
 
 
 _PLANET_FIELDS = (
-    "a_au",
-    "mass_mearth",
-    "radius_rearth",
+    "a_AU",
+    "mass_Mearth",
+    "radius_Rearth",
     "e",
     "inc_deg",
     "node_deg",
@@ -115,7 +115,7 @@ _PLANET_FIELDS = (
 )
 
 
-def earth_like(a_au, radius_rearth, luminosity_lsun):
+def earth_like(a_AU, radius_Rearth, luminosity_Lsun):
     """Whether a planet is an exoEarth candidate (``get_earth_like_planet_indices``).
 
     The scaled semi-major axis ``a / sqrt(L)`` lies in
@@ -123,25 +123,25 @@ def earth_like(a_au, radius_rearth, luminosity_lsun):
     and the radius in ``[0.8 / sqrt(a_scaled), 1.4)`` Earth radii (Stark et al.
     2019, the same box the ExoVista planet-type table uses for exoEarth candidates).
     """
-    a_scaled = a_au / jnp.sqrt(luminosity_lsun)
+    a_scaled = a_AU / jnp.sqrt(luminosity_Lsun)
     lower_r = 0.8 / jnp.sqrt(a_scaled)
     return (
         (a_scaled >= HZ_INNER_EEID)
         & (a_scaled < HZ_OUTER_EEID)
-        & (radius_rearth >= lower_r)
-        & (radius_rearth < 1.4)
+        & (radius_Rearth >= lower_r)
+        & (radius_Rearth < 1.4)
     )
 
 
 def _sort_by_a(fields, present):
     """Order every slot array of every star by semi-major axis, empty slots last."""
-    key = jnp.where(present, fields["a_au"], _ABSENT_A)
+    key = jnp.where(present, fields["a_AU"], _ABSENT_A)
     order = jnp.argsort(key, axis=1)
     take = lambda x: jnp.take_along_axis(x, order, axis=1)  # noqa: E731
     return jax.tree_util.tree_map(take, fields), take(present)
 
 
-def _remove_unstable(a_au, mass_mearth, present, three_star_mass_mearth, hill_min):
+def _remove_unstable(a_AU, mass_Mearth, present, three_star_mass_Mearth, hill_min):
     """Mark planets removed until no pair is closer than `hill_min` mutual Hill radii.
 
     One star, slots sorted by semi-major axis. The first unstable pair loses its
@@ -150,7 +150,7 @@ def _remove_unstable(a_au, mass_mearth, present, three_star_mass_mearth, hill_mi
 
     def unstable_pair(alive):
         idx = jnp.argsort(~alive, stable=True)
-        a, m, ok = a_au[idx], mass_mearth[idx], alive[idx]
+        a, m, ok = a_AU[idx], mass_Mearth[idx], alive[idx]
         a_in, a_out = a[:-1], a[1:]
         m_in, m_out = m[:-1], m[1:]
         both = ok[:-1] & ok[1:]
@@ -159,7 +159,7 @@ def _remove_unstable(a_au, mass_mearth, present, three_star_mass_mearth, hill_mi
             2.0
             * (a_out - a_in)
             / (a_out + a_in)
-            * (three_star_mass_mearth / safe_m) ** (1.0 / 3.0)
+            * (three_star_mass_Mearth / safe_m) ** (1.0 / 3.0)
         )
         bad = both & (hill < hill_min)
         k = jnp.argmax(bad)
@@ -180,30 +180,30 @@ def _uniform_between(key, lo, hi, shape):
     return lo + jax.random.uniform(key, shape) * (hi - lo)
 
 
-def draw_population(key, occurrence, types, luminosity_lsun, mass_msun, config=None):
+def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=None):
     """Draw one world's planets for the stars with the given luminosities and masses.
 
     Args:
         key: A JAX PRNG key.
         occurrence: The `OccurrenceTable` to draw from.
         types: The `PlanetTypes` that planets are assigned to.
-        luminosity_lsun: ``[n_stars]`` host luminosities in solar units.
-        mass_msun: ``[n_stars]`` host masses in solar masses.
+        luminosity_Lsun: ``[n_stars]`` host luminosities in solar units.
+        mass_Msun: ``[n_stars]`` host masses in solar masses.
         config: A `PopulationConfig`; the default is the ExoVista generator's.
 
     Returns:
         A `PlanetPopulation` with ``[n_stars, config.max_planets]`` planet leaves.
     """
     config = PopulationConfig() if config is None else config
-    luminosity_lsun = jnp.asarray(luminosity_lsun, float)
-    n_stars = luminosity_lsun.shape[0]
+    luminosity_Lsun = jnp.asarray(luminosity_Lsun, float)
+    n_stars = luminosity_Lsun.shape[0]
     n_slots = config.max_planets
     n_a, n_m = occurrence.rate.shape
     cap = math.ceil(1.25 * occurrence.total_rate * n_stars) + 64
-    sqrt_l = jnp.sqrt(luminosity_lsun)
-    three_ms = 3.0 * jnp.asarray(mass_msun, float) * _EARTH_MASSES_PER_SUN
-    log_a = jnp.log(occurrence.a_edges_au)
-    log_m = jnp.log(occurrence.mass_edges_mearth)
+    sqrt_l = jnp.sqrt(luminosity_Lsun)
+    three_ms = 3.0 * jnp.asarray(mass_Msun, float) * _EARTH_MASSES_PER_SUN
+    log_a = jnp.log(occurrence.a_edges_AU)
+    log_m = jnp.log(occurrence.mass_edges_Mearth)
 
     key, k_pa, k_inc, k_flip, k_bin = jax.random.split(key, 5)
     midplane_pa = jax.random.uniform(k_pa, (n_stars,)) * 360.0
@@ -261,7 +261,7 @@ def draw_population(key, occurrence, types, luminosity_lsun, mass_msun, config=N
     k = jnp.arange(cap)
 
     empty = {name: jnp.zeros((n_stars, n_slots)) for name in _PLANET_FIELDS}
-    empty["a_au"] = jnp.full((n_stars, n_slots), _ABSENT_A)
+    empty["a_AU"] = jnp.full((n_stars, n_slots), _ABSENT_A)
     empty["cell"] = jnp.full((n_stars, n_slots), -1, jnp.int32)
     present = jnp.zeros((n_stars, n_slots), bool)
 
@@ -288,9 +288,9 @@ def draw_population(key, occurrence, types, luminosity_lsun, mass_msun, config=N
         a_scaled = jnp.exp(_uniform_between(k_a, log_a[ia], log_a[ia + 1], (cap,)))
         mass = jnp.exp(_uniform_between(k_m, log_m[im], log_m[im + 1], (cap,)))
         new = {
-            "a_au": a_scaled * sqrt_l[star],
-            "mass_mearth": mass,
-            "radius_rearth": mass_to_radius(mass),
+            "a_AU": a_scaled * sqrt_l[star],
+            "mass_Mearth": mass,
+            "radius_Rearth": mass_to_radius(mass),
             "e": _uniform_between(k_e, config.e_min, config.e_max, (cap,)),
             "inc_deg": _uniform_between(
                 k_i, config.inc_min_deg, config.inc_max_deg, (cap,)
@@ -329,8 +329,8 @@ def draw_population(key, occurrence, types, luminosity_lsun, mass_msun, config=N
         fields = {name: value[:, :n_slots] for name, value in merged.items()}
         present = merged_present[:, :n_slots]
         alive = jax.vmap(_remove_unstable, in_axes=(0, 0, 0, 0, None))(
-            fields["a_au"],
-            fields["mass_mearth"],
+            fields["a_AU"],
+            fields["mass_Mearth"],
             present,
             three_ms,
             config.mutual_hill_min,
@@ -361,18 +361,18 @@ def draw_population(key, occurrence, types, luminosity_lsun, mass_msun, config=N
 
     # Planet types: those whose ranges contain the planet, by selection weight.
     key, k_type = jax.random.split(key)
-    a_scaled = fields["a_au"] / sqrt_l[:, None]
-    radius = fields["radius_rearth"]
+    a_scaled = fields["a_AU"] / sqrt_l[:, None]
+    radius = fields["radius_Rearth"]
     r_lo = jnp.where(
         types.earth_candidate[None, None, :],
-        types.radius_min_rearth[None, None, :] / jnp.sqrt(a_scaled)[..., None],
-        types.radius_min_rearth[None, None, :],
+        types.radius_min_Rearth[None, None, :] / jnp.sqrt(a_scaled)[..., None],
+        types.radius_min_Rearth[None, None, :],
     )
     fits = (
         (r_lo < radius[..., None])
-        & (radius[..., None] < types.radius_max_rearth[None, None, :])
-        & (types.a_min_au[None, None, :] < a_scaled[..., None])
-        & (a_scaled[..., None] < types.a_max_au[None, None, :])
+        & (radius[..., None] < types.radius_max_Rearth[None, None, :])
+        & (types.a_min_AU[None, None, :] < a_scaled[..., None])
+        & (a_scaled[..., None] < types.a_max_AU[None, None, :])
     )
     any_candidate = jnp.any(fits & types.earth_candidate, axis=-1, keepdims=True)
     p_eec = config.earth_candidate_probability
@@ -390,9 +390,9 @@ def draw_population(key, occurrence, types, luminosity_lsun, mass_msun, config=N
 
     return PlanetPopulation(
         present=present,
-        mass_mearth=masked("mass_mearth"),
-        radius_rearth=masked("radius_rearth"),
-        a_au=masked("a_au"),
+        mass_Mearth=masked("mass_Mearth"),
+        radius_Rearth=masked("radius_Rearth"),
+        a_AU=masked("a_AU"),
         e=masked("e"),
         inc_deg=masked("inc_deg"),
         node_deg=masked("node_deg"),
@@ -412,7 +412,7 @@ class SkyElements(eqx.Module):
     ``M0_rad`` the mean anomaly. Each leaf has shape ``[n_stars, max_planets]``.
 
     Attributes:
-        a_au: Semi-major axis.
+        a_AU: Semi-major axis.
         e: Eccentricity.
         i_rad: Inclination to the sky plane.
         W_rad: Position angle of the ascending node.
@@ -421,7 +421,7 @@ class SkyElements(eqx.Module):
         period_d: Orbital period in days (planet mass included in the total mass).
     """
 
-    a_au: jnp.ndarray
+    a_AU: jnp.ndarray
     e: jnp.ndarray
     i_rad: jnp.ndarray
     W_rad: jnp.ndarray
@@ -451,10 +451,10 @@ def _kepler_e(mean_anomaly, e):
 
 
 def _sky_elements_one(
-    a_au, e, inc, node, peri, anom, mass_mearth, star_mass_msun, mid_inc, mid_pa
+    a_AU, e, inc, node, peri, anom, mass_Mearth, star_mass_Msun, mid_inc, mid_pa
 ):
-    mu = G_si * (star_mass_msun * Msun2kg + mass_mearth * Mearth2kg)
-    a_m = a_au * AU2m
+    mu = G_si * (star_mass_Msun * Msun2kg + mass_Mearth * Mearth2kg)
+    a_m = a_AU * AU2m
     n = jnp.sqrt(mu / a_m**3)
     ecc_anomaly = _kepler_e(anom, e)
     root = jnp.sqrt(1.0 - e * e)
@@ -484,7 +484,7 @@ def _sky_elements_one(
     return e_sky, i, big_w, w, m, 2.0 * jnp.pi / n / d2s
 
 
-def sky_elements(population, star_mass_msun):
+def sky_elements(population, star_mass_Msun):
     """Sky-frame Keplerian elements of a `PlanetPopulation`.
 
     The planet state at the reference epoch is built in the system midplane
@@ -495,7 +495,7 @@ def sky_elements(population, star_mass_msun):
 
     Args:
         population: One world's `PlanetPopulation`.
-        star_mass_msun: ``[n_stars]`` host masses in solar masses.
+        star_mass_Msun: ``[n_stars]`` host masses in solar masses.
     """
     rad = jnp.pi / 180.0
     present = population.present
@@ -505,19 +505,19 @@ def sky_elements(population, star_mass_msun):
         in_axes=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
     )
     e, i, big_w, w, m, period = one(
-        safe(population.a_au, 1.0),
+        safe(population.a_AU, 1.0),
         population.e,
         population.inc_deg * rad,
         population.node_deg * rad,
         population.argperi_deg * rad,
         population.mean_anomaly_deg * rad,
-        population.mass_mearth,
-        jnp.asarray(star_mass_msun, float),
+        population.mass_Mearth,
+        jnp.asarray(star_mass_Msun, float),
         population.midplane_inc_deg * rad,
         population.midplane_pa_deg * rad,
     )
     return SkyElements(
-        a_au=population.a_au,
+        a_AU=population.a_AU,
         e=e,
         i_rad=i,
         W_rad=big_w,
@@ -528,7 +528,7 @@ def sky_elements(population, star_mass_msun):
 
 
 def draw_populations(
-    key, n_worlds, occurrence, types, luminosity_lsun, mass_msun, config=None
+    key, n_worlds, occurrence, types, luminosity_Lsun, mass_Msun, config=None
 ):
     """Draw `n_worlds` independent worlds, one after another to bound memory.
 
@@ -539,7 +539,7 @@ def draw_populations(
     keys = jax.random.split(key, n_worlds)
     return jax.lax.map(
         lambda k: draw_population(
-            k, occurrence, types, luminosity_lsun, mass_msun, config
+            k, occurrence, types, luminosity_Lsun, mass_Msun, config
         ),
         keys,
     )

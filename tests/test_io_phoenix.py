@@ -35,8 +35,8 @@ SIGMA_SB_TEST = 5.670374419e-8  # typed once here; parity with hwoutils asserted
 REQUIRE_DATA = os.environ.get("SKYSCAPES_REQUIRE_DATA") == "1"
 
 
-def fixture_path(teff_k: int) -> str:
-    return str(DATA / f"phoenixm00_{teff_k}_test.fits")
+def fixture_path(teff_K: int) -> str:
+    return str(DATA / f"phoenixm00_{teff_K}_test.fits")
 
 
 def photon_energy_flux_w_m2(star, wavelength_nm):
@@ -51,13 +51,13 @@ def band_mean(wavelength_nm, values, low_nm, high_nm):
     return values[keep].mean()
 
 
-def planck_lambda(wavelength_nm, teff_k):
+def planck_lambda(wavelength_nm, teff_K):
     """Shape of the Planck spectral radiance per wavelength (arbitrary scale)."""
-    x = h * c_si / (wavelength_nm * 1e-9 * k_B * teff_k)
+    x = h * c_si / (wavelength_nm * 1e-9 * k_B * teff_K)
     return 1.0 / (wavelength_nm**5 * np.expm1(x))
 
 
-def co_band_depth_of(wavelength_nm, flux, teff_k):
+def co_band_depth_of(wavelength_nm, flux, teff_K):
     """Fractional CO depth of 4.55-4.95 micron relative to 3.95-4.25 micron.
 
     Both windows are divided by a same-Teff Planck shape first, so a blackbody
@@ -65,20 +65,20 @@ def co_band_depth_of(wavelength_nm, flux, teff_k):
     """
     keep = (wavelength_nm >= 3900.0) & (wavelength_nm <= 5000.0)
     wavelength_nm = wavelength_nm[keep]
-    ratio = flux[keep] / planck_lambda(wavelength_nm, teff_k)
+    ratio = flux[keep] / planck_lambda(wavelength_nm, teff_K)
     band = band_mean(wavelength_nm, ratio, 4550.0, 4950.0)
     continuum = band_mean(wavelength_nm, ratio, 3950.0, 4250.0)
     return 1.0 - band / continuum
 
 
-def co_band_depth(teff_k, logg):
+def co_band_depth(teff_K, logg):
     """CO depth of a fixture model."""
-    wavelength_nm, flux = phoenix_surface_flux(teff_k, logg, fetch=fixture_fetch)
-    return co_band_depth_of(wavelength_nm, flux, teff_k)
+    wavelength_nm, flux = phoenix_surface_flux(teff_K, logg, fetch=fixture_fetch)
+    return co_band_depth_of(wavelength_nm, flux, teff_K)
 
 
-def fixture_fetch(teff_k):
-    return fixture_path(teff_k)
+def fixture_fetch(teff_K):
+    return fixture_path(teff_K)
 
 
 def test_sigma_parity():
@@ -87,8 +87,8 @@ def test_sigma_parity():
 
 
 @vv.case("stellar-photometry", "code-verification")
-@pytest.mark.parametrize(("teff_k", "logg"), [(3500, 5.0), (3600, 5.0), (5800, 4.5)])
-def test_surface_flux_integrates_to_sigma_teff4(teff_k, logg):
+@pytest.mark.parametrize(("teff_K", "logg"), [(3500, 5.0), (3600, 5.0), (5800, 4.5)])
+def test_surface_flux_integrates_to_sigma_teff4(teff_K, logg):
     """Integrated surface flux equals sigma Teff^4 within 5 percent.
 
     Truth: the Stefan-Boltzmann law for a model atmosphere that conserves flux.
@@ -100,9 +100,9 @@ def test_surface_flux_integrates_to_sigma_teff4(teff_k, logg):
 
     Fails if the header unit conversion of wavelength or flux is wrong.
     """
-    wavelength_nm, flux = phoenix_surface_flux(teff_k, logg, fetch=fixture_fetch)
+    wavelength_nm, flux = phoenix_surface_flux(teff_K, logg, fetch=fixture_fetch)
     bolometric = np.trapezoid(flux, wavelength_nm)
-    np.testing.assert_allclose(bolometric, SIGMA_SB_TEST * teff_k**4, rtol=0.05)
+    np.testing.assert_allclose(bolometric, SIGMA_SB_TEST * teff_K**4, rtol=0.05)
 
 
 @vv.seam("skyscapes", "coronagraphoto")
@@ -117,9 +117,9 @@ def test_star_photon_flux_energy_matches_dilution():
     Fails if the surface flux is not diluted by (R / d)^2, or if the Jy and
     photon conversions between the model and ``Star`` are off by a unit.
     """
-    teff_k, radius_m, dist_pc = 3500.0, 0.4 * Rsun2m, 5.0
+    teff_K, radius_m, dist_pc = 3500.0, 0.4 * Rsun2m, 5.0
     star = from_phoenix(
-        teff_k,
+        teff_K,
         5.0,
         Ms_kg=1.0e30,
         dist_pc=dist_pc,
@@ -127,17 +127,17 @@ def test_star_photon_flux_energy_matches_dilution():
         wavelength_range_nm=None,
         fetch=fixture_fetch,
     )
-    wavelength_nm, _ = phoenix_surface_flux(teff_k, 5.0, fetch=fixture_fetch)
+    wavelength_nm, _ = phoenix_surface_flux(teff_K, 5.0, fetch=fixture_fetch)
     energy = photon_energy_flux_w_m2(star, wavelength_nm)
-    expected = SIGMA_SB_TEST * teff_k**4 * (radius_m / (dist_pc * pc2m)) ** 2
+    expected = SIGMA_SB_TEST * teff_K**4 * (radius_m / (dist_pc * pc2m)) ** 2
     np.testing.assert_allclose(energy, expected, rtol=0.05)
     np.testing.assert_allclose(
         star.diameter_arcsec,
         np.degrees(2 * radius_m / (dist_pc * pc2m)) * 3600.0,
         rtol=1e-6,
     )
-    assert star.luminosity_lsun == pytest.approx(
-        (radius_m / Rsun2m) ** 2 * (teff_k / 5772.0) ** 4
+    assert star.luminosity_Lsun == pytest.approx(
+        (radius_m / Rsun2m) ** 2 * (teff_K / 5772.0) ** 4
     )
 
 
@@ -171,7 +171,7 @@ def test_out_of_grid_requests_raise():
 
     Fails if a request outside the registered grid returns the edge model.
     """
-    with pytest.raises(ValueError, match="teff_k"):
+    with pytest.raises(ValueError, match="teff_K"):
         phoenix_surface_flux(1500.0, 5.0, fetch=fixture_fetch)
     with pytest.raises(ValueError, match="logg"):
         phoenix_surface_flux(3500.0, 3.0, fetch=fixture_fetch)
@@ -244,8 +244,8 @@ def test_archive_node_matches_vendored_copy():
         pytest.skip(
             f"data-absent: PHOENIX 3500 K node not cached and no network ({error})"
         )
-    wavelength_nm, logg, flux, teff_k = _read_model(path)
-    assert teff_k == 3500.0
+    wavelength_nm, logg, flux, teff_K = _read_model(path)
+    assert teff_K == 3500.0
     full = flux[list(logg).index(5.0)]
     np.testing.assert_allclose(
         np.trapezoid(full, wavelength_nm), SIGMA_SB_TEST * 3500.0**4, rtol=0.01
@@ -255,10 +255,10 @@ def test_archive_node_matches_vendored_copy():
 
 
 @pytest.mark.parametrize(
-    "teff_k, logg, factor", [(12000.0, 4.0, 1.0), (12125.0, 4.25, 4.0)]
+    "teff_K, logg, factor", [(12000.0, 4.0, 1.0), (12125.0, 4.25, 4.0)]
 )
 def test_castelli_kurucz_synthetic_units_and_missing_gravity(
-    tmp_path, teff_k, logg, factor
+    tmp_path, teff_K, logg, factor
 ):
     """Fails if CK04 columns, missing gravities, log blends, or units are misread."""
     wave_angstrom = np.array([9000.0, 10000.0, 20000.0, 40000.0, 60000.0])
@@ -279,7 +279,7 @@ def test_castelli_kurucz_synthetic_units_and_missing_gravity(
         fits.HDUList([primary, fits.BinTableHDU.from_columns(columns)]).writeto(path)
         paths[temperature] = str(path)
     star = from_castelli_kurucz(
-        teff_k,
+        teff_K,
         logg,
         Ms_kg=Msun2kg,
         dist_pc=10,

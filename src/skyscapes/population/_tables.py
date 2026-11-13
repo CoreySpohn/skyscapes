@@ -31,13 +31,13 @@ _R_AT_BREAK_1 = 1.008 * _M_BREAK_1**0.279
 _R_AT_BREAK_2 = _R_AT_BREAK_1 * (_M_BREAK_2 / _M_BREAK_1) ** 0.589
 
 
-def mass_to_radius(mass_mearth):
+def mass_to_radius(mass_Mearth):
     """Mean radius in Earth radii of a planet, Chen and Kipping (2017) forecaster.
 
     Accepts NumPy or JAX input and returns the same kind.
     """
-    xp = jnp if isinstance(mass_mearth, jax.Array) else np
-    m = xp.asarray(mass_mearth, float)
+    xp = jnp if isinstance(mass_Mearth, jax.Array) else np
+    m = xp.asarray(mass_Mearth, float)
     return xp.where(
         m <= _M_BREAK_1,
         1.008 * m**0.279,
@@ -49,13 +49,13 @@ def mass_to_radius(mass_mearth):
     )
 
 
-def radius_to_mass(radius_rearth):
+def radius_to_mass(radius_Rearth):
     """Mass in Earth masses for a radius, the inverse of `mass_to_radius`.
 
     The Jovian branch is not monotonic; like the generator this returns the
     lower-mass branch, and it is only used for radius bin edges below 10 Earth radii.
     """
-    r = np.asarray(radius_rearth, float)
+    r = np.asarray(radius_Rearth, float)
     mass = (r / 1.008) ** (1.0 / 0.279)
     mass = np.where(
         r > _R_AT_BREAK_1, (r / _R_AT_BREAK_1) ** (1.0 / 0.589) * _M_BREAK_1, mass
@@ -280,8 +280,8 @@ class OccurrenceTable(eqx.Module):
 
     Attributes:
         rate: ``float[n_a, n_m]`` expected planets per star in each cell.
-        a_edges_au: ``float[n_a + 1]`` cell edges of ``a / sqrt(L)`` in AU.
-        mass_edges_mearth: ``float[n_m + 1]`` cell edges of planet mass in Earth masses.
+        a_edges_AU: ``float[n_a + 1]`` cell edges of ``a / sqrt(L)`` in AU.
+        mass_edges_Mearth: ``float[n_m + 1]`` cell edges of planet mass in Earth masses.
         bin_id: ``int[n_a, n_m]`` planet bin of each cell (a radius bin crossed with a
             stellar-flux sub-bin); the draw fixes the planet count of each bin.
         n_bins: Number of planet bins.
@@ -289,27 +289,27 @@ class OccurrenceTable(eqx.Module):
     """
 
     rate: jnp.ndarray
-    a_edges_au: jnp.ndarray
-    mass_edges_mearth: jnp.ndarray
+    a_edges_AU: jnp.ndarray
+    mass_edges_Mearth: jnp.ndarray
     bin_id: jnp.ndarray
     n_bins: int = eqx.field(static=True)
     total_rate: float = eqx.field(static=True)
 
 
-def occurrence_table_from_grid(rate, a_edges_au, mass_edges_mearth, bin_id):
+def occurrence_table_from_grid(rate, a_edges_AU, mass_edges_Mearth, bin_id):
     """Build an `OccurrenceTable` from a rate grid and the bin index of each cell.
 
     Args:
         rate: ``[n_a, n_m]`` expected planets per star per cell.
-        a_edges_au: ``[n_a + 1]`` edges of the scaled semi-major axis.
-        mass_edges_mearth: ``[n_m + 1]`` edges of the planet mass.
+        a_edges_AU: ``[n_a + 1]`` edges of the scaled semi-major axis.
+        mass_edges_Mearth: ``[n_m + 1]`` edges of the planet mass.
         bin_id: ``int[n_a, n_m]`` planet bin of each cell, -1 outside every bin.
     """
     rate, bin_id = np.asarray(rate, float), np.asarray(bin_id, np.int32)
     return OccurrenceTable(
         rate=jnp.asarray(rate),
-        a_edges_au=jnp.asarray(a_edges_au),
-        mass_edges_mearth=jnp.asarray(mass_edges_mearth),
+        a_edges_AU=jnp.asarray(a_edges_AU),
+        mass_edges_Mearth=jnp.asarray(mass_edges_Mearth),
         bin_id=jnp.asarray(bin_id),
         n_bins=int(bin_id.max()) + 1,
         total_rate=float(rate[bin_id >= 0].sum()),
@@ -327,11 +327,11 @@ class PlanetTypes(eqx.Module):
 
     Attributes:
         names: One name per type.
-        radius_min_rearth: ``[n_types]`` lower radius edge; for exoEarth-candidate
+        radius_min_Rearth: ``[n_types]`` lower radius edge; for exoEarth-candidate
             types the edge is scaled by ``1 / sqrt(a_scaled)``.
-        radius_max_rearth: ``[n_types]`` upper radius edge.
-        a_min_au: ``[n_types]`` lower edge of the scaled semi-major axis.
-        a_max_au: ``[n_types]`` upper edge of the scaled semi-major axis.
+        radius_max_Rearth: ``[n_types]`` upper radius edge.
+        a_min_AU: ``[n_types]`` lower edge of the scaled semi-major axis.
+        a_max_AU: ``[n_types]`` upper edge of the scaled semi-major axis.
         weight: ``[n_types]`` selection weight among the types that fit a planet.
         earth_candidate: ``bool[n_types]`` whether the type is an exoEarth candidate.
         wavelength_nm: ``[n_wavelengths]`` common wavelength grid of the spectra.
@@ -339,10 +339,10 @@ class PlanetTypes(eqx.Module):
     """
 
     names: tuple[str, ...] = eqx.field(static=True)
-    radius_min_rearth: jnp.ndarray
-    radius_max_rearth: jnp.ndarray
-    a_min_au: jnp.ndarray
-    a_max_au: jnp.ndarray
+    radius_min_Rearth: jnp.ndarray
+    radius_max_Rearth: jnp.ndarray
+    a_min_AU: jnp.ndarray
+    a_max_AU: jnp.ndarray
     weight: jnp.ndarray
     earth_candidate: jnp.ndarray
     wavelength_nm: jnp.ndarray
@@ -372,10 +372,10 @@ def load_planet_types():
         raise ValueError("albedo_spectra.npz does not match albedo_list.csv")
     return PlanetTypes(
         names=names,
-        radius_min_rearth=column(1),
-        radius_max_rearth=column(2),
-        a_min_au=column(3),
-        a_max_au=column(4),
+        radius_min_Rearth=column(1),
+        radius_max_Rearth=column(2),
+        a_min_AU=column(3),
+        a_max_AU=column(4),
         weight=column(5),
         earth_candidate=jnp.asarray([row[6] == "True" for row in rows]),
         wavelength_nm=jnp.asarray(spectra["wavelength_nm"]),

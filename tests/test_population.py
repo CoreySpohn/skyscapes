@@ -49,7 +49,7 @@ def test_planets_are_hill_stable_sorted_and_zero_when_absent(world):
     slots are not sorted by semi-major axis, or if an absent slot keeps values.
     """
     present = np.asarray(world.present)
-    a, m = np.asarray(world.a_au), np.asarray(world.mass_mearth)
+    a, m = np.asarray(world.a_AU), np.asarray(world.mass_Mearth)
     for s in range(N_STARS):
         n = present[s].sum()
         assert present[s, :n].all() and not present[s, n:].any()
@@ -62,7 +62,7 @@ def test_planets_are_hill_stable_sorted_and_zero_when_absent(world):
             * (three_ms / (m[s, 1:n] + m[s, : n - 1])) ** (1.0 / 3.0)
         )
         assert np.all(hill >= 6.0)
-    for name in ("a_au", "mass_mearth", "radius_rearth", "inc_deg"):
+    for name in ("a_AU", "mass_Mearth", "radius_Rearth", "inc_deg"):
         assert np.all(np.asarray(getattr(world, name))[~present] == 0.0)
 
 
@@ -89,8 +89,8 @@ def test_draw_is_deterministic_in_the_key(draw, world):
     Fails if the draw reads global random state or ignores the key.
     """
     again, other = draw(0), draw(1)
-    assert np.array_equal(np.asarray(again.a_au), np.asarray(world.a_au))
-    assert not np.array_equal(np.asarray(other.a_au), np.asarray(world.a_au))
+    assert np.array_equal(np.asarray(again.a_AU), np.asarray(world.a_AU))
+    assert not np.array_equal(np.asarray(other.a_AU), np.asarray(world.a_AU))
 
 
 def test_orbit_ranges_follow_the_config(draw):
@@ -107,7 +107,7 @@ def test_orbit_ranges_follow_the_config(draw):
 
 
 @pytest.mark.parametrize(
-    ("a_au", "radius_rearth", "luminosity", "expected"),
+    ("a_AU", "radius_Rearth", "luminosity", "expected"),
     [
         (0.95, 1.0, 1.0, True),  # inner edge is inclusive
         (1.67, 1.0, 1.0, False),  # outer edge is exclusive
@@ -116,12 +116,12 @@ def test_orbit_ranges_follow_the_config(draw):
         (0.5, 1.0, 0.25, True),  # scaled by sqrt(L): a / sqrt(L) = 1
     ],
 )
-def test_earth_like_box_edges(a_au, radius_rearth, luminosity, expected):
+def test_earth_like_box_edges(a_AU, radius_Rearth, luminosity, expected):
     """The exoEarth-candidate box has the edges of get_earth_like_planet_indices.
 
     Fails if an edge flips inclusivity or the luminosity scaling is dropped.
     """
-    assert bool(earth_like(a_au, radius_rearth, luminosity)) is expected
+    assert bool(earth_like(a_AU, radius_Rearth, luminosity)) is expected
 
 
 def test_sky_elements_match_orbit_geometry(world):
@@ -133,11 +133,11 @@ def test_sky_elements_match_orbit_geometry(world):
     """
     present = world.present
     base = eqx.tree_at(
-        lambda p: (p.a_au, p.mass_mearth, p.inc_deg, p.e),
+        lambda p: (p.a_AU, p.mass_Mearth, p.inc_deg, p.e),
         world,
         (
             jnp.where(present, 1.0, 0.0),
-            jnp.zeros_like(world.mass_mearth),
+            jnp.zeros_like(world.mass_Mearth),
             jnp.zeros_like(world.inc_deg),
             jnp.full_like(world.e, 0.25),
         ),

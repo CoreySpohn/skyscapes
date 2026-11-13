@@ -169,7 +169,7 @@ def test_temperature_gradient_is_finite_in_single_precision(
     with jax.enable_x64(False):
         wl = jnp.asarray(wavelength, jnp.float32)
         args = (jnp.zeros((1, 2), jnp.float32), jnp.ones((1, 2), jnp.float32))
-        t_jd = jnp.array([0.0, 1.0], jnp.float32)
+        time_jd = jnp.array([0.0, 1.0], jnp.float32)
         rp = jnp.array([15.7], jnp.float32)
 
         def observable(teff):
@@ -178,8 +178,8 @@ def test_temperature_gradient_is_finite_in_single_precision(
                 return model.spec_flux_density(wl, rp, STAR.dist_pc)[0]
             if quantity == "star_flux":
                 star = BlackbodyStar(STAR.Ms_kg, STAR.dist_pc, teff[0], STAR.radius_m)
-                return star.spec_flux_density(wl, t_jd)
-            out = model.contrast_at_time(*args, wl, rp, time_jd=t_jd, star=STAR)
+                return star.spec_flux_density(wl, time_jd)
+            out = model.contrast_at_time(*args, wl, rp, time_jd=time_jd, star=STAR)
             return jnp.log(out)[0, 0]
 
         def derivatives(teff):

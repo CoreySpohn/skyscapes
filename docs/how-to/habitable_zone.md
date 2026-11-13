@@ -13,14 +13,14 @@ mystnb:
 habitable zone, in AU, for one star or for a whole target list. It offers two
 definitions.
 
-- {func}`~skyscapes.habitable_zone.habitable_zone_au` scales fixed edges by
+- {func}`~skyscapes.habitable_zone.habitable_zone_AU` scales fixed edges by
   the Earth-equivalent insolation distance (EEID), $a_\mathrm{EEID} =
   \sqrt{L_\star / L_\odot}$ AU. The conservative zone, 0.95 to 1.67 EEID, is
   the exoEarth-candidate zone of Stark et al. (2019); the optimistic zone,
   0.75 to 1.77 EEID, is the recent-Venus to early-Mars range of Kopparapu et
   al. (2013). It needs only the luminosity, and it is the definition used for
   exoEarth-candidate yields.
-- {func}`~skyscapes.habitable_zone.kopparapu_habitable_zone_au` uses the
+- {func}`~skyscapes.habitable_zone.kopparapu_habitable_zone_AU` uses the
   effective-flux limits of Kopparapu et al. (2014), which also depend on the
   stellar effective temperature (valid for 2600 K to 7200 K).
 
@@ -31,23 +31,23 @@ import jax
 import jax.numpy as jnp
 
 from skyscapes.habitable_zone import (
-    eeid_au,
-    habitable_zone_au,
-    kopparapu_habitable_zone_au,
+    eeid_AU,
+    habitable_zone_AU,
+    kopparapu_habitable_zone_AU,
 )
 
 jax.config.update("jax_enable_x64", True)
 
-luminosity_lsun = 0.6
-print("EEID [AU]:", float(eeid_au(luminosity_lsun)))
-print("conservative [AU]:", [float(x) for x in habitable_zone_au(luminosity_lsun)])
+luminosity_Lsun = 0.6
+print("EEID [AU]:", float(eeid_AU(luminosity_Lsun)))
+print("conservative [AU]:", [float(x) for x in habitable_zone_AU(luminosity_Lsun)])
 print(
     "optimistic [AU]:",
-    [float(x) for x in habitable_zone_au(luminosity_lsun, optimistic=True)],
+    [float(x) for x in habitable_zone_AU(luminosity_Lsun, optimistic=True)],
 )
 print(
     "Kopparapu, Teff = 5200 K [AU]:",
-    [float(x) for x in kopparapu_habitable_zone_au(luminosity_lsun, 5200.0)],
+    [float(x) for x in kopparapu_habitable_zone_AU(luminosity_Lsun, 5200.0)],
 )
 ```
 
@@ -57,14 +57,14 @@ Every function broadcasts over arrays and works under `jax.vmap`, so a target
 list goes through in one call.
 
 ```{code-cell} ipython3
-luminosities_lsun = jnp.array([0.08, 0.35, 1.0, 1.9, 4.5])
-teffs_k = jnp.array([3800.0, 4800.0, 5780.0, 6300.0, 6900.0])
+luminosities_Lsun = jnp.array([0.08, 0.35, 1.0, 1.9, 4.5])
+teffs_K = jnp.array([3800.0, 4800.0, 5780.0, 6300.0, 6900.0])
 
-inner_au, outer_au = jax.vmap(habitable_zone_au)(luminosities_lsun)
-k_inner_au, k_outer_au = jax.vmap(kopparapu_habitable_zone_au)(
-    luminosities_lsun, teffs_k
+inner_AU, outer_AU = jax.vmap(habitable_zone_AU)(luminosities_Lsun)
+k_inner_AU, k_outer_AU = jax.vmap(kopparapu_habitable_zone_AU)(
+    luminosities_Lsun, teffs_K
 )
-for row in zip(luminosities_lsun, teffs_k, inner_au, outer_au, k_inner_au, k_outer_au):
+for row in zip(luminosities_Lsun, teffs_K, inner_AU, outer_AU, k_inner_AU, k_outer_AU):
     print("L = {:.2f}  Teff = {:.0f} K  EEID: {:.3f}-{:.3f} AU  "
           "Kopparapu: {:.3f}-{:.3f} AU".format(*map(float, row)))
 ```
@@ -81,14 +81,14 @@ import matplotlib.pyplot as plt
 
 hwostyle.use("light")
 
-teff_k = jnp.linspace(2600.0, 7200.0, 200)
+teff_K = jnp.linspace(2600.0, 7200.0, 200)
 fig, ax = plt.subplots(figsize=(6, 4.4), layout="constrained")
 for optimistic, style in ((False, "-"), (True, "--")):
     label = "optimistic" if optimistic else "conservative"
-    inner_eeid, outer_eeid = kopparapu_habitable_zone_au(1.0, teff_k, optimistic)
-    ax.plot(teff_k, inner_eeid, "C0" + style, label=f"Kopparapu {label}")
-    ax.plot(teff_k, outer_eeid, "C0" + style)
-    flat_inner, flat_outer = habitable_zone_au(1.0, optimistic)
+    inner_eeid, outer_eeid = kopparapu_habitable_zone_AU(1.0, teff_K, optimistic)
+    ax.plot(teff_K, inner_eeid, "C0" + style, label=f"Kopparapu {label}")
+    ax.plot(teff_K, outer_eeid, "C0" + style)
+    flat_inner, flat_outer = habitable_zone_AU(1.0, optimistic)
     ax.axhline(float(flat_inner), color="C1", ls=style, label=f"EEID-scaled {label}")
     ax.axhline(float(flat_outer), color="C1", ls=style)
 ax.set_xlabel("Host effective temperature [K]")

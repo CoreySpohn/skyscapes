@@ -69,20 +69,20 @@ class Planet(eqx.Module):
         known = jnp.isfinite(mp_kg) & (mp_kg > 0.0)
         return star.Ms_kg + jnp.where(known, mp_kg, 0.0)
 
-    def mean_anomaly(self, t_jd: Array, *, star: AbstractStar) -> Array:
+    def mean_anomaly(self, time_jd: Array, *, star: AbstractStar) -> Array:
         """Mean anomaly mod 360 [deg], shape ``(K, T)``.
 
-        ``t_jd`` must be shape ``(T,)`` -- no rank polymorphism. Callers
+        ``time_jd`` must be shape ``(T,)`` -- no rank polymorphism. Callers
         that hold a scalar should wrap it in ``jnp.asarray([t])`` at the
         call site.
         """
         n = mean_motion(self.orbit.a_AU, G * self.central_mass_kg(star=star))
         T_d = period_n(n)
         tp_d = self.orbit.t0_d - T_d * self.orbit.M0_rad / two_pi
-        M = mean_anomaly_tp(t_jd[None, :], n[:, None], tp_d[:, None]) % two_pi
+        M = mean_anomaly_tp(time_jd[None, :], n[:, None], tp_d[:, None]) % two_pi
         return jnp.rad2deg(M)
 
-    def propagate(self, trig_solver, t_jd: Array, *, star: AbstractStar):
+    def propagate(self, trig_solver, time_jd: Array, *, star: AbstractStar):
         """Propagate the orbit; returns ``(r_AU, phase_angle_rad, dist_AU)``.
 
         ``r_AU`` has shape ``(K, 3, T)`` in orbix's right-handed
@@ -97,13 +97,13 @@ class Planet(eqx.Module):
         In this sky chart, ``cos(phase_angle_rad) = +r_AU[:, 2, :] / dist_AU``.
         """
         return self.orbit.propagate(
-            trig_solver, t_jd, Ms_kg=self.central_mass_kg(star=star)
+            trig_solver, time_jd, Ms_kg=self.central_mass_kg(star=star)
         )
 
     def position_arcsec(
         self,
         trig_solver,
-        t_jd: Array,
+        time_jd: Array,
         *,
         star: AbstractStar,
     ) -> Array:
@@ -112,7 +112,7 @@ class Planet(eqx.Module):
         ``(dRA, dDec) = (Delta alpha*, Delta Dec)``, where the east offset
         ``Delta alpha* = Delta RA cos Dec`` includes the declination factor.
         """
-        r_AU, _, _ = self.propagate(trig_solver, t_jd, star=star)
+        r_AU, _, _ = self.propagate(trig_solver, time_jd, star=star)
         dist_AU = star.dist_pc * pc2AU
         scale = rad2arcsec / dist_AU
         ra = r_AU[:, 0, :] * scale
@@ -122,7 +122,7 @@ class Planet(eqx.Module):
     def alpha_dMag(
         self,
         trig_solver,
-        t_jd: Array,
+        time_jd: Array,
         *,
         star: AbstractStar,
         wavelength_nm: float = 600.0,
@@ -135,7 +135,7 @@ class Planet(eqx.Module):
         dependent models, ``dMag`` is evaluated at ``wavelength_nm``;
         pick a value within the model's spectral grid.
         """
-        r_AU, phase_angle_rad, dist_AU = self.propagate(trig_solver, t_jd, star=star)
+        r_AU, phase_angle_rad, dist_AU = self.propagate(trig_solver, time_jd, star=star)
         s_AU = jnp.sqrt(r_AU[:, 0, :] ** 2 + r_AU[:, 1, :] ** 2)
         dist_pc_AU = star.dist_pc * pc2AU
         alpha = s_AU * (rad2arcsec / dist_pc_AU)
@@ -145,7 +145,7 @@ class Planet(eqx.Module):
             dist_AU=dist_AU,
             wavelength_nm=jnp.asarray(wavelength_nm),
             Rp_Rearth=self.Rp_Rearth,
-            time_jd=t_jd,
+            time_jd=time_jd,
             star=star,
         )
         eps = jnp.finfo(contrast.dtype).tiny
@@ -156,18 +156,18 @@ class Planet(eqx.Module):
         self,
         trig_solver,
         wavelength_nm: Array,
-        t_jd: Array,
+        time_jd: Array,
         *,
         star: AbstractStar,
     ) -> Array:
         """Planet-to-star contrast at (wavelength, time), shape ``(K, T)``."""
-        _, phase_angle_rad, dist_AU = self.propagate(trig_solver, t_jd, star=star)
+        _, phase_angle_rad, dist_AU = self.propagate(trig_solver, time_jd, star=star)
         return self.physical_model.contrast_at_time(
             phase_angle_rad=phase_angle_rad,
             dist_AU=dist_AU,
             wavelength_nm=wavelength_nm,
             Rp_Rearth=self.Rp_Rearth,
-            time_jd=t_jd,
+            time_jd=time_jd,
             star=star,
         )
 
@@ -175,13 +175,13 @@ class Planet(eqx.Module):
         self,
         trig_solver,
         wavelength_nm: Array,
-        t_jd: Array,
+        time_jd: Array,
         *,
         star: AbstractStar,
     ) -> Array:
         """Planet flux density [ph/s/m^2/nm], shape ``(K, T)``."""
-        c = self.contrast(trig_solver, wavelength_nm, t_jd, star=star)
-        f_star = star.spec_flux_density(wavelength_nm, t_jd)
+        c = self.contrast(trig_solver, wavelength_nm, time_jd, star=star)
+        f_star = star.spec_flux_density(wavelength_nm, time_jd)
         return c * f_star
 
     def __repr__(self) -> str:

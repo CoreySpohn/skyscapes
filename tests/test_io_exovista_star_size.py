@@ -20,9 +20,9 @@ from skyscapes.io import from_exovista
 _EXOVISTA_RSUN_AU = 0.00465047
 
 
-def _expected_diameter_arcsec(rstar_rsun, dist_pc):
+def _expected_diameter_arcsec(rstar_Rsun, dist_pc):
     """Angular diameter 2 R / d of a star, computed independently in astropy."""
-    angle = 2 * rstar_rsun * R_sun / (dist_pc * u.pc)
+    angle = 2 * rstar_Rsun * R_sun / (dist_pc * u.pc)
     return angle.to_value(u.arcsec, equivalencies=u.dimensionless_angles())
 
 

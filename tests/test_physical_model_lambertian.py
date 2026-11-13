@@ -99,11 +99,11 @@ def test_lambertian_matches_orbix_alpha_dmag():
     Ms_kg = jnp.array([1.989e30])
     Ag = jnp.array([0.3])
     Rp_AU = jnp.array([1.0]) * Rearth2AU
-    t_jd = jnp.array([0.0])
+    time_jd = jnp.array([0.0])
 
     # Rebuild the same phase/distance via orbit.propagate then feed
     # LambertianPhysicalModel. The output contrast must match dMag exactly.
-    _, phase_angle_rad, dist_AU = orbit.propagate(solver, t_jd, Ms_kg=Ms_kg)
+    _, phase_angle_rad, dist_AU = orbit.propagate(solver, time_jd, Ms_kg=Ms_kg)
 
     phase = lambert_phase_exact(jnp.cos(phase_angle_rad), jnp.sin(phase_angle_rad))
     log_arg = Ag[:, None] * (Rp_AU[:, None] / dist_AU) ** 2 * phase

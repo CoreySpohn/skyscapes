@@ -189,7 +189,7 @@ class Star(AbstractStar):
     ra_deg: float
     dec_deg: float
     diameter_arcsec: float
-    luminosity_lsun: float
+    luminosity_Lsun: float
     spots: StarSpots | None
     metadata: dict = eqx.field(static=True)
 
@@ -210,7 +210,7 @@ class Star(AbstractStar):
         ra_deg: float = 0.0,
         dec_deg: float = 0.0,
         diameter_arcsec: float = 0.0,
-        luminosity_lsun: float = 1.0,
+        luminosity_Lsun: float = 1.0,
         spots: StarSpots | None = None,
         metadata: dict | None = None,
         interpolation_method: Literal["linear", "cubic"] = "cubic",
@@ -224,7 +224,7 @@ class Star(AbstractStar):
         self.ra_deg = ra_deg
         self.dec_deg = dec_deg
         self.diameter_arcsec = diameter_arcsec
-        self.luminosity_lsun = luminosity_lsun
+        self.luminosity_Lsun = luminosity_Lsun
         self.spots = spots
         self.metadata = {} if metadata is None else dict(metadata)
         self._wavelengths_nm = wavelengths_nm
@@ -330,7 +330,7 @@ class Star(AbstractStar):
         return (
             f"Star(M={m_solar:.3f} Msun, "
             f"dist={self.dist_pc:.3g} pc, "
-            f"L={self.luminosity_lsun:.3g} Lsun, "
+            f"L={self.luminosity_Lsun:.3g} Lsun, "
             f"diam={self.diameter_arcsec:.3g} arcsec, "
             f"RA/Dec=({self.ra_deg:.4f}, {self.dec_deg:.4f}) deg, "
             f"wl={wl_min:.0f}-{wl_max:.0f} nm, n_times={n_t})"

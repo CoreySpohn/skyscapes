@@ -216,8 +216,8 @@ def _load_spots(hdul: fits.HDUList, star_ext: int, times_jd) -> StarSpots | None
         longitude_deg=jnp.asarray(data[..., 1]),
         area_m2=jnp.asarray(data[..., 2] * cm22m2),
         area_ratio=jnp.asarray(data[..., 3]),
-        umbra_temperature_k=header.get("TEFFUMBRA"),
-        penumbra_temperature_k=header.get("TEFFPENUMBRA"),
+        umbra_temperature_K=header.get("TEFFUMBRA"),
+        penumbra_temperature_K=header.get("TEFFPENUMBRA"),
     )
 
 
@@ -243,7 +243,7 @@ def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
     dist_pc = obj_header.get("DIST")
     ra_deg = obj_header.get("RA", 0.0)
     dec_deg = obj_header.get("DEC", 0.0)
-    luminosity_lsun = obj_header.get("LSTAR", 1.0)
+    luminosity_Lsun = obj_header.get("LSTAR", 1.0)
 
     return Star(
         Ms_kg=Ms_kg,
@@ -251,7 +251,7 @@ def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
         ra_deg=ra_deg,
         dec_deg=dec_deg,
         diameter_arcsec=diameter_arcsec,
-        luminosity_lsun=luminosity_lsun,
+        luminosity_Lsun=luminosity_Lsun,
         wavelengths_nm=wavelengths_nm,
         times_jd=times_jd,
         flux_density_jy=flux_density_jy,
@@ -316,10 +316,10 @@ def _load_single_planet(
     relative_state = obj_data[0, 9:15].astype(np.float64) - star_data[0, 9:15].astype(
         np.float64
     )
-    r_sky_au = _exovista_to_orbix(jnp.asarray(relative_state[:3]))
+    r_sky_AU = _exovista_to_orbix(jnp.asarray(relative_state[:3]))
     v_sky_au_yr = _exovista_to_orbix(jnp.asarray(relative_state[3:]))
 
-    r_sky_m = r_sky_au * AU2m
+    r_sky_m = r_sky_AU * AU2m
     v_sky_m_s = jnp.array(au_per_yr_to_m_per_s(v_sky_au_yr))
     planet_mass_kg = float(obj_header.get("M")) * Mearth2kg
     if not (np.isfinite(planet_mass_kg) and planet_mass_kg > 0.0):
@@ -466,17 +466,17 @@ def _earth_like_planet_indices_from_hdul(hdul: fits.HDUList) -> list[int]:
     """Earth-filter logic operating on an already-open HDUList."""
     star_ext = _star_extension(hdul)
     planet_extensions = _body_extensions(hdul, star_ext)
-    star_luminosity_lsun = hdul[star_ext].header.get("LSTAR", 1.0)
+    star_luminosity_Lsun = hdul[star_ext].header.get("LSTAR", 1.0)
 
     earth_indices: list[int] = []
     for i, ext in enumerate(planet_extensions):
         planet_header = hdul[ext].header
-        a_au = planet_header.get("A", 1.0)
-        radius_rearth = planet_header.get("R", 1.0)
-        a_scaled = a_au / np.sqrt(star_luminosity_lsun)
+        a_AU = planet_header.get("A", 1.0)
+        radius_Rearth = planet_header.get("R", 1.0)
+        a_scaled = a_AU / np.sqrt(star_luminosity_Lsun)
         lower_r = 0.8 / np.sqrt(a_scaled)
         if (HZ_INNER_EEID <= a_scaled < HZ_OUTER_EEID) and (
-            lower_r <= radius_rearth < 1.4
+            lower_r <= radius_Rearth < 1.4
         ):
             earth_indices.append(i)
     return earth_indices

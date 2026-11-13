@@ -198,7 +198,7 @@ def angle_diff_mod180(a, b):
 
 VIEWS = {
     "system_sky": lambda s, ax: viz.plot_system(
-        s, 0.0, ax=ax, track_t_jd=jnp.linspace(0, 900, 50)
+        s, 0.0, ax=ax, track_time_jd=jnp.linspace(0, 900, 50)
     ),
     "system_side": lambda s, ax: viz.plot_system(s, 0.0, view="side", ax=ax),
     "disk_image": lambda s, ax: viz.plot_disk_image(
@@ -398,7 +398,7 @@ def test_system_views_use_east_north_away(view):
     )
     track_days = 30.0
     result = viz.plot_system(
-        system, 0.0, view=view, track_t_jd=jnp.array([0.0, track_days])
+        system, 0.0, view=view, track_time_jd=jnp.array([0.0, track_days])
     )
     artists = by_gid(result)
 
@@ -590,7 +590,7 @@ def test_pre_rendered_disk_draws_no_invented_outline():
     ("call", "match"),
     [
         (lambda s: viz.plot_system(s, 0.0, view="top"), "view"),
-        (lambda s: viz.plot_system(s), "t_jd"),
+        (lambda s: viz.plot_system(s), "time_jd"),
         (lambda s: viz.plot_disk_image(np.ones((4, 4))), "pixel_scale"),
         (lambda s: viz.plot_disk_image(s.disk), "wavelength_nm"),
         (lambda s: viz.plot_disk_image(np.ones(4), pixel_scale_arcsec=0.1), "2D"),

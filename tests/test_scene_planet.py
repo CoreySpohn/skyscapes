@@ -60,9 +60,9 @@ def test_planet_alpha_dMag_matches_orbix():
     """
     star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     p = _single_planet()
-    t_jd = jnp.array([0.0, 100.0, 200.0])
+    time_jd = jnp.array([0.0, 100.0, 200.0])
 
-    alpha_new, dMag_new = p.alpha_dMag(SOLVER, t_jd, star=star)
+    alpha_new, dMag_new = p.alpha_dMag(SOLVER, time_jd, star=star)
 
     orbit = KeplerianOrbit(
         a_AU=jnp.array([1.0]),
@@ -79,13 +79,13 @@ def test_planet_alpha_dMag_matches_orbix():
     Ag = jnp.array([0.3])
     Rp_AU = jnp.array([1.0]) * Rearth2AU
 
-    r_AU, _, dist_AU = orbit.propagate(SOLVER, t_jd, Ms_kg=Ms_kg)
+    r_AU, _, dist_AU = orbit.propagate(SOLVER, time_jd, Ms_kg=Ms_kg)
     # Raw orbix z points away: cos(beta) = z / r.
     cos_a = r_AU[:, 2, :] / dist_AU
     phase = lambert_phase_exact(cos_a, jnp.sqrt(1.0 - cos_a**2))
     log_arg = Ag[:, None] * (Rp_AU[:, None] / dist_AU) ** 2 * phase
     dMag_ref = -2.5 * jnp.log10(log_arg + jnp.finfo(log_arg.dtype).tiny)
-    alpha_ref = orbit.separation_arcsec(SOLVER, t_jd, Ms_kg=Ms_kg, dist_pc=dist_pc)
+    alpha_ref = orbit.separation_arcsec(SOLVER, time_jd, Ms_kg=Ms_kg, dist_pc=dist_pc)
 
     assert jnp.allclose(alpha_new, alpha_ref, rtol=1e-6)
     assert jnp.allclose(dMag_new, dMag_ref, rtol=1e-6)
@@ -95,9 +95,9 @@ def test_planet_contrast_wavelength_agnostic_for_lambertian():
     """Lambertian -> contrast independent of wavelength."""
     star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     p = _single_planet()
-    t_jd = jnp.array([0.0])
-    c_blue = p.contrast(SOLVER, jnp.array([400.0]), t_jd, star=star)
-    c_red = p.contrast(SOLVER, jnp.array([800.0]), t_jd, star=star)
+    time_jd = jnp.array([0.0])
+    c_blue = p.contrast(SOLVER, jnp.array([400.0]), time_jd, star=star)
+    c_red = p.contrast(SOLVER, jnp.array([800.0]), time_jd, star=star)
     assert jnp.allclose(c_blue, c_red, rtol=1e-6)
 
 
@@ -105,10 +105,10 @@ def test_planet_spec_flux_density_equals_contrast_times_star():
     """spec_flux_density equals contrast times star.spec_flux_density."""
     star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     p = _single_planet()
-    t_jd = jnp.array([0.0])
+    time_jd = jnp.array([0.0])
     wl = jnp.array([600.0])
-    c = p.contrast(SOLVER, wl, t_jd, star=star)
-    f = p.spec_flux_density(SOLVER, wl, t_jd, star=star)
+    c = p.contrast(SOLVER, wl, time_jd, star=star)
+    f = p.spec_flux_density(SOLVER, wl, time_jd, star=star)
     assert jnp.allclose(f, c * 1e9, rtol=1e-6)
 
 
@@ -148,9 +148,9 @@ _STAR = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
 
 def _sample_orbit(planet, n=361):
     """Positions, phase angle and dMag over one period (K=1)."""
-    t_jd = jnp.linspace(0.0, 365.25, n)
-    r_AU, beta, _ = planet.propagate(SOLVER, t_jd, star=_STAR)
-    _, dMag = planet.alpha_dMag(SOLVER, t_jd, star=_STAR)
+    time_jd = jnp.linspace(0.0, 365.25, n)
+    r_AU, beta, _ = planet.propagate(SOLVER, time_jd, star=_STAR)
+    _, dMag = planet.alpha_dMag(SOLVER, time_jd, star=_STAR)
     return r_AU[0], beta[0], dMag[0]
 
 

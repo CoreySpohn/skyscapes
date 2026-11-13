@@ -143,8 +143,8 @@ toward or away from the observer.
 ```{code-cell} ipython3
 fig, axes = plt.subplots(1, 2, figsize=(10, 4.6), layout="constrained")
 track = jnp.linspace(0.0, 1500.0, 300)
-viz.plot_system(system, 0.0, ax=axes[0], track_t_jd=track)
-viz.plot_system(system, 0.0, view="side", ax=axes[1], track_t_jd=track);
+viz.plot_system(system, 0.0, ax=axes[0], track_time_jd=track)
+viz.plot_system(system, 0.0, view="side", ax=axes[1], track_time_jd=track);
 ```
 
 The dashed line on the sky view is the line of nodes, at 30 degrees from

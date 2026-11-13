@@ -48,7 +48,7 @@ wavelength_nm = jnp.linspace(3900.0, 5000.0, 200)
 photon_flux = star.spec_flux_density(wavelength_nm, jnp.zeros(()))  # ph/s/m^2/nm
 ```
 
-`phoenix_surface_flux(teff_k, logg)` returns the model surface flux in
+`phoenix_surface_flux(teff_K, logg)` returns the model surface flux in
 W/m^2/nm on the native wavelength grid, for normalizing to a magnitude or a
 luminosity instead of a radius and distance.
 
