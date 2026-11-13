@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from itertools import pairwise
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -205,20 +208,81 @@ def test_high_inclination_is_finite(incl):
     assert float(sb.sum()) > 0.0
 
 
-@pytest.mark.parametrize("incl", [89.9, 90.0, 90.3])
-def test_edge_on_render_is_rejected(incl):
-    """At and near edge-on the render raises instead of returning a number.
+@pytest.mark.parametrize(
+    "incl, cutoff_width", [(89.5, 0.0), (90.0, 0.0), (89.5, 0.2), (90.0, 0.2)]
+)
+def test_edge_on_render_gradient_and_convergence(incl, cutoff_width):
+    """Fails if the edge-on window diverges or loses gradients and convergence.
 
-    The LOS window about the midplane crossing has half-width
-    ``zmax / |cos(incl)|``; at exactly 90 deg ``cos`` rounds to ~6e-17 and a
-    map built on that denominator is not a result. Both sides of 90 are
-    rejected, eagerly and under ``jax.jit``.
+    Smooth radial cutoffs remove node-crossing jumps. Max image residuals
+    are normalized by peak brightness, not by vanishing off-disk pixels.
     """
-    d = make_disk()
-    with pytest.raises(Exception, match="edge-on"):
-        _render(d, incl_deg=incl)
-    with pytest.raises(Exception, match="edge-on"):
-        jax.jit(lambda disk: _render(disk, incl_deg=incl))(d)
+    disk = replace(
+        _belt(257),
+        nx=17,
+        ny=9,
+        pixel_scale_arcsec=0.04,
+        cutoff_width_AU=jnp.asarray(cutoff_width),
+    )
+    render = eqx.filter_jit(lambda d, i: d.surface_brightness(550.0, 0.0, i, 13.0))
+    images = [
+        render(replace(disk, n_slices_los=n), jnp.asarray(incl))
+        for n in (129, 257, 513)
+    ]
+    peak = images[-1].max()
+    residuals = [float(jnp.max(jnp.abs(a - b)) / peak) for a, b in pairwise(images)]
+    print(f"LOS ladder {incl}, cutoff {cutoff_width}: {residuals}")
+    assert residuals[1] < residuals[0]
+    assert residuals[1] < 0.005
+    point = jnp.asarray(incl)
+    derivative = jax.jacfwd(lambda i: render(disk, i))(point)
+    step = 1e-4
+    fd = (render(disk, point + step) - render(disk, point - step)) / (2 * step)
+    error = float(jnp.max(jnp.abs(derivative - fd)) / peak)
+    print(f"Inclination gradient error {incl}, cutoff {cutoff_width}: {error:.3g}")
+    np.testing.assert_allclose(derivative / peak, fd / peak, rtol=2e-5, atol=1e-8)
+    assert jnp.all(jnp.isfinite(derivative))
+    assert jnp.max(jnp.abs(derivative)) > 1e-4 * peak
+
+
+def test_edge_on_continuity_and_smooth_cutoff_gradients():
+    """Fails if the former threshold introduces a seam or taper parameters detach.
+
+    Includes the requested inclination sequence and the exact chart boundary.
+    The hard-cutoff default retains sample-crossing jumps; the positive-width
+    fit uses a C2 taper so both the geometry and density are continuous.
+    """
+    disk = replace(
+        _belt(257),
+        nx=17,
+        ny=9,
+        pixel_scale_arcsec=0.04,
+        cutoff_width_AU=jnp.asarray(0.2),
+    )
+    render = eqx.filter_jit(lambda d, i: d.surface_brightness(550.0, 0.0, i, 0.0))
+    angles = jnp.array([89.3, 89.43, 89.5, 90.0, 90.5])
+    images = jax.vmap(lambda i: render(disk, i))(angles)
+    assert jnp.all(jnp.isfinite(images))
+    np.testing.assert_allclose(images[-1], images[2, ::-1], atol=1e-12, rtol=1e-10)
+    seam = jnp.rad2deg(jnp.arccos(0.01))
+    probes = jnp.concatenate([angles, jnp.array([seam])])
+    step = 1e-5
+    left = jax.vmap(lambda i: render(disk, i - step))(probes)
+    right = jax.vmap(lambda i: render(disk, i + step))(probes)
+    change = float(jnp.max(jnp.abs(left - right)) / images.max())
+    print(f"Continuity probe peak-normalized change: {change:.3g}")
+    assert change < 1e-3
+
+    def loss(p):
+        updated = eqx_replace(
+            disk, cutoff_width_AU=p[0] * 0.2, rmin_AU=p[1] * 1.5, rmax_AU=p[2] * 5.0
+        )
+        return render(updated, jnp.asarray(89.5)).sum() / images[2].sum()
+
+    p = jnp.ones(3)
+    directions = jnp.eye(3) * 1e-5
+    fd = jax.vmap(lambda d: (loss(p + d) - loss(p - d)) / 2e-5)(directions)
+    np.testing.assert_allclose(jax.grad(loss)(p), fd, rtol=1e-5, atol=1e-7)
 
 
 # --------------------------------------------------------------------------
@@ -426,3 +490,21 @@ def test_ring_major_axis_has_fits_sky_pa():
     measured = np.degrees(0.5 * np.arctan2(2 * en, nn - ee)) % 180
     difference = abs((measured - sky_pa + 90) % 180 - 90)
     assert difference < 0.5, f"sky PA {measured:.3f} deg, expected {sky_pa} deg"
+
+
+def test_legacy_window_values():
+    """Fails if the established LOS quadrature changes outside the edge-on extension."""
+    d = make_disk(nx=9, ny=7, n_slices_los=65, pixel_scale_arcsec=1.0)
+    values = []
+    for incl in (0.0, 60.0, 88.0, 89.3, 90.7, 120.0):
+        img = _render(d, incl_deg=incl)
+        values.append([float(img.sum()), float(img.max()), float(img[3, 6])])
+    expected = [
+        [0.00033461184740070203, 1.601973253891392e-05, 5.807893853785125e-07],
+        [0.0011629071373011552, 6.524151937072618e-05, 1.1640691338873824e-06],
+        [0.0016548897060709312, 0.00041568363670442684, 0.00010526344093093486],
+        [0.006455398700343054, 0.000799933358185768, 0.0006904846218028235],
+        [0.00645539870034303, 0.0007999333581857665, 0.00069048462180282],
+        [0.0011629071373011567, 6.524151937072622e-05, 1.1640691338873832e-06],
+    ]
+    np.testing.assert_allclose(values, expected, rtol=1e-13, atol=0)

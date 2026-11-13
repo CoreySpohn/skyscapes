@@ -249,9 +249,7 @@ class ExovistaParametricDisk(AbstractDisk):
         )
 
         zmax_AU = self._zmax_AU()
-        # The numerical problem is only at true edge-on (cos_i -> 0), where
-        # the LOS window half-width diverges; the shared kernel rejects
-        # |cos_i| < 1e-2 explicitly.
+        # The shared LOS kernel uses a finite radial window at edge-on.
 
         def density_fn(r_AU: Array, z_AU: Array, valid: Array) -> Array:
             # Substitute r0_AU outside the annulus so the radial-profile

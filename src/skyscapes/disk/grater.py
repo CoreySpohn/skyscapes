@@ -26,11 +26,10 @@ Notes on convention:
     contract; ``vmap`` over wavelength gives a cube without changing
     the interface.
 
-    The LOS-around-midplane sampling uses log-spaced nodes concentrated at
-    the midplane crossing (after the GRaTeR-JAX reference), so the integral
-    stays converged at high inclination. It diverges only at the true edge-on
-    singularity (``cos(incl) -> 0``); ``surface_brightness`` raises via
-    ``eqx.error_if`` when ``|cos(incl)| < 1e-2`` (within ~0.57 deg of 90).
+    The LOS kernel retains midplane-centered log-spaced sampling away from
+    edge-on and changes smoothly to an outer-radius-bounded window near
+    90 degrees. Exactly edge-on images and inclination derivatives are
+    supported. Smooth radial tapers remove hard sample-crossing jumps.
     Inclinations above 90 view the disk from its other face and return the
     physical, nonnegative map, mirrored across the line of nodes relative to
     ``180 - incl``.
@@ -117,6 +116,11 @@ class GraterDisk(AbstractDisk):
         beta: Flaring index (0 = none, 1 = linear).
         rmin_AU: Inner truncation radius [AU].
         rmax_AU: Outer truncation radius [AU].
+        cutoff_width_AU: Nonnegative inward radial taper width [AU].
+            Zero (default) preserves the hard rmin/rmax mask exactly.
+            Positive values use a C2 quintic ramp from zero at the boundary
+            to one a width inside the annulus. Widths larger than half the
+            annulus overlap.
         wavelengths_nm: 1-D wavelength grid for ``g_HG_grid`` /
             ``Ag_grid``, shape ``(n_wave,)`` [nm]. Must be sorted.
             ``surface_brightness`` calls outside this range return NaN.
@@ -149,6 +153,8 @@ class GraterDisk(AbstractDisk):
     dist_pc: float = eqx.field(static=True)
     n_slices_los: int = eqx.field(static=True)
     n_scale_heights: float = eqx.field(static=True, default=6.0)
+
+    cutoff_width_AU: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
 
     def _zmax_AU(self) -> Array:
         """LOS half-extent in disk-frame z, evaluated at ``rmax_AU``.
@@ -194,12 +200,12 @@ class GraterDisk(AbstractDisk):
             extrap=False,
         )
 
-        # The LOS-around-midplane sampling diverges only at the true edge-on
-        # singularity (cos_i -> 0), where the window half-width zmax/|cos_i|
-        # and the midplane crossing y*tan(i) both blow up (the GRaTeR-JAX
-        # reference shares the same 1/cos_i divergence with no handling). The
-        # shared kernel rejects |cos_i| < 1e-2 explicitly.
         zmax_AU = self._zmax_AU()
+        cutoff_width = eqx.error_if(
+            jnp.asarray(self.cutoff_width_AU),
+            self.cutoff_width_AU < 0,
+            "cutoff_width_AU must be nonnegative.",
+        )
 
         # Density closure: substitute sma_AU outside the valid annulus
         # so the (-2 alpha_in) power stays bounded in float32; the kernel
@@ -207,7 +213,7 @@ class GraterDisk(AbstractDisk):
         def density_fn(r_AU: Array, z_AU: Array, valid: Array) -> Array:
             r_safe = jnp.where(valid, r_AU, self.sma_AU)
             z_safe = jnp.where(valid, z_AU, jnp.zeros_like(z_AU))
-            return two_power_law_density(
+            density = two_power_law_density(
                 r_safe,
                 z_safe,
                 self.sma_AU,
@@ -217,6 +223,13 @@ class GraterDisk(AbstractDisk):
                 self.gamma,
                 self.beta,
             )
+            width = jnp.where(cutoff_width > 0, cutoff_width, 1.0)
+            inner = jnp.clip((r_safe - self.rmin_AU) / width, 0.0, 1.0)
+            outer = jnp.clip((self.rmax_AU - r_safe) / width, 0.0, 1.0)
+            inner = inner**3 * (10.0 + inner * (-15.0 + 6.0 * inner))
+            outer = outer**3 * (10.0 + outer * (-15.0 + 6.0 * outer))
+            taper = jnp.where(cutoff_width > 0, inner * outer, 1.0)
+            return density * taper
 
         def phase_fn(cos_phi: Array) -> Array:
             return henyey_greenstein(cos_phi, g_HG)

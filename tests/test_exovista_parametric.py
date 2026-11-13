@@ -211,13 +211,13 @@ def test_jit_round_trip():
 
 
 @pytest.mark.parametrize("incl", [89.9, 90.0, 90.3])
-def test_edge_on_is_rejected(incl):
-    """At and near edge-on (either side of 90) the render raises, also under jit."""
+def test_edge_on_has_supplementary_symmetry(incl):
+    """Fails if the shared edge-on extension breaks ExovistaParametricDisk geometry."""
     d = make_disk()
-    with pytest.raises(Exception, match="edge-on"):
-        _render(d, incl_deg=incl)
-    with pytest.raises(Exception, match="edge-on"):
-        jax.jit(lambda disk: _render(disk, incl_deg=incl))(d)
+    image = jax.jit(lambda i: _render(d, incl_deg=i))(jnp.asarray(incl))
+    mirrored = _render(d, incl_deg=180.0 - incl)
+    np.testing.assert_allclose(image, mirrored[::-1], rtol=1e-9, atol=1e-12)
+    assert jnp.all(jnp.isfinite(image)) and image.max() > 0
 
 
 def _apertures(img: np.ndarray, incl: float, px_AU: float) -> dict[str, float]:
