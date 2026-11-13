@@ -17,8 +17,9 @@ from jaxtyping import Array
 
 from .._repr import indent
 from ..disk import AbstractDisk
+from ..spectral import _model_max_knots, bin_mean
 from .planet import Planet
-from .star import AbstractStar, Star, _bin_nodes
+from .star import AbstractStar
 
 
 class System(eqx.Module):
@@ -97,43 +98,53 @@ class System(eqx.Module):
         contrast, with an exact stellar denominator. Resolve any additional
         planetary features by increasing ``n_nodes``. Other stars use one
         Gauss-Legendre rule per bin. This is a flux-weighted contrast, not
-        a mean of monochromatic contrasts.
+        a mean of monochromatic contrasts. See Davis and Rabinowitz (1984),
+        Methods of Numerical Integration, for the quadrature rule. Concrete
+        bin geometry determines the static interval cap; traced geometry uses
+        a conservative full-table cap. Close over concrete bins when compiling
+        to retain bounded work.
         """
+        numerator = self.bin_mean_planet_flux_densities(
+            centers_nm, widths_nm, time_jd, n_nodes=n_nodes
+        )
+        knots = self.star.quadrature_knots_nm
+        denominator = bin_mean(
+            lambda w: jax.vmap(lambda t: self.star.spec_flux_density(w, t))(time_jd),
+            centers_nm,
+            widths_nm,
+            n_nodes=n_nodes,
+            knots_nm=knots,
+            max_knots=_model_max_knots(centers_nm, widths_nm, knots),
+        )
         centers, widths = jnp.asarray(centers_nm), jnp.asarray(widths_nm)
-        if isinstance(self.star, Star) and self.star._interpolation_method == "linear":
-            grid = self.star.wavelengths_nm
-
-            def integrate_bin(bin_parameters):
-                center, width = bin_parameters
-                low, high = center - width / 2, center + width / 2
-                lo = jnp.clip(grid[:-1], low, high)
-                hi = jnp.clip(grid[1:], low, high)
-                nodes, weights = _bin_nodes((lo + hi) / 2, hi - lo, n_nodes)
-                flux = jax.vmap(
-                    jax.vmap(lambda w: self.planet_flux_densities(w, time_jd))
-                )(nodes)
-                span = high - low
-                lengths = (hi - lo) / jnp.where(span == 0, 1.0, span)
-                return jnp.einsum("s,n,snkt->kt", lengths, weights, flux)
-
-            numerator = jax.lax.map(integrate_bin, (centers, widths))
-        else:
-            nodes, weights = _bin_nodes(centers, widths, n_nodes)
-            flux = jax.vmap(jax.vmap(lambda w: self.planet_flux_densities(w, time_jd)))(
-                nodes
-            )
-            numerator = jnp.einsum("n,wnkt->wkt", weights, flux)
-        denominator = jax.vmap(
-            lambda t: self.star.bin_mean_flux_density(
-                centers, widths, t, n_nodes=n_nodes
-            ),
-            out_axes=1,
-        )(time_jd)
         point_bin = centers - widths / 2 == centers + widths / 2
         safe_denominator = jnp.where(point_bin[:, None], 1.0, denominator)
         ratio = numerator / safe_denominator[:, None, :]
         return jnp.where(
             point_bin[:, None, None], self.contrast_cube(centers, time_jd), ratio
+        )
+
+    def bin_mean_planet_flux_densities(
+        self, centers_nm: Array, widths_nm: Array, time_jd: Array, *, n_nodes: int = 4
+    ) -> Array:
+        """Band-mean planet flux [ph/s/m^2/nm], shape ``(W, K_total, T)``.
+
+        Centers and nonnegative full widths are ``(W,)`` in nm; dates are
+        ``(T,)``. Integrate contrast times stellar flux, splitting at the star's
+        public quadrature knots. Zero width returns the monochromatic flux.
+        Use Gauss-Legendre quadrature (Davis and Rabinowitz 1984, Methods of
+        Numerical Integration). Concrete geometry determines the static cap;
+        traced geometry uses a conservative full-table cap. Close over concrete
+        bins when compiling to retain bounded work.
+        """
+        knots = self.star.quadrature_knots_nm
+        return bin_mean(
+            lambda w: self.planet_flux_densities(w, time_jd),
+            centers_nm,
+            widths_nm,
+            n_nodes=n_nodes,
+            knots_nm=knots,
+            max_knots=_model_max_knots(centers_nm, widths_nm, knots),
         )
 
     def planet_flux_densities(self, wavelength_nm: Array, time_jd: Array) -> Array:

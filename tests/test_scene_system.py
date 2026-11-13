@@ -92,6 +92,32 @@ def test_system_spec_flux_density_per_planet():
     assert jnp.allclose(f, c * 1e9, rtol=1e-6)
 
 
+def test_bin_planet_flux_narrow_limit():
+    """Narrow-bin flux equals contrast times star flux to rtol 1e-10, atol 0.
+
+    A blackbody varies smoothly over 1e-4 nm at 500-700 nm, so the symmetric
+    bin's second-order correction is below this float64 relative tolerance.
+    Include a zero-width bin and multiple planets and dates to check axes.
+    """
+    from skyscapes.scene import BlackbodyStar
+
+    star = BlackbodyStar(Msun2kg, 10.0, 5772.0, 6.957e8)
+    planet = _make_planet(1.0, 0.3, 1.0)
+    system = System(star, (planet, planet), SOLVER)
+    centers = jnp.array([500.0, 700.0])
+    widths = jnp.array([1e-4, 0.0])
+    times = jnp.array([0.0, 100.0])
+    actual, expected = eqx.filter_jit(
+        lambda: (
+            system.bin_mean_planet_flux_densities(centers, widths, times),
+            system.contrast_cube(centers, times)
+            * star.spec_flux_density(centers, 0.0)[:, None, None],
+        )
+    )()
+    assert actual.shape == (2, 2, 2)
+    np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=0)
+
+
 @pytest.mark.parametrize("target", ["planet", "system"])
 @pytest.mark.parametrize("wavelength", [[500.0, 600.0], [[500.0, 600.0]]])
 @pytest.mark.parametrize("traced", [False, True])

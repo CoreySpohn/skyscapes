@@ -4,6 +4,7 @@ Public API:
 
 - :mod:`skyscapes.scene` -- star + planet + system hierarchy, plus the
   top-level ``Scene`` container.
+- :mod:`skyscapes.spectral` -- shared spectral band integration.
 - :mod:`skyscapes.disk` -- extended-source surface brightness maps.
 - :mod:`skyscapes.physical_model` -- phase/wavelength-dependent
   planet-to-star contrast (reflective, emissive, future joint models).
@@ -38,6 +39,7 @@ from . import (
     physical_model,
     population,
     scene,
+    spectral,
     viz,
 )
 from .io import from_exovista
@@ -56,5 +58,6 @@ __all__ = [
     "physical_model",
     "population",
     "scene",
+    "spectral",
     "viz",
 ]

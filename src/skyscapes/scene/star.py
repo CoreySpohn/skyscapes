@@ -23,22 +23,10 @@ from equinox import AbstractVar
 from hwoutils.constants import Msun2kg, pc2m, rad2arcsec
 from hwoutils.conversions import jy_to_photons_per_nm_per_m2
 from jaxtyping import Array
-from numpy.polynomial.legendre import leggauss
 
 from .._planck import _planck_photon_flux
+from ..spectral import _model_max_knots, bin_mean
 from .spots import StarSpots
-
-
-def _bin_nodes(centers_nm: Array, widths_nm: Array, n_nodes: int):
-    """Static Gauss-Legendre setup, followed by traced wavelength mapping."""
-    # NumPy generates configuration constants only, never evaluates spectra.
-    nodes, weights = leggauss(n_nodes)
-    centers = jnp.asarray(centers_nm)
-    widths = jnp.asarray(widths_nm)
-    widths = eqx.error_if(widths, jnp.any(widths < 0), "Bin widths must be >= 0.")
-    return centers[:, None] + widths[:, None] * jnp.asarray(nodes) / 2, jnp.asarray(
-        weights
-    ) / 2
 
 
 class AbstractStar(eqx.Module):
@@ -62,6 +50,11 @@ class AbstractStar(eqx.Module):
     ) -> Array:
         """Return spectral flux density in ph/s/m^2/nm."""
 
+    @property
+    def quadrature_knots_nm(self) -> Array | None:
+        """Spectral integration knots [nm], or None for an analytic spectrum."""
+        return None
+
     def bin_mean_flux_density(
         self, centers_nm: Array, widths_nm: Array, time_jd: Array, *, n_nodes: int = 4
     ) -> Array:
@@ -74,12 +67,20 @@ class AbstractStar(eqx.Module):
         of Numerical Integration. For a 5772 K blackbody, centers 400-5000
         nm and widths <= 20 percent of center, the default relative error
         is below 1e-8. Wider bins or Wien tails need a convergence check.
+        Linear tables split at ``quadrature_knots_nm`` and are exact. The
+        static interval cap is inferred from concrete geometry; traced geometry
+        uses a conservative full-table cap to preserve this method's signature.
+        Close over concrete bins when compiling to retain bounded work.
         """
-        nodes, weights = _bin_nodes(centers_nm, widths_nm, n_nodes)
-        flux = jax.vmap(jax.vmap(lambda w: self.spec_flux_density(w, time_jd)))(nodes)
-        mean = flux @ weights
-        point = self.spec_flux_density(jnp.asarray(centers_nm), time_jd)
-        return jnp.where(jnp.asarray(widths_nm) == 0, point, mean)
+        knots = self.quadrature_knots_nm
+        return bin_mean(
+            lambda w: self.spec_flux_density(w, time_jd),
+            centers_nm,
+            widths_nm,
+            n_nodes=n_nodes,
+            knots_nm=knots,
+            max_knots=_model_max_knots(centers_nm, widths_nm, knots),
+        )
 
 
 class FlatStar(AbstractStar):
@@ -270,53 +271,16 @@ class Star(AbstractStar):
             return self._flux_interp(wavelength_nm)
         return self._flux_interp(wavelength_nm, time_jd)
 
-    def _bin_weights(self, centers_nm: Array, widths_nm: Array) -> Array:
-        """Weights on table knots for exact partial linear-segment integrals.
+    @property
+    def quadrature_knots_nm(self) -> Array | None:
+        """Return linear-table knots [nm]; cubic spectra retain one rule per bin.
 
-        Zero-width rows are zero; callers supply their point-value limit.
-        Bins beyond the table return NaN instead of silently losing flux.
+        Splitting linear segments makes Gauss-Legendre integration exact even
+        at order one (Davis and Rabinowitz 1984, Methods of Numerical Integration).
         """
-        centers, widths = jnp.asarray(centers_nm), jnp.asarray(widths_nm)
-        widths = eqx.error_if(widths, jnp.any(widths < 0), "Bin widths must be >= 0.")
-        low, high = centers - widths / 2, centers + widths / 2
-        x0, x1 = self._wavelengths_nm[:-1], self._wavelengths_nm[1:]
-        lo = jnp.clip(x0[None, :], low[:, None], high[:, None])
-        hi = jnp.clip(x1[None, :], low[:, None], high[:, None])
-        fraction = ((lo + hi) / 2 - x0) / (x1 - x0)
-        # Divide by the represented span so sub-ULP edge rounding does not
-        # spoil the point limit of a very narrow bin.
-        span = high - low
-        length = (hi - lo) / jnp.where(span == 0, 1.0, span)[:, None]
-        left, right = length * (1 - fraction), length * fraction
-        weights = jnp.pad(left, ((0, 0), (0, 1))) + jnp.pad(right, ((0, 0), (1, 0)))
-        covered = (low >= self._wavelengths_nm[0]) & (high <= self._wavelengths_nm[-1])
-        return jnp.where(covered[:, None], weights, jnp.nan)
-
-    def bin_mean_flux_density(
-        self, centers_nm: Array, widths_nm: Array, time_jd: Array, *, n_nodes: int = 4
-    ) -> Array:
-        """Mean photon flux [ph/s/m^2/nm], shape ``(W,)``, at scalar time.
-
-        Linear tables (including atmosphere loaders) are integrated exactly,
-        including partial end intervals, using the trapezoid rule on each
-        linear segment. Cubic spectra use Gauss-Legendre quadrature as in
-        ``AbstractStar``. Width zero returns ``spec_flux_density``.
-        """
-        if self._interpolation_method != "linear":
-            return super().bin_mean_flux_density(
-                centers_nm, widths_nm, time_jd, n_nodes=n_nodes
-            )
-        weights = self._bin_weights(centers_nm, widths_nm)
-        flux = (
-            self._flux_interp.f
-            if self._times_jd.size == 1
-            else self.spec_flux_density(self._wavelengths_nm, time_jd)
-        )
-        mean = weights @ flux
-        point = self.spec_flux_density(jnp.asarray(centers_nm), time_jd)
-        centers, widths = jnp.asarray(centers_nm), jnp.asarray(widths_nm)
-        point_bin = centers - widths / 2 == centers + widths / 2
-        return jnp.where(point_bin, point, mean)
+        if self._interpolation_method == "linear":
+            return self.wavelengths_nm
+        return None
 
     def __repr__(self) -> str:
         """One-line summary of metadata + wavelength/time grid extent."""
