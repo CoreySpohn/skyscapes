@@ -18,7 +18,7 @@ from jaxtyping import Array
 from .._repr import indent
 from ..disk import AbstractDisk
 from .planet import Planet
-from .star import AbstractStar
+from .star import AbstractStar, Star, _bin_nodes
 
 
 class System(eqx.Module):
@@ -79,6 +79,56 @@ class System(eqx.Module):
             t_jd: Observation Julian Dates, shape ``(T,)``.
         """
         return jax.vmap(lambda w: self.contrasts(w, t_jd))(jnp.asarray(wavelengths_nm))
+
+    def bin_contrast_cube(
+        self, centers_nm: Array, widths_nm: Array, t_jd: Array, *, n_nodes: int = 4
+    ) -> Array:
+        """Ratio of bin-integrated planet and star photons, ``(W, K_total, T)``.
+
+        Centers and full nonnegative widths are ``(W,)`` in nm; dates are
+        ``(T,)``. Zero width returns ``contrast_cube``. For linear stellar
+        tables each stellar interval is integrated with ``n_nodes`` Gauss-
+        Legendre nodes, clipping the end intervals to the bin. This resolves
+        stellar lines and integrates the product of stellar flux and planet
+        contrast, with an exact stellar denominator. Resolve any additional
+        planetary features by increasing ``n_nodes``. Other stars use one
+        Gauss-Legendre rule per bin. This is a flux-weighted contrast, not
+        a mean of monochromatic contrasts.
+        """
+        centers, widths = jnp.asarray(centers_nm), jnp.asarray(widths_nm)
+        if isinstance(self.star, Star) and self.star._interpolation_method == "linear":
+            grid = self.star.wavelengths_nm
+
+            def integrate_bin(bin_parameters):
+                center, width = bin_parameters
+                low, high = center - width / 2, center + width / 2
+                lo = jnp.clip(grid[:-1], low, high)
+                hi = jnp.clip(grid[1:], low, high)
+                nodes, weights = _bin_nodes((lo + hi) / 2, hi - lo, n_nodes)
+                flux = jax.vmap(
+                    jax.vmap(lambda w: self.planet_flux_densities(w, t_jd))
+                )(nodes)
+                span = high - low
+                lengths = (hi - lo) / jnp.where(span == 0, 1.0, span)
+                return jnp.einsum("s,n,snkt->kt", lengths, weights, flux)
+
+            numerator = jax.lax.map(integrate_bin, (centers, widths))
+        else:
+            nodes, weights = _bin_nodes(centers, widths, n_nodes)
+            flux = jax.vmap(jax.vmap(lambda w: self.planet_flux_densities(w, t_jd)))(
+                nodes
+            )
+            numerator = jnp.einsum("n,wnkt->wkt", weights, flux)
+        denominator = jax.vmap(
+            lambda t: self.star.bin_flux_density(centers, widths, t, n_nodes=n_nodes),
+            out_axes=1,
+        )(t_jd)
+        point_bin = centers - widths / 2 == centers + widths / 2
+        safe_denominator = jnp.where(point_bin[:, None], 1.0, denominator)
+        ratio = numerator / safe_denominator[:, None, :]
+        return jnp.where(
+            point_bin[:, None, None], self.contrast_cube(centers, t_jd), ratio
+        )
 
     def planet_flux_densities(self, wavelength_nm: Array, t_jd: Array) -> Array:
         """Per-planet flux density [ph/s/m^2/nm], shape ``(K_total, T)``."""

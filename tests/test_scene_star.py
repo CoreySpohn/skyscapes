@@ -8,7 +8,10 @@ import jax.numpy as jnp
 import pytest
 from astropy import units as u
 from hwoutils.constants import Msun2kg, c, h, k_B, pc2m, sigma_SB
-from hwoutils.conversions import jy_to_photons_per_nm_per_m2
+from hwoutils.conversions import (
+    jy_to_photons_per_nm_per_m2,
+    photons_per_nm_per_m2_to_jy,
+)
 
 from skyscapes.scene import AbstractStar, BlackbodyStar, FlatStar, Star
 
@@ -238,3 +241,96 @@ def test_spectrum_star_wavelength_coverage(n_epochs):
     bounds = s.wavelength_range_nm
     assert bounds == (500.0, 1000.0)
     assert all(isinstance(bound, float) for bound in bounds)
+
+
+def test_bin_flux_blackbody_quadrature_and_gradients(blackbody_star):
+    """Fails if bin means use centers only, misnormalize weights, or detach gradients.
+
+    Four-node error is compared to 16 nodes over 400-5000 nm at 20 percent
+    width. The Gauss-Legendre remainder is eighth order in bin width.
+    """
+    centers = jnp.geomspace(400.0, 5000.0, 16)
+    widths = centers * 0.2
+    mean = eqx.filter_jit(blackbody_star.bin_flux_density)(centers, widths, 0.0)
+    reference = blackbody_star.bin_flux_density(centers, widths, 0.0, n_nodes=16)
+    print(
+        "Blackbody maximum relative quadrature error:",
+        float(jnp.max(jnp.abs(mean / reference - 1))),
+    )
+    assert jnp.allclose(mean, reference, rtol=1e-8, atol=0)
+    assert jnp.allclose(
+        blackbody_star.bin_flux_density(centers, jnp.zeros_like(widths), 0.0),
+        blackbody_star.spec_flux_density(centers, 0.0),
+        rtol=1e-14,
+    )
+
+    @eqx.filter_jit
+    def flux(parameters):
+        star = eqx.tree_at(lambda s: s.teff_K, blackbody_star, parameters[0] * 5772.0)
+        return (
+            star.bin_flux_density(
+                jnp.array([parameters[1] * 550.0]),
+                jnp.array([parameters[2] * 100.0]),
+                0.0,
+            )[0]
+            / mean[0]
+        )
+
+    point = jnp.ones(3)
+    step = 1e-4
+    directions = jnp.eye(3) * step
+    finite_difference = jax.vmap(
+        lambda d: (flux(point + d) - flux(point - d)) / (2 * step)
+    )(directions)
+    assert jnp.allclose(jax.grad(flux)(point), finite_difference, rtol=1e-6, atol=1e-9)
+    assert jnp.allclose(jax.vmap(flux)(jnp.stack([point, point])), flux(point))
+
+
+@pytest.mark.parametrize("n_epochs", [1, 2])
+def test_bin_flux_linear_partial_intervals(n_epochs):
+    """Fails if partial intervals, unresolved absorption, or zero widths are lost."""
+    wave = jnp.array([400.0, 500.0, 600.0, 800.0])
+    photons = jnp.array([4.0, 2.0, 6.0, 8.0])
+    times = jnp.arange(n_epochs, dtype=float)
+    jy = photons_per_nm_per_m2_to_jy(photons, wave)
+    star = Star(
+        Ms_kg=Msun2kg,
+        dist_pc=10.0,
+        wavelengths_nm=wave,
+        times_jd=times,
+        flux_density_jy=jy[:, None] * (1 + times[None, :]),
+        interpolation_method="linear",
+    )
+    centers = jnp.array([550.0, 650.0, 575.0])
+    widths = jnp.array([200.0, 200.0, 0.0])
+    epoch = jnp.array(0.5 if n_epochs == 2 else 0.0)
+    actual = eqx.filter_jit(star.bin_flux_density)(centers, widths, epoch)
+    # Exact areas: 50*(3+2)/2 + 100*(2+6)/2 + 50*(6+6.5)/2.
+    expected = jnp.array([4.1875, 6.3125, 5.0]) * (1 + epoch)
+    assert jnp.allclose(actual, expected, rtol=1e-13)
+    narrow = star.bin_flux_density(centers, jnp.full_like(widths, 1e-14), epoch)
+    assert jnp.allclose(narrow, star.spec_flux_density(centers, epoch), rtol=1e-13)
+    assert jnp.isnan(
+        star.bin_flux_density(jnp.array([410.0]), jnp.array([40.0]), epoch)[0]
+    )
+
+    @eqx.filter_jit
+    def mean(p):
+        scaled = eqx.tree_at(
+            lambda model: model._flux_interp.f, star, star._flux_interp.f * p[2]
+        )
+        return scaled.bin_flux_density(
+            jnp.array([p[0] * 550]), jnp.array([p[1] * 200]), epoch
+        )[0]
+
+    p = jnp.ones(3)
+    delta = jnp.eye(3) * 1e-5
+    fd = jax.vmap(lambda d: (mean(p + d) - mean(p - d)) / 2e-5)(delta)
+    gradient = jax.grad(mean)(p)
+    assert jnp.allclose(gradient, fd, rtol=1e-7, atol=1e-8)
+    assert jnp.isclose(gradient[2], expected[0], rtol=1e-13)
+
+    def zero(w):
+        return star.bin_flux_density(jnp.array([575.0]), jnp.array([w]), epoch)[0]
+
+    assert float(jax.grad(zero)(0.0)) == 0.0

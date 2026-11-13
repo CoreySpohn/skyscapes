@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import equinox as eqx
+import jax
 import jax.numpy as jnp
+import numpy as np
+import pytest
+from hwoutils.constants import Msun2kg
+from hwoutils.conversions import photons_per_nm_per_m2_to_jy
 from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.orbit import KeplerianOrbit
 
 from skyscapes.disk import ExovistaDisk
-from skyscapes.physical_model import LambertianPhysicalModel
-from skyscapes.scene import FlatStar, Planet, System
+from skyscapes.physical_model import GridPhysicalModel, LambertianPhysicalModel
+from skyscapes.scene import FlatStar, Planet, Star, System
 
 SOLVER = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
 
@@ -84,3 +90,54 @@ def test_system_spec_flux_density_per_planet():
     assert f.shape == (2, 1)
     c = sys_obj.contrasts(jnp.array([600.0]), jnp.array([0.0]))
     assert jnp.allclose(f, c * 1e9, rtol=1e-6)
+
+
+@pytest.mark.parametrize("tabulated", [False, True])
+def test_bin_contrast_weights_flux_and_has_point_limit(tabulated):
+    """Fails if contrast is averaged without photon weighting or loses its point limit.
+
+    For F(lambda)=lambda/500 and C(lambda)=lambda/500, the band ratio
+    is (center + width**2/(12*center))/500, independent of epoch.
+    """
+    wave = jnp.array([400.0, 500.0, 600.0, 800.0])
+    if tabulated:
+        star = Star(
+            Ms_kg=Msun2kg,
+            dist_pc=10.0,
+            wavelengths_nm=wave,
+            times_jd=jnp.array([0.0, 200.0]),
+            flux_density_jy=photons_per_nm_per_m2_to_jy(wave / 500, wave)[:, None]
+            * jnp.array([[1.0, 2.0]]),
+            interpolation_method="linear",
+        )
+    else:
+        star = FlatStar(Msun2kg, 10.0, 1.0)
+    p = _make_planet(1.0, 0.3, 1.0)
+    model = GridPhysicalModel(
+        wave, jnp.array([0.0, 180.0]), (wave / 500)[None, :, None] * jnp.ones((1, 1, 2))
+    )
+    p = eqx.tree_at(lambda p: p.physical_model, p, model)
+    system = System(star, (p, p), SOLVER)
+    centers = jnp.array([550.0, 650.0, 575.0])
+    widths = jnp.array([200.0, 100.0, 0.0])
+    times = jnp.array([0.0, 100.0])
+    actual = eqx.filter_jit(system.bin_contrast_cube)(centers, widths, times)
+    expected = (centers + (widths**2 / (12 * centers) if tabulated else 0)) / 500
+    np.testing.assert_allclose(
+        actual, jnp.broadcast_to(expected[:, None, None], (3, 2, 2)), rtol=1e-12
+    )
+    for width in (1e-5, 1e-14):
+        tiny = system.bin_contrast_cube(centers, jnp.full(3, width), times)
+        np.testing.assert_allclose(
+            tiny, system.contrast_cube(centers, times), rtol=1e-8
+        )
+
+    @eqx.filter_jit
+    def mean(p):
+        return system.bin_contrast_cube(
+            jnp.array([550.0 * p[0]]), jnp.array([200.0 * p[1]]), times
+        )[0, 0, 0]
+
+    point, steps = jnp.ones(2), jnp.eye(2) * 1e-5
+    fd = jax.vmap(lambda d: (mean(point + d) - mean(point - d)) / 2e-5)(steps)
+    np.testing.assert_allclose(jax.grad(mean)(point), fd, rtol=1e-6, atol=1e-9)
