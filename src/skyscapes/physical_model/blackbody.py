@@ -36,9 +36,11 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
         Returns:
             Flux density, shape ``(K,)``.
         """
-        wavelength_m = jnp.asarray(wavelength_nm) * nm2m
-        exponent = h * c / (wavelength_m * k_B * self.teff_K)
-        photon_radiance = 2.0 * c / wavelength_m**4 / jnp.expm1(exponent)
+        # Grouped so no intermediate (or its square, in a derivative) leaves the
+        # single-precision range: h c / k is 0.014 m K, 1 / lambda about 1e6 per m.
+        inverse_m = 1.0 / (jnp.asarray(wavelength_nm) * nm2m)
+        exponent = (h * c / k_B) * inverse_m / self.teff_K
+        photon_radiance = 2.0 * c * inverse_m**4 / jnp.expm1(exponent)
         dilution = (Rp_Rearth * Rearth2m / (dist_pc * pc2m)) ** 2
         return jnp.pi * photon_radiance * dilution * nm2m  # per m to per nm
 

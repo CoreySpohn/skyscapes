@@ -118,3 +118,26 @@ def test_temperature_gradient_matches_finite_difference():
     x = H * C / (4400.0e-9 * KB)
     expected = x / 1560.0**2 / (1.0 - jnp.exp(-x / 1560.0))
     assert jnp.allclose(auto, expected, rtol=1e-4, atol=0.0)
+
+
+def test_temperature_gradient_is_finite_in_single_precision():
+    """The same derivative in float32: ``lambda k T`` squared would underflow."""
+    with jax.enable_x64(False):
+        wl = jnp.asarray(4400.0, jnp.float32)
+        args = (jnp.zeros((1, 2), jnp.float32), jnp.ones((1, 2), jnp.float32))
+        t_jd = jnp.array([0.0, 1.0], jnp.float32)
+        rp = jnp.array([15.7], jnp.float32)
+
+        def log_contrast(teff):
+            model = BlackbodyPhysicalModel(teff_K=teff)
+            out = model.contrast_at_time(*args, wl, rp, time_jd=t_jd, star=STAR)
+            return jnp.log(out)[0, 0]
+
+        t0 = jnp.array([1560.0], jnp.float32)
+        auto = jax.grad(log_contrast)(t0)[0]
+        curvature = jax.hessian(log_contrast)(t0)[0, 0]
+        assert auto.dtype == jnp.float32
+    x = H * C / (4400.0e-9 * KB)
+    expected = x / 1560.0**2 / (1.0 - jnp.exp(-x / 1560.0))
+    assert jnp.allclose(auto, expected, rtol=1e-4, atol=0.0)
+    assert jnp.isfinite(curvature) and curvature < 0.0
