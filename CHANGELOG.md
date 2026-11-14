@@ -46,6 +46,37 @@
   observer on the left at -z, with z labelled away from the observer. The
   scattering diagram labels the illumination angle beta.
 
+## [3.0.0](https://github.com/CoreySpohn/skyscapes/compare/v2.2.0...v3.0.0) (2026-11-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* unit suffixes keep the unit's capitalization and time arguments are time_jd
+
+### Features
+
+* **disk:** finite line-of-sight window through edge-on and optional smooth radial cutoffs ([8f968cc](https://github.com/CoreySpohn/skyscapes/commit/8f968cc1163a9f832ed1ff69726b4bf1a36ae199))
+* **io:** Castelli-Kurucz ATLAS9 stellar grid loader for stars above 12000 K ([50d37a0](https://github.com/CoreySpohn/skyscapes/commit/50d37a0bcddaa9cbaac6461d335c57b877b06d09))
+* **physical_model:** blackbody thermal emission against the host star, and System.contrast_cube ([0e23324](https://github.com/CoreySpohn/skyscapes/commit/0e23324b37a487535b197c2cd9351761f3be202c))
+* **scene:** bin-averaged stellar flux and flux-weighted bin contrast ([31d0656](https://github.com/CoreySpohn/skyscapes/commit/31d06562fecec922da60ca843004d64edf21ca23))
+* **scene:** expose a tabulated star's wavelength grid and range as read-only properties ([d4383a8](https://github.com/CoreySpohn/skyscapes/commit/d4383a87b286b8f565ec0300719b41a920e54be5))
+* **spectral:** one band-mean function for star, contrast and planet flux, with cost set by the knots inside each bin ([3a187f5](https://github.com/CoreySpohn/skyscapes/commit/3a187f58e975ea6d86bc1e538e1ec12c6381c5b5))
+
+
+### Bug Fixes
+
+* **background:** remove the extra wavelength factor from the LeinertZodi photon flux ([7f7bb43](https://github.com/CoreySpohn/skyscapes/commit/7f7bb435795ffcbc99397b16589d4e753d845625))
+* **blackbody:** balance Planck prefactors so single-precision second derivatives hold under JIT ([182b9fb](https://github.com/CoreySpohn/skyscapes/commit/182b9fb073fbbe1a3d9c83e3a4b2a22c0fca5090))
+* **population:** clip negative planet-type albedos on load and make radius_to_mass accept JAX arrays ([43b1dc3](https://github.com/CoreySpohn/skyscapes/commit/43b1dc3f92f92221d47d88e5108ec21f67d5f6ed))
+* **scene:** accept a one-element wavelength array in contrast ([2e4c6eb](https://github.com/CoreySpohn/skyscapes/commit/2e4c6eb7e78e90c0ebf76f56bdb19799561206af))
+* **scene:** Planck terms grouped so temperature derivatives are finite in single precision ([5c62a72](https://github.com/CoreySpohn/skyscapes/commit/5c62a72a064feea28dedbcade9cdbb71ddb6e83c))
+* **scene:** reject wavelength arrays in contrast, pass wavelength through alpha_dMag, share one Planck function ([2b8d4ff](https://github.com/CoreySpohn/skyscapes/commit/2b8d4ff7c104d7ae7c5fb3cce511488fd8404fbf))
+
+
+### Code Refactoring
+
+* unit suffixes keep the unit's capitalization and time arguments are time_jd ([39dfffb](https://github.com/CoreySpohn/skyscapes/commit/39dfffb30976d0a87670f6134ca01110fb9bcd0a))
+
 ## [2.2.0](https://github.com/CoreySpohn/skyscapes/compare/v2.1.0...v2.2.0) (2026-11-12)
 
 
