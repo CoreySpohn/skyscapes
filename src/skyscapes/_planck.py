@@ -14,6 +14,7 @@ def _planck_photon_flux(
     dist_pc: Array,
     *,
     radius_unit_m: float = 1.0,
+    stable_wien: bool = False,
 ) -> Array:
     """Diluted Planck photon flux density [ph/s/m^2/nm].
 
@@ -22,9 +23,15 @@ def _planck_photon_flux(
     Radius is in units of ``radius_unit_m`` meters; inputs broadcast.
     Fold radiance, dilution and per-nm conversion into one moderate scale
     before squaring to preserve float32 second derivatives under JIT.
+    ``stable_wien`` uses decaying half-exponent factors to avoid overflow
+    in the Wien tail. The default retains existing stellar and legacy
+    blackbody arithmetic.
     """
     wavelength_um = jnp.asarray(wavelength_nm) * nm2um
     exponent = (h * c / (k_B * um2m)) / (wavelength_um * temperature_K)
     amplitude = sqrt(2.0 * pi * c * nm2m) * radius_unit_m / (um2m**2 * pc2m)
     scale = (amplitude * radius / dist_pc) ** 2
+    if stable_wien:
+        decay = jnp.exp(-exponent / 2)
+        return (scale / wavelength_um**4 * decay) * decay / -jnp.expm1(-exponent)
     return scale / (wavelength_um**4 * jnp.expm1(exponent))

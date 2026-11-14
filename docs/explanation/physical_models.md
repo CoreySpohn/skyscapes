@@ -1,13 +1,11 @@
 # Physical models
 
-`skyscapes.physical_model` provides the **planet-to-star contrast**
-model attached to every `Planet`. A physical model returns, given a
-phase angle, star-planet distance, wavelength, planet radius, and when
-needed the physical observation time, the
-dimensionless contrast $f_p / f_*$ that scales the host star's
-spectrum into the planet's emitted flux. The submodule covers
-atmospheric reflection, surface reflection, thermal emission, and
-joint planet + atmosphere models.
+`skyscapes.physical_model` provides the **planet photon flux and contrast**
+model attached to every `Planet`. Given geometry, wavelength, radius,
+observation time and the host star, a physical model returns observer flux
+in ph/s/m²/nm or the dimensionless planet-to-star ratio $f_p / f_*$.
+The submodule covers atmospheric reflection, surface reflection, thermal
+emission, and sums of these contributions.
 
 ## The hierarchy
 
@@ -19,17 +17,36 @@ flowchart TB
     TPM[TimeSeriesPhysicalModel]
     EXO[ExoJaxPhysicalModel]
     PPM[PrecomputedPhysicalModel]
+    BB[BlackbodyPhysicalModel]
+    EM[ExoJaxEmissionModel]
+    SUM[SumPhysicalModel]
 
     APM --> LPM
     APM --> GPM
     APM --> TPM
     APM --> EXO
     APM --> PPM
+    APM --> BB
+    APM --> EM
+    APM --> SUM
 ```
+
+`Planet.spec_flux_density` calls
+`physical_model.spec_flux_density(wavelength_nm, phase_angle_rad=...,
+dist_AU=..., Rp_Rearth=..., time_jd=..., star=...)`. Wavelength is scalar;
+the result has shape `(K, T)` in ph/s/m²/nm. The base implementation
+multiplies `contrast_at_time` by stellar photon flux. Thermal models
+compute observer flux directly, then derive contrast by dividing by the
+star's flux. Blackbody contrast against a `BlackbodyStar` retains the
+equivalent analytic ratio to avoid losing numerical range. Thermal flux
+needs the observer distance but does not require a nonzero or defined
+stellar spectrum; a contrast ratio still needs a valid denominator.
+`System.bin_mean_planet_flux_densities` integrates this same
+flux interface, including sums, with `skyscapes.spectral.bin_mean`.
 
 `Planet.contrast` and `Planet.alpha_dMag` call
 `physical_model.contrast_at_time(phase_angle_rad, dist_AU,
-wavelength_nm, Rp_Rearth, time_jd=...)`. This returns per-planet
+wavelength_nm, Rp_Rearth, time_jd=..., star=...)`. This returns per-planet
 flux-ratio contrast, shape `(K, T)` for `K` planets and `T` epochs.
 The default `AbstractPhysicalModel.contrast_at_time` ignores the time
 argument and forwards the other arguments to `contrast`, so existing
@@ -43,6 +60,44 @@ the model does not store it. Heterogeneous planets
 tuple, with one `Planet` per physical-model type.
 
 ## Variants and when to use them
+
+### `SumPhysicalModel`
+
+Add two or more radiative contributions for the same planet, sharing its
+radius, orbit geometry and host star. Components are a nonempty tuple;
+their parameters remain differentiable JAX leaves.
+
+```python
+import jax.numpy as jnp
+from skyscapes.physical_model import (
+    BlackbodyPhysicalModel,
+    LambertianPhysicalModel,
+    SumPhysicalModel,
+)
+
+model = SumPhysicalModel(
+    (
+        LambertianPhysicalModel(Ag=jnp.array([0.3])),
+        BlackbodyPhysicalModel(teff_K=jnp.array([288.0])),
+    )
+)
+```
+
+Its photon flux is the component sum, and `contrast_at_time` divides that
+sum by stellar flux. An empty tuple raises `ValueError`. The phase-only
+`contrast` call requires callers to use the time-aware method with a star.
+
+### `BlackbodyPhysicalModel` and `ExoJaxEmissionModel`
+
+`BlackbodyPhysicalModel` emits a uniform Planck disk at `teff_K`.
+`ExoJaxEmissionModel` computes atmospheric thermal emission; see the
+[thermal-emission how-to](../how-to/thermal_emission.md). Both implement
+the common flux interface without normalizing by the star first.
+
+The blackbody's existing `spec_flux_density(wavelength_nm, Rp_Rearth,
+dist_pc)` form still returns `(K,)`. Its common interface with geometry
+and stellar context returns `(K, T)`. ExoJAX's existing `flux_density_jy`
+continues to return `(W, K)` in Jy.
 
 ### `LambertianPhysicalModel`
 
@@ -94,6 +149,8 @@ Two epochs with the same orbital phase can retain different contrasts.
 Phase angle, distance, and radius are accepted for interface
 compatibility but are ignored: their effects are already encoded in
 the tabulated planet-to-star flux ratios.
+Its `spec_flux_density` therefore multiplies the interpolated contrast
+by the host star's flux at each epoch, retaining the table's semantics.
 
 ```python
 import jax

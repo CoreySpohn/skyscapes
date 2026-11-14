@@ -1,8 +1,10 @@
 """Abstract physical-model interface for a planet's radiative output.
 
 Subclasses own whatever spectral-physics parameters describe "this kind of
-planet" (Lambertian, grid-interpolated, radiative-transfer, future thermal
-emission). The phase-dependent hook maps
+planet" (Lambertian, grid-interpolated, radiative-transfer, thermal
+emission). ``spec_flux_density`` returns photon flux at the observer.
+Its default multiplies contrast by the host star's photon flux; thermal
+models provide flux directly. The phase-dependent hook maps
 (phase_angle, star-planet distance, wavelength, planet radius) onto a
 contrast (flux ratio relative to the host star).
 Time-dependent models override ``contrast_at_time`` instead of identifying
@@ -27,6 +29,42 @@ class AbstractPhysicalModel(eqx.Module):
     grid contrast cube, ExoJax composition, etc.). The host planet's
     radius is supplied at call time via ``contrast(..., Rp_Rearth=...)``.
     """
+
+    def spec_flux_density(
+        self,
+        wavelength_nm: Array,
+        *,
+        phase_angle_rad: Array,
+        dist_AU: Array,
+        Rp_Rearth: Array,
+        time_jd: Array,
+        star,
+    ) -> Array:
+        """Planet photon flux density at the observer [ph/s/m^2/nm].
+
+        The default multiplies ``contrast_at_time`` by stellar flux.
+        Thermal models override this method to evaluate flux directly.
+
+        Args:
+            wavelength_nm: Scalar wavelength [nm].
+            phase_angle_rad: Phase angle [rad], shape ``(K, T)``.
+            dist_AU: Star-planet distance [AU], shape ``(K, T)``.
+            Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
+            time_jd: Observation Julian Dates, shape ``(T,)``.
+            star: Host ``AbstractStar``, providing observer distance and flux.
+
+        Returns:
+            Photon flux density, shape ``(K, T)``.
+        """
+        contrast = self.contrast_at_time(
+            phase_angle_rad=phase_angle_rad,
+            dist_AU=dist_AU,
+            wavelength_nm=wavelength_nm,
+            Rp_Rearth=Rp_Rearth,
+            time_jd=time_jd,
+            star=star,
+        )
+        return contrast * star.spec_flux_density(wavelength_nm, time_jd)
 
     @abstractmethod
     def contrast(

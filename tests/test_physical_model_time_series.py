@@ -14,6 +14,11 @@ from orbix.orbit import KeplerianOrbit
 from skyscapes import physical_model
 from skyscapes.scene import FlatStar, Planet
 
+from .test_physical_model_emission import _model as emission_model
+from .test_physical_model_emission import engines  # noqa: F401
+from .test_physical_model_exojax import make_physical_model
+from .test_physical_model_grid import _flat_grid
+
 
 def _model(dtype=jnp.float64):
     values = jnp.array([[1.0, 3.0, 15.0], [3.0, 7.0, 19.0]], dtype=dtype)
@@ -121,14 +126,76 @@ def test_contrast_without_time_raises_clear_error():
         _model().contrast(jnp.zeros((2, 1)), jnp.ones((2, 1)), 550.0, jnp.ones(2))
 
 
-def test_default_time_hook_preserves_existing_model_behavior():
-    """A phase-only model inherits the hook without implementing a new method."""
-    model = physical_model.LambertianPhysicalModel(Ag=jnp.array([0.3]))
-    args = (jnp.array([[0.0, jnp.pi / 2]]), jnp.ones((1, 2)), 550.0, jnp.ones(1))
-    np.testing.assert_array_equal(
-        model.contrast_at_time(*args, time_jd=jnp.array([2451545.0, 2451546.0])),
-        model.contrast(*args),
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "lambertian",
+        "grid",
+        "precomputed",
+        "exojax",
+        "time_series",
+        "blackbody",
+        "emission",
+        "sum",
+    ],
+)
+def test_default_time_hook_preserves_existing_model_behavior(kind, request):
+    """Fails if the flux hook rescales contrast or loses the planet/time axes.
+
+    Reflection is bitwise identical; thermal division allows 2e-15 relative
+    float64 roundoff. The legacy phase-only hook must stay exact too.
+    """
+    if kind == "lambertian":
+        model = physical_model.LambertianPhysicalModel(Ag=jnp.array([0.3, 0.5]))
+    elif kind == "grid":
+        wave, phase, grid = _flat_grid()
+        model = physical_model.GridPhysicalModel(wave, phase, jnp.stack([grid, grid]))
+    elif kind in ("precomputed", "exojax"):
+        model = make_physical_model(K=2, n_nu=10, n_layers=2)
+        if kind == "precomputed":
+            model = physical_model.PrecomputedPhysicalModel.from_physical_model(model)
+    elif kind == "time_series":
+        model = _model()
+    elif kind == "emission":
+        model = emission_model(request.getfixturevalue("engines"), (288.0,))
+    else:
+        model = physical_model.BlackbodyPhysicalModel(
+            teff_K=jnp.array([1560.0, 1700.0])
+        )
+        if kind == "sum":
+            model = physical_model.SumPhysicalModel(
+                (
+                    physical_model.LambertianPhysicalModel(jnp.array([0.3, 0.5])),
+                    model,
+                )
+            )
+    count = 1 if kind == "emission" else 2
+    args = (
+        jnp.array([[0.0, jnp.pi / 2], [0.3, 0.7]])[:count],
+        jnp.ones((count, 2)),
+        jnp.asarray(10000.0 if kind == "emission" else 550.0),
+        jnp.array([1.0, 2.0])[:count],
     )
+    times = jnp.array([2451545.0, 2451546.0])
+    star = FlatStar(1.989e30, 10.0, 3.0)
+    contrast = model.contrast_at_time(*args, time_jd=times, star=star)
+    flux = model.spec_flux_density(
+        args[2],
+        phase_angle_rad=args[0],
+        dist_AU=args[1],
+        Rp_Rearth=args[3],
+        time_jd=times,
+        star=star,
+    )
+    expected = contrast * star.spec_flux_density(args[2], times)
+    assert isinstance(model, physical_model.AbstractPhysicalModel)
+    assert flux.shape == (count, 2)
+    if kind in ("blackbody", "emission", "sum"):
+        np.testing.assert_allclose(flux, expected, rtol=2e-15, atol=0)
+    else:
+        np.testing.assert_array_equal(flux, expected)
+    if kind in ("lambertian", "grid", "precomputed", "exojax"):
+        np.testing.assert_array_equal(contrast, model.contrast(*args))
 
 
 @vv.case("planet-phase", "code-verification")

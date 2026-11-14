@@ -48,9 +48,10 @@ from exojax.utils.constants import m_u
 from exojax.utils.grids import wavenumber_grid
 from hwoutils import constants as const
 from hwoutils.constants import G_si, Mearth2kg, Rearth2AU, Rearth2m
-from hwoutils.conversions import nm_to_wavenumber_cm
+from hwoutils.conversions import jy_to_photons_per_nm_per_m2, nm_to_wavenumber_cm
 from jaxtyping import Array
 
+from ..base import AbstractPhysicalModel
 from .cia import TabulatedCIA, cia_path, load_cia
 from .components import (
     Absorption,
@@ -244,7 +245,7 @@ def build_exojax_emission_engines(
     }
 
 
-class ExoJaxEmissionModel(eqx.Module):
+class ExoJaxEmissionModel(AbstractPhysicalModel):
     """Thermal-emission planet model over ExoJAX's ``ArtEmisPure``.
 
     Per-planet state (PyTree leaves, shape ``(K, ...)``): gravity, the
@@ -570,6 +571,61 @@ class ExoJaxEmissionModel(eqx.Module):
         f_nu_cgs = at_wl / (const.c * _M_TO_CM)
         rp_over_d = (Rp_Rearth * Rearth2AU) / (distance_pc * const.pc2AU)
         return f_nu_cgs * _ERG_PER_S_CM2_PER_HZ_TO_JY * rp_over_d**2
+
+    def spec_flux_density(
+        self,
+        wavelength_nm: Array,
+        *,
+        phase_angle_rad: Array,
+        dist_AU: Array,
+        Rp_Rearth: Array,
+        time_jd: Array,
+        star,
+    ) -> Array:
+        """Observer photon flux [ph/s/m^2/nm], shape ``(K, T)``.
+
+        Wavelength is scalar. The emission is steady and independent of
+        phase; ``phase_angle_rad`` supplies the ``(K, T)`` output shape.
+        Radius comes from the planet and observer distance from the star.
+        """
+        flux_jy = self.flux_density_jy(wavelength_nm, Rp_Rearth, star.dist_pc)[0]
+        flux = jy_to_photons_per_nm_per_m2(flux_jy, wavelength_nm)
+        return flux[:, None] * jnp.ones_like(phase_angle_rad)
+
+    def contrast(
+        self,
+        phase_angle_rad: Array,
+        dist_AU: Array,
+        wavelength_nm: Array,
+        Rp_Rearth: Array,
+    ) -> Array:
+        """Require the host star to normalize thermal emission."""
+        raise ValueError(
+            "Use contrast_at_time(..., time_jd=..., star=...) for thermal emission"
+        )
+
+    def contrast_at_time(
+        self,
+        phase_angle_rad: Array,
+        dist_AU: Array,
+        wavelength_nm: Array,
+        Rp_Rearth: Array,
+        *,
+        time_jd: Array,
+        star=None,
+    ) -> Array:
+        """Thermal photon flux over stellar flux, shape ``(K, T)``."""
+        if star is None:
+            raise ValueError("ExoJaxEmissionModel needs the host star")
+        flux = self.spec_flux_density(
+            wavelength_nm,
+            phase_angle_rad=phase_angle_rad,
+            dist_AU=dist_AU,
+            Rp_Rearth=Rp_Rearth,
+            time_jd=time_jd,
+            star=star,
+        )
+        return flux / star.spec_flux_density(wavelength_nm, time_jd)
 
     def __repr__(self) -> str:
         """One-line summary of species, grid and planet count."""

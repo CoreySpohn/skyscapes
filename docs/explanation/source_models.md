@@ -23,7 +23,7 @@ flowchart TB
     Planet["<b>Planet</b><br/>Rp + Mp + orbit + physical_model"]
     Disk["<b>AbstractDisk</b><br/>circumstellar dust"]
     Zodi["<b>Zodi</b><br/>(union of background variants)"]
-    PM["<b>AbstractPhysicalModel</b><br/>contrast / spectral physics"]
+    PM["<b>AbstractPhysicalModel</b><br/>photon flux / contrast"]
 
     Scene --> System
     Scene --> Zodi
@@ -312,6 +312,11 @@ two_planet = Planet(
     physical_model=LambertianPhysicalModel(Ag=jnp.array([0.3, 0.5])),
 )
 ```
+
+`Planet.spec_flux_density` delegates to its physical model's photon-flux
+method. `SumPhysicalModel` combines reflected and thermal components for
+one planet; see [Physical models](physical_models.md) for its common
+`(K, T)` flux and contrast interfaces.
 
 ## Disks
 

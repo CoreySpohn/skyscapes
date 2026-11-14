@@ -6,8 +6,8 @@ Public API:
   top-level ``Scene`` container.
 - :mod:`skyscapes.spectral` -- shared spectral band integration.
 - :mod:`skyscapes.disk` -- extended-source surface brightness maps.
-- :mod:`skyscapes.physical_model` -- phase/wavelength-dependent
-  planet-to-star contrast (reflective, emissive, future joint models).
+- :mod:`skyscapes.physical_model` -- planet photon flux and planet-to-star
+  contrast (reflective, emissive, and additive models).
 - :mod:`skyscapes.background` -- field-of-view background sources (zodi, ...).
 - :mod:`skyscapes.io` -- data loaders (e.g. ExoVista FITS).
 - :mod:`skyscapes.habitable_zone` -- habitable-zone edges for a host star.

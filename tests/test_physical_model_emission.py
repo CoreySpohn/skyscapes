@@ -22,7 +22,7 @@ from exojax.opacity import OpaPremodit
 from hwoutils import constants as const
 from scipy.special import expn
 
-from skyscapes.physical_model import ExoJaxEmissionModel
+from skyscapes.physical_model import AbstractPhysicalModel, ExoJaxEmissionModel
 from skyscapes.physical_model.exojax import (
     ConstantMmr,
     EmittingSurface,
@@ -32,6 +32,7 @@ from skyscapes.physical_model.exojax import (
     build_exojax_emission_engines,
     log_gravity_cgs_from_mass_radius,
 )
+from skyscapes.scene import FlatStar
 
 # Constants typed once, independently of hwoutils (parity asserted below).
 H_J_S = 6.62607015e-34
@@ -382,7 +383,7 @@ def test_brightness_temperature_inverts_planck():
 
 @vv.case("planet-thermal-emission", "code-verification")
 def test_flux_density_matches_si_planck_at_the_observer(engines):
-    """Jy at 10 pc equals the SI Planck law times the solid angle.
+    """Fails if observer flux loses a solid-angle or Jy-to-photon unit factor.
 
     The expected value is built in SI from lambda and temperature; the
     model works in cgs per wavenumber, so this anchors the unit chain
@@ -405,6 +406,21 @@ def test_flux_density_matches_si_planck_at_the_observer(engines):
     )
     expected = np.pi * b_nu * (REARTH_M / (10.0 * PC_M)) ** 2 / JY_SI
     np.testing.assert_allclose(flux, expected, rtol=1e-4)
+    assert isinstance(model, AbstractPhysicalModel)
+    times = jnp.array([0.0, 1.0])
+    star = FlatStar(const.Msun2kg, 10.0, 3.0)
+    args = dict(
+        phase_angle_rad=jnp.zeros((1, 2)),
+        dist_AU=jnp.ones((1, 2)),
+        Rp_Rearth=jnp.ones(1),
+        time_jd=times,
+        star=star,
+    )
+    photons = jax.vmap(lambda w: model.spec_flux_density(w, **args))(
+        jnp.asarray(wavelength_m * 1e9)
+    )
+    expected_photons = expected * JY_SI / (H_J_S * wavelength_m) * 1e-9
+    np.testing.assert_allclose(photons[:, 0, 0], expected_photons, rtol=1e-4)
 
 
 def test_flux_interpolation_preserves_nonnegativity_at_an_emissivity_step(engines):

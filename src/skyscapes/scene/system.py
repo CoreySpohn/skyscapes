@@ -130,7 +130,7 @@ class System(eqx.Module):
         """Band-mean planet flux [ph/s/m^2/nm], shape ``(W, K_total, T)``.
 
         Centers and nonnegative full widths are ``(W,)`` in nm; dates are
-        ``(T,)``. Integrate contrast times stellar flux, splitting at the star's
+        ``(T,)``. Integrate each model's photon flux, splitting at the star's
         public quadrature knots. Zero width returns the monochromatic flux.
         Use Gauss-Legendre quadrature (Davis and Rabinowitz 1984, Methods of
         Numerical Integration). Concrete geometry determines the static cap;
