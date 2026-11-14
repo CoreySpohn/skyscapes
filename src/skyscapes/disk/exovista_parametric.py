@@ -121,8 +121,10 @@ def exovista_density(
 
     n = nzodis * vertical
 
-    # Piecewise radial profile.
-    in_ring = jnp.abs(r - r0_AU) < dr_AU
+    # Piecewise radial profile. The ring owns its two edges, where it equals
+    # the neighboring branch; a strict comparison would leave r = r0 +- dr in
+    # no branch and return the fallback value of one there.
+    in_ring = jnp.abs(r - r0_AU) <= dr_AU
     outer_halo = r > r0_AU + dr_AU
     inner_pr_drag = r < r0_AU - dr_AU
 

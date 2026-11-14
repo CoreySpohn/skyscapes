@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from skyscapes.disk import AbstractDisk, ExovistaParametricDisk
+from skyscapes.disk.exovista_parametric import exovista_density
 
 
 def make_disk(**overrides) -> ExovistaParametricDisk:
@@ -135,6 +136,29 @@ def test_outer_halo_falls_as_r_minus_one_point_five():
     assert sb_inner > sb_outer > 0.0
     # Expect roughly halved-or-more brightness at 2x radius in the halo.
     assert sb_outer < 0.5 * sb_inner
+
+
+def test_density_is_continuous_at_the_ring_edges():
+    """Fails if a sample exactly on ``r0 -+ dr`` falls outside every branch.
+
+    The ring, halo and inward-decay branches all equal ``exp(-0.5)`` at the
+    ring edges. A line-of-sight node at the midplane crossing lands exactly
+    on an edge for some pixels (here ``r0 + dr = 22`` AU), and a density of
+    one there, the piecewise fallback, brightened that pixel by 19 percent.
+    """
+    edges = jnp.array([18.0, 22.0])
+    just_inside = jnp.array([18.0 + 1e-9, 22.0 - 1e-9])
+    parameters = dict(
+        r0_AU=jnp.array(20.0),
+        dror=jnp.array(0.1),
+        rinner_AU=jnp.array(2.0),
+        hor=jnp.array(0.05),
+        nzodis=jnp.array(3.0),
+        eta=jnp.array(1.0),
+    )
+    on_edge = exovista_density(edges, jnp.zeros(2), **parameters)
+    inside = exovista_density(just_inside, jnp.zeros(2), **parameters)
+    np.testing.assert_allclose(on_edge, inside, rtol=1e-8)
 
 
 def test_three_hg_weight_concentrates_forward():
