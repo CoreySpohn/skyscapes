@@ -1,4 +1,4 @@
-"""Physical-model hierarchy: phase/wavelength-dependent planet-to-star contrast."""
+"""Physical-model hierarchy: planet photon flux and planet-to-star contrast."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from .cached import PrecomputedPhysicalModel
 from .exojax import ExoJaxEmissionModel, ExoJaxPhysicalModel
 from .grid import GridPhysicalModel
 from .lambertian import LambertianPhysicalModel
+from .sum import SumPhysicalModel
 from .time_series import TimeSeriesPhysicalModel
 
 __all__ = [
@@ -18,5 +19,6 @@ __all__ = [
     "GridPhysicalModel",
     "LambertianPhysicalModel",
     "PrecomputedPhysicalModel",
+    "SumPhysicalModel",
     "TimeSeriesPhysicalModel",
 ]

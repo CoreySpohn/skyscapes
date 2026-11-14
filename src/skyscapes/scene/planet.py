@@ -185,9 +185,17 @@ class Planet(eqx.Module):
         star: AbstractStar,
     ) -> Array:
         """Planet flux density [ph/s/m^2/nm], shape ``(K, T)``."""
-        c = self.contrast(trig_solver, wavelength_nm, time_jd, star=star)
-        f_star = star.spec_flux_density(wavelength_nm, time_jd)
-        return c * f_star
+        if jnp.size(wavelength_nm) != 1:
+            raise ValueError("need one wavelength; use System.contrast_cube")
+        _, phase_angle_rad, dist_AU = self.propagate(trig_solver, time_jd, star=star)
+        return self.physical_model.spec_flux_density(
+            wavelength_nm,
+            phase_angle_rad=phase_angle_rad,
+            dist_AU=dist_AU,
+            Rp_Rearth=self.Rp_Rearth,
+            time_jd=time_jd,
+            star=star,
+        )
 
     def __repr__(self) -> str:
         """Nested summary: planet count + intrinsic params + orbit + physical_model."""

@@ -13,8 +13,15 @@ from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.orbit import KeplerianOrbit
 
 from skyscapes.disk import ExovistaDisk
-from skyscapes.physical_model import GridPhysicalModel, LambertianPhysicalModel
+from skyscapes.physical_model import (
+    AbstractPhysicalModel,
+    BlackbodyPhysicalModel,
+    GridPhysicalModel,
+    LambertianPhysicalModel,
+    SumPhysicalModel,
+)
 from skyscapes.scene import FlatStar, Planet, Star, System
+from skyscapes.spectral import bin_mean
 
 SOLVER = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
 
@@ -81,15 +88,33 @@ def test_system_contrasts_stacks_planets():
 
 
 def test_system_spec_flux_density_per_planet():
-    """planet_flux_densities = contrasts x star.spec_flux_density."""
+    """Fails if flux dispatch changes the recorded planet fluxes or contrasts."""
     star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     p1 = _make_planet(1.0, 0.3, 1.0)
     p2 = _make_planet(5.0, 0.5, 2.0)
     sys_obj = System(star=star, planets=(p1, p2), disk=None, trig_solver=SOLVER)
-    f = sys_obj.planet_flux_densities(jnp.array(600.0), jnp.array([0.0]))
-    assert f.shape == (2, 1)
-    c = sys_obj.contrasts(jnp.array(600.0), jnp.array([0.0]))
-    assert jnp.allclose(f, c * 1e9, rtol=1e-6)
+    times = jnp.array([0.0, 100.0])
+    f = sys_obj.planet_flux_densities(jnp.array(600.0), times)
+    c = sys_obj.contrasts(jnp.array(600.0), times)
+    # Recorded from the same fixture before model-level flux dispatch.
+    np.testing.assert_allclose(
+        c,
+        [
+            [1.7358140773855922e-10, 4.759592469336877e-10],
+            [4.628837539694912e-11, 5.6348368911253246e-11],
+        ],
+        rtol=1e-14,
+        atol=0,
+    )
+    np.testing.assert_allclose(
+        f,
+        [
+            [0.17358140773855923, 0.47595924693368774],
+            [0.04628837539694912, 0.05634836891125325],
+        ],
+        rtol=1e-14,
+        atol=0,
+    )
 
 
 def test_bin_planet_flux_narrow_limit():
@@ -118,11 +143,11 @@ def test_bin_planet_flux_narrow_limit():
     np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=0)
 
 
-@pytest.mark.parametrize("target", ["planet", "system"])
+@pytest.mark.parametrize("target", ["planet", "system", "planet_flux"])
 @pytest.mark.parametrize("wavelength", [[500.0, 600.0], [[500.0, 600.0]]])
 @pytest.mark.parametrize("traced", [False, True])
 def test_contrast_rejects_wavelength_arrays(target, wavelength, traced):
-    """Reject several wavelengths eagerly and at JIT trace time."""
+    """Fails if flux dispatch bypasses the scalar-wavelength guard."""
     star = FlatStar(Msun2kg, 10.0, 1e9)
     planet = _make_planet(1.0, 0.3, 1.0)
     system = System(star, (planet,), SOLVER)
@@ -131,6 +156,8 @@ def test_contrast_rejects_wavelength_arrays(target, wavelength, traced):
     def evaluate(wavelength_nm):
         if target == "planet":
             return planet.contrast(SOLVER, wavelength_nm, times, star=star)
+        if target == "planet_flux":
+            return planet.spec_flux_density(SOLVER, wavelength_nm, times, star=star)
         return system.contrasts(wavelength_nm, times)
 
     evaluate = jax.jit(evaluate) if traced else evaluate
@@ -187,3 +214,142 @@ def test_bin_contrast_weights_flux_and_has_point_limit(tabulated):
     point, steps = jnp.ones(2), jnp.eye(2) * 1e-5
     fd = jax.vmap(lambda d: (mean(point + d) - mean(point - d)) / 2e-5)(steps)
     np.testing.assert_allclose(jax.grad(mean)(point), fd, rtol=1e-6, atol=1e-9)
+
+
+def test_sum_flux_preserves_components_bins_and_gradients():
+    """Fails if summing drops a component, its gradient, or stellar bin knots.
+
+    Float64 quadrature and JIT reassociation allow 1e-12 relative error;
+    the central difference at relative step 1e-5 allows 1e-7.
+    """
+    wave = jnp.array([4000.0, 5000.0, 6000.0])
+    times = jnp.array([0.0, 100.0])
+    star = Star(
+        Ms_kg=Msun2kg,
+        dist_pc=10.0,
+        wavelengths_nm=wave,
+        times_jd=times,
+        flux_density_jy=photons_per_nm_per_m2_to_jy(1e5 * wave / 5000, wave)[:, None]
+        * jnp.array([[1.0, 2.0]]),
+        interpolation_method="linear",
+    )
+    reflected = _make_planet(1.0, 0.3, 1.0)
+    emitted = eqx.tree_at(
+        lambda p: p.physical_model,
+        reflected,
+        BlackbodyPhysicalModel(jnp.array([800.0])),
+    )
+    combined = eqx.tree_at(
+        lambda p: p.physical_model,
+        reflected,
+        SumPhysicalModel((reflected.physical_model, emitted.physical_model)),
+    )
+    parts = System(star, (reflected, emitted), SOLVER)
+    system = System(star, (combined,), SOLVER)
+    wavelength = jnp.asarray(5000.0)
+    expected = jnp.sum(
+        parts.planet_flux_densities(wavelength, times), axis=0, keepdims=True
+    )
+    actual = system.planet_flux_densities(wavelength, times)
+    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=0)
+    np.testing.assert_allclose(
+        eqx.filter_jit(system.planet_flux_densities)(wavelength, times),
+        actual,
+        rtol=1e-12,
+        atol=0,
+    )
+    np.testing.assert_allclose(
+        system.contrasts(wavelength, times),
+        actual / star.spec_flux_density(wavelength, times),
+        rtol=2e-15,
+        atol=0,
+    )
+    centers, widths = jnp.array([5000.0, 5500.0]), jnp.array([800.0, 0.0])
+    expected_bins = jnp.sum(
+        parts.bin_mean_planet_flux_densities(centers, widths, times),
+        axis=1,
+        keepdims=True,
+    )
+    np.testing.assert_allclose(
+        system.bin_mean_planet_flux_densities(centers, widths, times),
+        expected_bins,
+        rtol=1e-12,
+        atol=0,
+    )
+    direct = bin_mean(
+        lambda w: combined.spec_flux_density(SOLVER, w, times, star=star),
+        centers,
+        widths,
+        knots_nm=star.quadrature_knots_nm,
+    )
+    np.testing.assert_allclose(direct, expected_bins, rtol=1e-12, atol=0)
+
+    def log_flux(scales):
+        varied = eqx.tree_at(
+            lambda s: (
+                s.planets[0].physical_model.components[0].Ag,
+                s.planets[0].physical_model.components[1].teff_K,
+            ),
+            system,
+            (jnp.array([0.3]) * scales[0], jnp.array([800.0]) * scales[1]),
+        )
+        return jnp.log(varied.planet_flux_densities(wavelength, times)[0, 0])
+
+    point, steps = jnp.ones(2), jnp.eye(2) * 1e-5
+    gradient = jax.grad(log_flux)(point)
+    finite_difference = jax.vmap(
+        lambda d: (log_flux(point + d) - log_flux(point - d)) / 2e-5
+    )(steps)
+    assert jnp.all(jnp.abs(gradient) > 0)
+    np.testing.assert_allclose(gradient, finite_difference, rtol=1e-7, atol=0)
+    dark = FlatStar(Msun2kg, 10.0, 0.0)
+    np.testing.assert_allclose(
+        combined.spec_flux_density(SOLVER, wavelength, times, star=dark),
+        emitted.physical_model.spec_flux_density(
+            wavelength, emitted.Rp_Rearth, dark.dist_pc
+        )[:, None]
+        * jnp.ones((1, 2)),
+        rtol=1e-12,
+        atol=0,
+    )
+
+
+def test_sum_requires_a_component_and_stellar_context():
+    """Fails if an empty sum constructs or contrast silently lacks a host star."""
+    with pytest.raises(ValueError, match="component"):
+        SumPhysicalModel(())
+    model = SumPhysicalModel((LambertianPhysicalModel(jnp.array([0.3])),))
+    args = (jnp.zeros((1, 1)), jnp.ones((1, 1)), jnp.asarray(500.0), jnp.ones(1))
+    with pytest.raises(ValueError, match="star"):
+        model.contrast(*args)
+    with pytest.raises(ValueError, match="star"):
+        model.contrast_at_time(*args, time_jd=jnp.zeros(1))
+
+
+def test_planet_flux_preserves_keyword_only_model_overrides():
+    """Fails if the default flux hook breaks existing keyword-only time hooks."""
+
+    class KeywordModel(AbstractPhysicalModel):
+        def contrast(self, phase_angle_rad, dist_AU, wavelength_nm, Rp_Rearth):
+            raise AssertionError("The time-aware override must be used")
+
+        def contrast_at_time(
+            self,
+            *,
+            phase_angle_rad,
+            dist_AU,
+            wavelength_nm,
+            Rp_Rearth,
+            time_jd,
+            star=None,
+        ):
+            return jnp.ones_like(phase_angle_rad) * (time_jd + 1) * 1e-10
+
+    planet = eqx.tree_at(
+        lambda p: p.physical_model, _make_planet(1.0, 0.3, 1.0), KeywordModel()
+    )
+    star = FlatStar(Msun2kg, 10.0, 3.0)
+    actual = planet.spec_flux_density(
+        SOLVER, jnp.asarray(500.0), jnp.array([0.0, 1.0]), star=star
+    )
+    np.testing.assert_allclose(actual, [[3e-10, 6e-10]], rtol=1e-15, atol=0)

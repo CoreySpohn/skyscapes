@@ -25,21 +25,48 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
     teff_K: Array
 
     def spec_flux_density(
-        self, wavelength_nm: Array, Rp_Rearth: Array, dist_pc: Array
+        self,
+        wavelength_nm: Array,
+        Rp_Rearth: Array,
+        dist_pc: Array | None = None,
+        *,
+        phase_angle_rad: Array | None = None,
+        dist_AU: Array | None = None,
+        time_jd: Array | None = None,
+        star=None,
     ) -> Array:
         """Planet photon flux density at the observer [ph/s/m^2/nm].
 
         Args:
             wavelength_nm: Wavelength [nm], scalar.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
-            dist_pc: Distance to the system [pc].
+            dist_pc: Distance to the system [pc] for the legacy three-argument
+                call, which returns shape ``(K,)``.
+            phase_angle_rad: Phase angles [rad], shape ``(K, T)``; sets the
+                output shape for the common physical-model interface.
+            dist_AU: Star-planet distance [AU]; ignored.
+            time_jd: Observation Julian Dates; ignored (steady emission).
+            star: Host ``AbstractStar`` providing the observer distance.
 
         Returns:
-            Flux density, shape ``(K,)``.
+            Flux density, shape ``(K, T)`` with stellar context, or ``(K,)``
+            for the legacy ``(wavelength_nm, Rp_Rearth, dist_pc)`` call.
         """
-        return _planck_photon_flux(
-            wavelength_nm, self.teff_K, Rp_Rearth, dist_pc, radius_unit_m=Rearth2m
+        if phase_angle_rad is not None:
+            if star is None:
+                raise ValueError("BlackbodyPhysicalModel needs the host star")
+            dist_pc = star.dist_pc
+        flux = _planck_photon_flux(
+            wavelength_nm,
+            self.teff_K,
+            Rp_Rearth,
+            dist_pc,
+            radius_unit_m=Rearth2m,
+            stable_wien=phase_angle_rad is not None,
         )
+        if phase_angle_rad is None:
+            return flux
+        return flux[:, None] * jnp.ones_like(phase_angle_rad)
 
     def contrast(
         self,
@@ -83,16 +110,23 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
         if star is None:
             raise ValueError("BlackbodyPhysicalModel needs the host star")
         if isinstance(star, BlackbodyStar):
+            # Cancel the shared dilution before division to retain numerical range.
             wavelength_um = jnp.asarray(wavelength_nm) * nm2um
             c2 = h * c / (k_B * um2m)
             x_star = c2 / (wavelength_um * star.teff_K)
             x_planet = c2 / (wavelength_um * self.teff_K)
             area = (Rp_Rearth * Rearth2m / star.radius_m) ** 2
             ratio = (area * jnp.expm1(x_star) / jnp.expm1(x_planet))[:, None]
-        else:
-            planet = self.spec_flux_density(wavelength_nm, Rp_Rearth, star.dist_pc)
-            ratio = planet[:, None] / star.spec_flux_density(wavelength_nm, time_jd)
-        return ratio * jnp.ones_like(phase_angle_rad)
+            return ratio * jnp.ones_like(phase_angle_rad)
+        flux = self.spec_flux_density(
+            wavelength_nm,
+            phase_angle_rad=phase_angle_rad,
+            dist_AU=dist_AU,
+            Rp_Rearth=Rp_Rearth,
+            time_jd=time_jd,
+            star=star,
+        )
+        return flux / star.spec_flux_density(wavelength_nm, time_jd)
 
     def __repr__(self) -> str:
         """One-line summary of the effective temperature."""

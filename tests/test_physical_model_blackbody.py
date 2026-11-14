@@ -38,30 +38,66 @@ def _system(model, star=STAR, rp=15.7):
 
 
 @pytest.mark.parametrize(
-    "temperature, wavelength", [(1560.0, 4400.0), (150.0, 10000.0)]
+    "temperature, wavelength", [(1560.0, 4400.0), (150.0, 10000.0), (100.0, 1650.0)]
 )
 @pytest.mark.parametrize("x64", [False, True])
 def test_contrast_matches_planck_ratio(temperature, wavelength, x64):
-    """Fails if the direct ratio or generic stellar-flux division changes units."""
+    """Fails if photon units change or float32 Wien-tail flux overflows to zero.
+
+    At 100 K, the exponent is 87: float32 exponent rounding allows 2e-5
+    relative flux error. Other float32 cases allow 1e-5, float64 1e-12.
+    """
     with jax.enable_x64(x64):
+        star = STAR
+        if temperature == 100.0:
+            star = BlackbodyStar(STAR.Ms_kg, 10.0, 1000.0, 0.1 * Rsun2m)
         model = BlackbodyPhysicalModel(teff_K=jnp.array([temperature]))
         wl, rp = jnp.asarray(wavelength), jnp.array([15.7])
         args = (jnp.zeros((1, 2)), jnp.ones((1, 2)))
         times = jnp.array([0.0, 1.0])
-        got = model.contrast_at_time(*args, wl, rp, time_jd=times, star=STAR)
+        got = model.contrast_at_time(*args, wl, rp, time_jd=times, star=star)
         flat = FlatStar(
-            Ms_kg=STAR.Ms_kg,
-            dist_pc=STAR.dist_pc,
-            flux_phot_per_nm_m2=STAR.spec_flux_density(wl, times),
+            Ms_kg=star.Ms_kg,
+            dist_pc=star.dist_pc,
+            flux_phot_per_nm_m2=star.spec_flux_density(wl, times),
         )
         generic = model.contrast_at_time(*args, wl, rp, time_jd=times, star=flat)
         x = H * C / (wavelength * 1e-9 * KB)
-        area = (15.7 * 6.3781e6 / (1.77 * 6.957e8)) ** 2
-        expected = area * jnp.expm1(x / 8840.0) / jnp.expm1(x / temperature)
+        area = (15.7 * 6.3781e6 / star.radius_m) ** 2
+        expected = area * np.expm1(x / star.teff_K) / np.expm1(x / temperature)
         assert got.shape == (1, 2)
         rtol = 1e-12 if x64 else 1e-5
+        if not x64 and temperature == 100.0:
+            rtol = 2e-5
         assert jnp.allclose(got, expected, rtol=rtol, atol=0.0)
         assert jnp.allclose(got, generic, rtol=rtol, atol=0.0)
+        flux = model.spec_flux_density(
+            wl,
+            phase_angle_rad=args[0],
+            dist_AU=args[1],
+            Rp_Rearth=rp,
+            time_jd=times,
+            star=star,
+        )
+        # Planck photon radiance per nm, diluted by the apparent disk solid angle.
+        radiance = 2 * C / (wavelength * 1e-9) ** 4 * 1e-9 / np.expm1(x / temperature)
+        expected_flux = (
+            radiance
+            * np.pi
+            * (15.7 * 6.3781e6 / (star.dist_pc * 3.085677581491367e16)) ** 2
+        )
+        np.testing.assert_allclose(flux, expected_flux, rtol=rtol, atol=0)
+        legacy = model.spec_flux_density(wl, rp, star.dist_pc)
+        if not x64 and temperature == 100.0:
+            # Preserve the legacy method's existing overflow behavior.
+            np.testing.assert_array_equal(legacy, 0.0)
+        else:
+            np.testing.assert_allclose(
+                flux,
+                jnp.broadcast_to(legacy[:, None], (1, 2)),
+                rtol=rtol,
+                atol=0,
+            )
     assert Rearth2m == pytest.approx(6.3781e6, rel=1e-4)
     assert Rsun2m == pytest.approx(6.957e8, rel=1e-4)
 
@@ -100,8 +136,21 @@ def test_contrast_without_star_raises():
 
 
 def test_system_contrast_cube_stacks_wavelengths():
-    """contrast_cube equals contrasts wavelength by wavelength, shape (W, K, T)."""
+    """Fails if flux dispatch changes thermal flux, contrasts, or cube axes."""
     system = _system(BlackbodyPhysicalModel(teff_K=jnp.array([1560.0])))
+    # Recorded from the same fixture before native thermal flux dispatch.
+    np.testing.assert_allclose(
+        system.contrasts(jnp.asarray(4400.0), jnp.array([0.0, 100.0])),
+        [[0.0004148682341547496, 0.0004148682341547496]],
+        rtol=1e-14,
+        atol=0,
+    )
+    np.testing.assert_allclose(
+        system.planet_flux_densities(jnp.asarray(4400.0), jnp.array([0.0, 100.0])),
+        [[0.641929514134305, 0.641929514134305]],
+        rtol=1e-14,
+        atol=0,
+    )
     wl = jnp.array([3900.0, 4400.0, 4900.0])
     cube = system.contrast_cube(wl, T_JD)
     assert cube.shape == (3, 1, 2)

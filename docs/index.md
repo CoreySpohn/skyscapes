@@ -121,7 +121,8 @@ pip install skyscapes
 - [`skyscapes.physical_model`](explanation/physical_models) --
   `LambertianPhysicalModel`, `ExoJaxPhysicalModel`,
   `ExoJaxEmissionModel` ([how-to](how-to/thermal_emission)),
-  `GridPhysicalModel`, ...
+  `GridPhysicalModel`, `BlackbodyPhysicalModel`, `SumPhysicalModel`, ...;
+  all expose observer photon flux through `spec_flux_density`.
 - [`skyscapes.background`](explanation/source_models) -- `Zodi`
   (union), `AYOZodi`, `LeinertZodi`, `PrecomputedZodi`
 

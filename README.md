@@ -89,8 +89,10 @@ optional `Zodi` background:
 - **Physical models** — `LambertianPhysicalModel`,
   `GridPhysicalModel` (wavelength/phase contrast tables),
   `TimeSeriesPhysicalModel` (wavelength/Julian-Date contrast tables),
-  `PrecomputedPhysicalModel` (cached reflectivity for hot loops), and
-  `ExoJaxPhysicalModel` (full 2-stream RT via ExoJAX).
+  `PrecomputedPhysicalModel` (cached reflectivity for hot loops),
+  `ExoJaxPhysicalModel` (full 2-stream RT via ExoJAX),
+  `BlackbodyPhysicalModel` and `ExoJaxEmissionModel` (thermal emission),
+  and `SumPhysicalModel` (additive radiative contributions).
 - **Disks** — `ExovistaDisk`, `ExovistaParametricDisk`, `GraterDisk`,
   `CompositeDisk`.
 - **Backgrounds** — `AYOZodi` (AYO-convention defaults), `LeinertZodi`
@@ -140,9 +142,13 @@ interpolation by default.
 
 `Star.spots` and `Star.metadata` preserve source records. Loading spot
 geometry does not yet provide resolved stellar-surface propagation or
-asymmetric stellar leakage through a coronagraph. Planet methods call
-`contrast_at_time(..., time_jd=...)`; existing physical models inherit
-a default hook that delegates to their phase-dependent `contrast`.
+asymmetric stellar leakage through a coronagraph. Planet contrast methods call
+`contrast_at_time(..., time_jd=..., star=...)`; phase-dependent models inherit
+a default hook that delegates to `contrast`. `Planet.spec_flux_density`
+calls the model's `spec_flux_density(wavelength_nm, phase_angle_rad=...,
+dist_AU=..., Rp_Rearth=..., time_jd=..., star=...)`, returning `(K, T)`
+photon flux in ph/s/m²/nm. Thermal models evaluate flux directly;
+`SumPhysicalModel` adds component fluxes, including through bin integration.
 
 Building one from scratch:
 
