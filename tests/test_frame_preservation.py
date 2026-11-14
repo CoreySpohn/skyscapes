@@ -211,6 +211,7 @@ def test_disk_image_mirrors_stored_columns(index, inc, pa):
         pixel_scale_arcsec=0.1,
         dist_pc=10.0,
         n_slices_los=101,
+        quadrature="trapezoid",
     )
     # Mirror the stored arrays for +column west; do not recapture snapshots.
     expected = np.asarray(LOS_IMAGES[index])[:, ::-1]

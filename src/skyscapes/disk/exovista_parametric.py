@@ -53,7 +53,11 @@ import jax.numpy as jnp
 from jaxtyping import Array
 
 from .._repr import fmt_scalar_or_array
-from ._los import los_integrate_scattered
+from ._los import (
+    check_quadrature,
+    layer_expansion_parameter,
+    los_integrate_scattered,
+)
 from .base import AbstractDisk
 from .grater import henyey_greenstein
 
@@ -163,6 +167,21 @@ class ExovistaParametricDisk(AbstractDisk):
     Density, scattering, and spectral parameters are fittable PyTree leaves.
     Image geometry and LOS integration settings are static configuration.
 
+    The vertical profile ``exp(-0.5 (z / (hor r))^2)`` is the form
+    ``exp(-(|z| / h)^gamma)`` with ``gamma = 2`` and ``h = sqrt(2) hor r``,
+    which is what the line-of-sight rules use (``quadrature``):
+
+    - ``"legendre"`` (default) covers 4 local scale heights ``h`` at every
+      radius, bounded by the ``rmax_AU`` cylinder, so it also captures the
+      outer halo that the ``"trapezoid"`` window truncates. The radial
+      profile has slope breaks at ``r0 -+ dr`` and ``rinner_AU``, so
+      convergence is algebraic, not spectral.
+    - ``"gauss"`` and ``"gauss_half"`` hold while :meth:`gauss_rule_eps`
+      stays below about 0.45. The profile is Gaussian, so ``"gauss_half"``
+      has no advantage here.
+    - ``"trapezoid"`` is the rule of earlier releases, kept bit for bit,
+      with its window sized by ``n_scale_heights`` at the ring center.
+
     Attributes:
         r0_AU: Ring center radius [AU].
         dror: Ring fractional width ``Delta r / r0`` (dimensionless).
@@ -184,9 +203,13 @@ class ExovistaParametricDisk(AbstractDisk):
         nx, ny: Output image shape.
         pixel_scale_arcsec: Pixel scale [arcsec/pixel].
         dist_pc: System distance [pc].
-        n_slices_los: Number of LOS integration slices.
-        n_scale_heights: LOS half-extent in units of the scale height at
-            ``rmax_AU`` (default 6.0).
+        n_slices_los: Number of LOS nodes (per side of the midplane for
+            ``"gauss_half"``).
+        n_scale_heights: ``"trapezoid"`` only: LOS half-extent in units of
+            the 1-sigma scale ``hor r0_AU`` at the ring center (default
+            6.0).
+        quadrature: Line-of-sight rule (static): ``"legendre"`` (default),
+            ``"gauss"``, ``"gauss_half"`` or ``"trapezoid"``.
     """
 
     r0_AU: Array
@@ -212,6 +235,27 @@ class ExovistaParametricDisk(AbstractDisk):
     dist_pc: float = eqx.field(static=True)
     n_slices_los: int = eqx.field(static=True)
     n_scale_heights: float = eqx.field(static=True, default=6.0)
+    quadrature: str = eqx.field(static=True, default="legendre")
+
+    def __check_init__(self):
+        """Validate the static LOS settings."""
+        check_quadrature(self.quadrature, self.n_slices_los)
+
+    def gauss_rule_eps(self, incl_deg: Array) -> Array:
+        """Expansion parameter of the ``"gauss"`` rules at ``incl_deg``.
+
+        ``eps = (1 / dror) sqrt(2) hor |tan(i)|``: the change in the
+        logarithm of the radial profile across one scale height
+        ``h = sqrt(2) hor r`` of the layer along the line of sight, with
+        the logarithmic slope ``r0 / dr`` of the Gaussian ring at its edge
+        ``|r - r0| = dr`` (its steepest value). ``"gauss"`` and
+        ``"gauss_half"`` need this below about 0.45; evaluate it at the
+        corners of a prior before choosing them. Nothing checks it at
+        render time.
+        """
+        return layer_expansion_parameter(
+            1.0 / self.dror, jnp.sqrt(2.0) * self.hor, incl_deg
+        )
 
     def _zmax_AU(self) -> Array:
         """LOS half-extent in disk-frame z, evaluated at the ring center.
@@ -250,9 +294,6 @@ class ExovistaParametricDisk(AbstractDisk):
             extrap=False,
         )
 
-        zmax_AU = self._zmax_AU()
-        # The shared LOS kernel uses a finite radial window at edge-on.
-
         def density_fn(r_AU: Array, z_AU: Array, valid: Array) -> Array:
             # Substitute r0_AU outside the annulus so the radial-profile
             # transitions evaluate at a well-conditioned radius. The
@@ -281,6 +322,9 @@ class ExovistaParametricDisk(AbstractDisk):
                 self.w2,
             )
 
+        def scale_height_fn(r_AU: Array) -> Array:
+            return jnp.sqrt(2.0) * self.hor * r_AU
+
         integral = los_integrate_scattered(
             density_fn,
             phase_fn,
@@ -288,12 +332,15 @@ class ExovistaParametricDisk(AbstractDisk):
             pa_deg=pa_deg,
             rmin_AU=self.rmin_AU,
             rmax_AU=self.rmax_AU,
-            zmax_AU=zmax_AU,
             nx=self.nx,
             ny=self.ny,
             pixel_scale_arcsec=self.pixel_scale_arcsec,
             dist_pc=self.dist_pc,
             n_slices_los=self.n_slices_los,
+            quadrature=self.quadrature,
+            scale_height_fn=scale_height_fn,
+            vertical_exponent=2.0,
+            zmax_AU=self._zmax_AU() if self.quadrature == "trapezoid" else None,
         )
         return Ag * integral
 
@@ -327,5 +374,6 @@ class ExovistaParametricDisk(AbstractDisk):
             f"{fmt_scalar_or_array(self.rmax_AU)}] AU; "
             f"Ag grid: {n_wl} pts in {wl_min:.0f}-{wl_max:.0f} nm; "
             f"image: {self.ny}x{self.nx} @ {self.pixel_scale_arcsec} arcsec/px, "
-            f"dist={self.dist_pc} pc, n_slices_los={self.n_slices_los})"
+            f"dist={self.dist_pc} pc, n_slices_los={self.n_slices_los}, "
+            f"quadrature={self.quadrature!r})"
         )

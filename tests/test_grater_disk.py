@@ -245,15 +245,18 @@ def test_edge_on_render_gradient_and_convergence(incl, cutoff_width):
     assert jnp.max(jnp.abs(derivative)) > 1e-4 * peak
 
 
-def test_edge_on_continuity_and_smooth_cutoff_gradients():
-    """Fails if the former threshold introduces a seam or taper parameters detach.
+@pytest.mark.parametrize("quadrature", ["trapezoid", "legendre"])
+def test_edge_on_continuity_and_smooth_cutoff_gradients(quadrature):
+    """Fails if a rule has a seam near edge-on or taper parameters detach.
 
-    Includes the requested inclination sequence and the exact chart boundary.
-    The hard-cutoff default retains sample-crossing jumps; the positive-width
-    fit uses a C2 taper so both the geometry and density are continuous.
+    Includes the requested inclination sequence and the trapezoid's chart
+    boundary. The hard-cutoff default retains sample-crossing jumps; the
+    positive-width fit uses a C2 taper so both the geometry and density are
+    continuous. The Gauss-Legendre window has no threshold in inclination and
+    must pass the same probes.
     """
     disk = replace(
-        _belt(257),
+        _belt(257, quadrature=quadrature),
         nx=17,
         ny=9,
         pixel_scale_arcsec=0.04,
@@ -300,7 +303,10 @@ _DISPLAY_PRECISION = 10.0 ** (np.log10(300.0) / 256.0) - 1.0
 _BELT_PX_AU = 0.085
 
 
-def _belt(n_slices_los: int, n_scale_heights: float = 6.0) -> GraterDisk:
+def _belt(
+    n_slices_los: int, n_scale_heights: float = 6.0, quadrature: str = "trapezoid"
+) -> GraterDisk:
+    """Narrow belt; the ladders below are statements about the trapezoid rule."""
     return GraterDisk(
         sma_AU=jnp.array(3.0),
         alpha_in=jnp.array(5.0),
@@ -319,6 +325,7 @@ def _belt(n_slices_los: int, n_scale_heights: float = 6.0) -> GraterDisk:
         dist_pc=10.0,
         n_slices_los=n_slices_los,
         n_scale_heights=n_scale_heights,
+        quadrature=quadrature,
     )
 
 
@@ -493,8 +500,10 @@ def test_ring_major_axis_has_fits_sky_pa():
 
 
 def test_legacy_window_values():
-    """Fails if the established LOS quadrature changes outside the edge-on extension."""
-    d = make_disk(nx=9, ny=7, n_slices_los=65, pixel_scale_arcsec=1.0)
+    """Fails if the trapezoid rule changes outside the edge-on extension."""
+    d = make_disk(
+        nx=9, ny=7, n_slices_los=65, pixel_scale_arcsec=1.0, quadrature="trapezoid"
+    )
     values = []
     for incl in (0.0, 60.0, 88.0, 89.3, 90.7, 120.0):
         img = _render(d, incl_deg=incl)

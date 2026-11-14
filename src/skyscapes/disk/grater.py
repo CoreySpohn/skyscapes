@@ -26,10 +26,11 @@ Notes on convention:
     contract; ``vmap`` over wavelength gives a cube without changing
     the interface.
 
-    The LOS kernel retains midplane-centered log-spaced sampling away from
-    edge-on and changes smoothly to an outer-radius-bounded window near
-    90 degrees. Exactly edge-on images and inclination derivatives are
-    supported. Smooth radial tapers remove hard sample-crossing jumps.
+    The line-of-sight rule is a static choice (``quadrature``). The default
+    Gauss-Legendre rule integrates over the exact extent of the flared layer
+    along each line of sight and is smooth through edge-on, so exactly
+    edge-on images and inclination derivatives are supported. Smooth radial
+    tapers remove hard sample-crossing jumps.
     Inclinations above 90 view the disk from its other face and return the
     physical, nonnegative map, mirrored across the line of nodes relative to
     ``180 - incl``.
@@ -39,11 +40,16 @@ from __future__ import annotations
 
 import equinox as eqx
 import interpax
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
 from .._repr import fmt_scalar_or_array
-from ._los import los_integrate_scattered
+from ._los import (
+    check_quadrature,
+    layer_expansion_parameter,
+    los_integrate_scattered,
+)
 from .base import AbstractDisk
 
 
@@ -74,8 +80,13 @@ def two_power_law_density(
     ksi0_AU: Array,
     gamma: Array,
     beta: Array,
+    *,
+    fixed_vertical_profile: bool = False,
 ) -> Array:
     """Augereau 1999 two-power-law radial density with flared vertical profile.
+
+    ``rho = (x^(-2 alpha_in) + x^(-2 alpha_out))^(-1/2) exp(-(|z| / h)^gamma)``
+    with ``x = r / sma_AU`` and ``h = ksi0_AU x^beta``.
 
     Args:
         r: Cylindrical radius in disk frame [AU]. Must be strictly positive;
@@ -90,10 +101,23 @@ def two_power_law_density(
         ksi0_AU: Vertical scale height at ``r = sma_AU`` [AU].
         gamma: Vertical profile exponent (2 = Gaussian, 1 = exponential).
         beta: Flaring index (0 = none, 1 = linear).
+        fixed_vertical_profile: Static. When True the density is evaluated
+            for ``gamma = 2`` and ``beta = 1`` without general powers (one
+            logarithm, three exponentials and a reciprocal square root in
+            place of five ``pow`` calls), which is 1.5 to 1.8 times faster
+            and agrees with the general expression to rounding. ``gamma``
+            and ``beta`` are then ignored and carry no gradient.
 
     Returns:
         Density in arbitrary units (relative), same shape as ``r`` and ``z``.
     """
+    if fixed_vertical_profile:
+        log_ratio = jnp.log(r / sma_AU)
+        radial = jax.lax.rsqrt(
+            jnp.exp(-2.0 * alpha_in * log_ratio) + jnp.exp(-2.0 * alpha_out * log_ratio)
+        )
+        height = z * sma_AU / (ksi0_AU * r)
+        return radial * jnp.exp(-height * height)
     r_ratio = r / sma_AU
     radial = (r_ratio ** (-2.0 * alpha_in) + r_ratio ** (-2.0 * alpha_out)) ** (-0.5)
     h_r = ksi0_AU * r_ratio**beta
@@ -106,6 +130,33 @@ class GraterDisk(AbstractDisk):
 
     Density, scattering, and spectral parameters are fittable PyTree leaves.
     Image geometry and LOS integration settings are static configuration.
+
+    **Choosing the line-of-sight rule.** All rules converge to the same
+    integral; the choice sets the truncation error and the cost, which is
+    proportional to the node count. Errors below are the largest pixel
+    error over the image peak for a narrow ring (``alpha = 5``,
+    ``h / r = 0.05``) with tapered edges.
+
+    - ``"legendre"`` (default) is accurate at every inclination. Use 24 to
+      48 nodes up to 70 degrees (below 1e-4; 48 nodes reach 1e-5 at 60
+      degrees and 6e-5 at 70) and 96 from 80 to 90 degrees (4e-4 to 2e-3).
+      A broader or thicker disk needs fewer.
+    - ``"gauss"`` needs only 7 nodes (2e-5 at 45 degrees, 2e-4 at 60) but
+      holds only while :meth:`gauss_rule_eps` stays below about 0.45 over
+      the whole prior (up to about 60 degrees for the ring above). Past
+      that its error grows without bound whatever the node count, and no
+      error is raised. Use ``"gauss_half"`` instead when ``gamma`` is, or
+      may be fitted, away from 2 (``n_slices_los`` is then per side; 4 to
+      6).
+    - ``"trapezoid"`` is the rule of earlier releases, kept bit for bit. It
+      is second order: 2e-2 at 31 nodes and 2e-3 at 101, mostly a uniform
+      scale error of the image.
+
+    **Fitting.** Set ``cutoff_width_AU > 0``. The hard ``rmin_AU`` /
+    ``rmax_AU`` masks of the default make the image piecewise smooth in the
+    parameters and add 1e-4 to 7e-4 of the peak to every rule's error. An
+    image needs about 1e-4 of the peak for the model error to stay below
+    the noise at a peak signal-to-noise ratio of 100 per pixel.
 
     Attributes:
         sma_AU: Reference radius [AU] (radial profile peak).
@@ -130,9 +181,19 @@ class GraterDisk(AbstractDisk):
         nx, ny: Output image shape.
         pixel_scale_arcsec: Pixel scale [arcsec/pixel].
         dist_pc: System distance [pc].
-        n_slices_los: Number of LOS integration slices.
-        n_scale_heights: LOS half-extent in units of the local scale
-            height at ``rmax_AU`` (default 6.0).
+        n_slices_los: Number of LOS nodes (per side of the midplane for
+            ``"gauss_half"``).
+        n_scale_heights: ``"trapezoid"`` only: LOS half-extent in units of
+            the scale height at ``rmax_AU`` (default 6.0). The other rules
+            size their window from the local scale height and ``gamma``.
+        quadrature: Line-of-sight rule (static): ``"legendre"`` (default),
+            ``"gauss"``, ``"gauss_half"`` or ``"trapezoid"``.
+        fixed_vertical_profile: Static. True declares ``gamma = 2`` and
+            ``beta = 1`` fixed: the density is evaluated without general
+            powers (1.5 to 1.8 times faster, same numbers to rounding) and
+            the Gauss rules are built at trace time, so they also work with
+            32-bit floats. ``gamma`` and ``beta`` must hold 2 and 1 and are
+            no longer fittable. Leave False (default) to fit either.
     """
 
     sma_AU: Array
@@ -155,6 +216,38 @@ class GraterDisk(AbstractDisk):
     n_scale_heights: float = eqx.field(static=True, default=6.0)
 
     cutoff_width_AU: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
+    quadrature: str = eqx.field(static=True, default="legendre")
+    fixed_vertical_profile: bool = eqx.field(static=True, default=False)
+
+    def __check_init__(self):
+        """Validate the static LOS settings and the fixed-profile promise."""
+        check_quadrature(self.quadrature, self.n_slices_los)
+        if not self.fixed_vertical_profile:
+            return
+        try:
+            mismatch = bool(jnp.any((self.gamma != 2.0) | (self.beta != 1.0)))
+        except jax.errors.TracerBoolConversionError:
+            return
+        if mismatch:
+            raise ValueError(
+                "fixed_vertical_profile=True needs gamma = 2 and beta = 1, got "
+                f"gamma={self.gamma}, beta={self.beta}."
+            )
+
+    def gauss_rule_eps(self, incl_deg: Array) -> Array:
+        """Expansion parameter of the ``"gauss"`` rules at ``incl_deg``.
+
+        ``eps = max(|alpha_in|, |alpha_out|) (ksi0_AU / sma_AU) |tan(i)|``:
+        the change in the logarithm of the radial power law across one
+        scale height of the layer along the line of sight. ``"gauss"`` and
+        ``"gauss_half"`` hold about 1e-3 of the peak or better while this
+        stays below about 0.45; evaluate it at the corners of a prior before
+        choosing them. Nothing checks it at render time.
+        """
+        log_slope = jnp.maximum(jnp.abs(self.alpha_in), jnp.abs(self.alpha_out))
+        return layer_expansion_parameter(
+            log_slope, self.ksi0_AU / self.sma_AU, incl_deg
+        )
 
     def _zmax_AU(self) -> Array:
         """LOS half-extent in disk-frame z, evaluated at ``rmax_AU``.
@@ -200,7 +293,7 @@ class GraterDisk(AbstractDisk):
             extrap=False,
         )
 
-        zmax_AU = self._zmax_AU()
+        fixed = self.fixed_vertical_profile
         cutoff_width = eqx.error_if(
             jnp.asarray(self.cutoff_width_AU),
             self.cutoff_width_AU < 0,
@@ -222,6 +315,7 @@ class GraterDisk(AbstractDisk):
                 self.ksi0_AU,
                 self.gamma,
                 self.beta,
+                fixed_vertical_profile=fixed,
             )
             width = jnp.where(cutoff_width > 0, cutoff_width, 1.0)
             inner = jnp.clip((r_safe - self.rmin_AU) / width, 0.0, 1.0)
@@ -234,6 +328,10 @@ class GraterDisk(AbstractDisk):
         def phase_fn(cos_phi: Array) -> Array:
             return henyey_greenstein(cos_phi, g_HG)
 
+        def scale_height_fn(r_AU: Array) -> Array:
+            r_ratio = r_AU / self.sma_AU
+            return self.ksi0_AU * (r_ratio if fixed else r_ratio**self.beta)
+
         integral = los_integrate_scattered(
             density_fn,
             phase_fn,
@@ -241,12 +339,15 @@ class GraterDisk(AbstractDisk):
             pa_deg=pa_deg,
             rmin_AU=self.rmin_AU,
             rmax_AU=self.rmax_AU,
-            zmax_AU=zmax_AU,
             nx=self.nx,
             ny=self.ny,
             pixel_scale_arcsec=self.pixel_scale_arcsec,
             dist_pc=self.dist_pc,
             n_slices_los=self.n_slices_los,
+            quadrature=self.quadrature,
+            scale_height_fn=scale_height_fn,
+            vertical_exponent=2.0 if fixed else self.gamma,
+            zmax_AU=self._zmax_AU() if self.quadrature == "trapezoid" else None,
         )
         return Ag * integral
 
@@ -273,5 +374,6 @@ class GraterDisk(AbstractDisk):
             f"gamma={fmt_scalar_or_array(self.gamma)}; "
             f"HG/Ag grid: {n_wl} pts in {wl_min:.0f}-{wl_max:.0f} nm; "
             f"image: {self.ny}x{self.nx} @ {self.pixel_scale_arcsec} arcsec/px, "
-            f"dist={self.dist_pc} pc, n_slices_los={self.n_slices_los})"
+            f"dist={self.dist_pc} pc, n_slices_los={self.n_slices_los}, "
+            f"quadrature={self.quadrature!r})"
         )

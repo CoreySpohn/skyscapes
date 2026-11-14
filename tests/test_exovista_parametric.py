@@ -278,7 +278,9 @@ def test_los_node_ladder_converges_at_second_order(incl):
     0.7-1.0 percent, matching the 641-node reference).
     """
     imgs = {
-        n: np.asarray(_render(make_disk(n_slices_los=n), incl_deg=incl))
+        n: np.asarray(
+            _render(make_disk(n_slices_los=n, quadrature="trapezoid"), incl_deg=incl)
+        )
         for n in (21, 41, 81)
     }
     for img in imgs.values():
@@ -298,15 +300,21 @@ def test_los_node_ladder_converges_at_second_order(incl):
     assert e_fine < 0.015
 
 
-def _halo_view(n_scale_heights: float) -> ExovistaParametricDisk:
-    """The default ring on an image that reaches ``rmax_AU`` (2 AU/pixel)."""
-    return make_disk(
+def _halo_view(n_scale_heights: float, **overrides) -> ExovistaParametricDisk:
+    """The default ring on an image that reaches ``rmax_AU`` (2 AU/pixel).
+
+    Trapezoid rule: the support tests below are about its window.
+    """
+    settings = dict(
         nx=81,
         ny=81,
         pixel_scale_arcsec=0.2,
         n_slices_los=161,
         n_scale_heights=n_scale_heights,
+        quadrature="trapezoid",
     )
+    settings.update(overrides)
+    return make_disk(**settings)
 
 
 def _radial_band(img: np.ndarray, lo_AU: float, hi_AU: float) -> float:
@@ -342,7 +350,7 @@ def test_vertical_support_ladder_converges_on_the_ring():
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "The LOS window is sized from the scale height at the ring center, so "
+        "The trapezoid window is sized from the scale height at the ring center, so "
         "at radius r it spans only n_scale_heights * r0 / r local scale "
         "heights and keeps erf(n_scale_heights * r0 / (sqrt(2) r)) of the "
         "halo column (0.95 at 3 r0 and 0.87 at 4 r0 for the default 6)."
@@ -359,6 +367,23 @@ def test_vertical_support_converges_in_the_outer_halo():
     )
     wide = _radial_band(np.asarray(_render(_halo_view(24.0), incl_deg=0.0)), 55.0, 75.0)
     assert abs(default / wide - 1.0) < 1e-3
+
+
+def test_legendre_window_captures_the_outer_halo():
+    """Fails if the Gauss-Legendre window is not sized from the local scale height.
+
+    Pole-on, the halo band (55-75 AU) that the trapezoid window truncates by
+    about 6 percent must match a trapezoid render with four times the support
+    and 1281 nodes to 1e-3, at 48 nodes. Tolerance basis: measured 3e-5.
+    """
+    wide = _radial_band(
+        np.asarray(_render(_halo_view(24.0, n_slices_los=1281), incl_deg=0.0)),
+        55.0,
+        75.0,
+    )
+    local = _halo_view(6.0, n_slices_los=48, quadrature="legendre")
+    band = _radial_band(np.asarray(_render(local, incl_deg=0.0)), 55.0, 75.0)
+    assert abs(band / wide - 1.0) < 1e-3
 
 
 def test_wavelength_vmap_returns_cube():
