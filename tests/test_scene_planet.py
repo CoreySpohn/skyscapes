@@ -10,6 +10,7 @@ import pytest
 from hwoutils.constants import G, Mearth2kg, Rearth2AU, pc2AU, rad2arcsec
 from orbix.equations.orbit import mean_motion, period_n
 from orbix.equations.phase import lambert_phase_exact
+from orbix.kepler.markley import solve_trig
 from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.orbit import KeplerianOrbit
 
@@ -279,8 +280,10 @@ def test_planet_propagate_passes_orbix_through_exactly():
 def test_planet_mass_and_legacy_observables(mass):
     """Fails if mass sanitization changes existing positions or contrasts.
 
-    Truth is the pre-addition expressions evaluated inline on the existing
-    fixture; require exact equality because their arithmetic is unchanged.
+    Truth is the existing two-body expressions with Markley propagation.
+    Mass sanitization remains exact; positions and contrast allow 3e-13
+    relative float64 basis/epoch roundoff (3e-13 arcsec absolute for position).
+    The system no longer includes grid interpolation error.
     """
     p = eqx.tree_at(lambda p: p.Mp_Mearth, _single_planet(), jnp.array([mass]))
     times = jnp.array([0.0, 42.0, 200.0])
@@ -288,7 +291,7 @@ def test_planet_mass_and_legacy_observables(mass):
     old_mass = _STAR.Ms_kg + jnp.where(jnp.isfinite(mp) & (mp > 0), mp, 0.0)
     np.testing.assert_array_equal(p.central_mass_kg(star=_STAR), old_mass)
     np.testing.assert_array_equal(p.planet_mass_kg(), [Mearth2kg if mass == 1 else 0])
-    r, phase, dist = p.orbit.propagate(SOLVER, times, Ms_kg=old_mass)
+    r, phase, dist = p.orbit.propagate(solve_trig, times, Ms_kg=old_mass)
     scale = rad2arcsec / (_STAR.dist_pc * pc2AU)
     old_position = jnp.stack([r[:, 0, :] * scale, r[:, 1, :] * scale])
     old_contrast = p.physical_model.contrast_at_time(
@@ -300,9 +303,11 @@ def test_planet_mass_and_legacy_observables(mass):
         star=_STAR,
     )
     system = System(_STAR, (p,), SOLVER)
-    np.testing.assert_array_equal(system.positions(times), old_position)
-    np.testing.assert_array_equal(
-        system.contrasts(jnp.asarray(600.0), times), old_contrast
+    np.testing.assert_allclose(
+        system.positions(times), old_position, rtol=3e-13, atol=3e-13
+    )
+    np.testing.assert_allclose(
+        system.contrasts(jnp.asarray(600.0), times), old_contrast, rtol=3e-13, atol=0
     )
 
 

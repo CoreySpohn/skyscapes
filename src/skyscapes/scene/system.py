@@ -1,7 +1,7 @@
 """scene.System -- the top-level PyTree container.
 
 Holds a star, a heterogeneous tuple of planets, an optional disk, and the
-Kepler-solver callable (static so JIT doesn't re-trace). The tuple makes
+legacy Kepler-solver callable (static so JIT does not re-trace). The tuple makes
 the system variadic: a 1-planet system and an 8-planet system have
 compatible shapes as long as per-planet arrays broadcast correctly.
 """
@@ -13,7 +13,11 @@ from collections.abc import Callable
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+from hwoutils.constants import Msun2kg
 from jaxtyping import Array
+from orbix.kepler import Markley
+from orbix.system import Body, Ephemeris, SkyFrame
+from orbix.system import System as DynamicsSystem
 
 from .._repr import indent
 from ..disk import AbstractDisk
@@ -22,15 +26,23 @@ from .planet import Planet
 from .star import AbstractStar
 
 
+class _SceneEphemeris(Ephemeris):
+    """Chain-order states with body indices for planets in scene order.
+
+    ``scene_planet_indices`` has shape ``(K_total,)`` and indexes the body
+    axis of all inherited observables; body zero is always the star.
+    """
+
+    scene_planet_indices: Array
+
+
 class System(eqx.Module):
     """Astrophysical scene: star + tuple of planets + optional disk.
 
     Attributes:
         star: Host star (``AbstractStar``).
         planets: Variable-length tuple of ``Planet``.
-        trig_solver: Scalar Kepler-trig solver (static; see
-            ``orbix.kepler.shortcuts.grid.get_grid_solver``). Required --
-            callers must provide a built solver, not None.
+        trig_solver: Required legacy static solver field, unused by System methods.
         disk: Optional extended-source disk (``AbstractDisk | None``).
         midplane_inc_deg: Disk midplane inclination [deg] in [0, 180],
             with 0 face-on (the default). Together with ``midplane_pa_deg``,
@@ -56,81 +68,152 @@ class System(eqx.Module):
         """Total number of planets across all composed ``Planet`` modules."""
         return sum(p.n_planets for p in self.planets)
 
-    def positions(self, time_jd: Array) -> Array:
-        """Concatenated on-sky positions, shape ``(2, K_total, T)``."""
-        per_planet = [
-            p.position_arcsec(self.trig_solver, time_jd, star=self.star)
-            for p in self.planets
-        ]
-        return jnp.concatenate(per_planet, axis=1)
+    def _chain_order(self) -> Array:
+        """Stable inner-to-outer permutation of the flattened scene planets."""
+        sizes = (
+            jnp.concatenate([p.orbit.a_AU for p in self.planets])
+            if self.planets
+            else jnp.empty(0)
+        )
+        return jnp.argsort(sizes, stable=True)
 
-    def position_angles(self, time_jd: Array) -> Array:
+    def dynamics(self) -> DynamicsSystem:
+        """Build a Jacobi chain from the current scene leaves, without host conversion.
+
+        Each orbit's ``t0_d`` is the epoch at which its mean anomaly is
+        ``M0_rad``: the existing two-body convention is
+        ``M(t) = M0_rad + n * (time_jd - t0_d)``. Map ``t0_d`` directly
+        to ``epoch_d``, retain ``M0_rad``, and pass Julian dates unchanged
+        as ``time_d``; SkyFrame has a zero date origin. Jacobi rates use
+        the enclosed mass, including the current planet. Masses are in
+        solar masses; nonfinite or nonpositive planet masses become zero.
+        Bodies are stably sorted by semi-major axis, inner to outer.
+        """
+        order = self._chain_order()
+        elements = {
+            name: jnp.concatenate([getattr(p.orbit, name) for p in self.planets])[order]
+            if self.planets
+            else jnp.empty(0)
+            for name in ("a_AU", "e", "i_rad", "W_rad", "w_rad", "M0_rad", "t0_d")
+        }
+        masses = (
+            jnp.concatenate([p.planet_mass_kg() / Msun2kg for p in self.planets])[order]
+            if self.planets
+            else jnp.empty(0)
+        )
+        return DynamicsSystem.from_classical(
+            Body(self.star.Ms_kg / Msun2kg),
+            Body(masses),
+            SkyFrame(self.star.dist_pc),
+            epoch_d=elements.pop("t0_d"),
+            **elements,
+        )
+
+    def ephemeris(self, time_jd: Array, *, solver=None) -> _SceneEphemeris:
+        """Solve once with Markley by default and retain scene-order body indices.
+
+        The returned orbix Ephemeris stores ``(K_total+1, T, 3)`` states
+        in chain order. Its ``scene_planet_indices`` array addresses the
+        planets in scene order. Pass this object as ``ephemeris=`` to any
+        geometry consumer to reuse the solve; dates must match that solve.
+        ``solver`` accepts an orbix.kepler strategy, independent of the
+        retained legacy ``trig_solver`` field.
+        """
+        solved = self.dynamics().solve(
+            time_jd, solver=Markley() if solver is None else solver
+        )
+        return _SceneEphemeris(
+            solved.position_AU,
+            solved.velocity_AU_per_d,
+            solved.dist_pc,
+            jnp.argsort(self._chain_order(), stable=True) + 1,
+        )
+
+    def positions(self, time_jd: Array, *, ephemeris=None) -> Array:
+        """Star-relative on-sky positions, shape ``(2, K_total, T)``."""
+        eph = self.ephemeris(time_jd) if ephemeris is None else ephemeris
+        return jnp.stack(eph.offset_arcsec(eph.scene_planet_indices, 0), axis=0)
+
+    def position_angles(self, time_jd: Array, *, ephemeris=None) -> Array:
         """Position angles east of north in ``[0, 360)``, ``(K_total, T)``."""
-        return jnp.concatenate(
-            [
-                p.position_angle_deg(self.trig_solver, time_jd, star=self.star)
-                for p in self.planets
-            ],
-            axis=0,
-        )
+        eph = self.ephemeris(time_jd) if ephemeris is None else ephemeris
+        return eph.position_angle_deg(eph.scene_planet_indices, 0)
 
-    def star_reflex(self, time_jd: Array) -> Array:
-        """Sum stellar (east, north) barycentric offsets [arcsec], ``(2, T)``.
+    def star_reflex(self, time_jd: Array, *, ephemeris=None) -> Array:
+        """Stellar (east, north) barycentric offsets [arcsec], ``(2, T)``.
 
-        Each planet is treated as an independent two-body orbit with the
-        star; planet-planet interactions are not included.
+        The Jacobi chain includes interior planets in each orbit's reference
+        mass and centre; it is a Kepler hierarchy, without mutual perturbations.
         """
-        return sum(
-            (
-                jnp.sum(
-                    p.reflex_position_arcsec(self.trig_solver, time_jd, star=self.star),
-                    axis=1,
-                )
-                for p in self.planets
-            ),
-            jnp.zeros((2, time_jd.size)),
-        )
+        eph = self.ephemeris(time_jd) if ephemeris is None else ephemeris
+        return jnp.stack(eph.offset_arcsec(0, "barycenter"), axis=0)
 
-    def star_radial_velocity(self, time_jd: Array) -> Array:
-        """Sum stellar radial velocities [m/s], positive receding, ``(T,)``.
+    def star_radial_velocity(self, time_jd: Array, *, ephemeris=None) -> Array:
+        """Stellar barycentric radial velocity [m/s], positive receding, ``(T,)``.
 
-        Each planet is an independent two-body orbit with the star.
-        No systemic velocity is added.
+        Read the Jacobi ephemeris without adding a systemic velocity.
         """
-        return sum(
-            (
-                jnp.sum(
-                    p.radial_velocity_m_s(self.trig_solver, time_jd, star=self.star),
-                    axis=0,
-                )
-                for p in self.planets
-            ),
-            jnp.zeros_like(time_jd, dtype=float),
-        )
+        eph = self.ephemeris(time_jd) if ephemeris is None else ephemeris
+        return eph.radial_velocity_m_per_s(0, "barycenter")
 
-    def contrasts(self, wavelength_nm: Array, time_jd: Array) -> Array:
-        """Per-planet contrast at a scalar wavelength [nm], shape ``(K_total, T)``."""
+    def _photometry(self, wavelength_nm, time_jd, ephemeris, *, flux=False):
+        """Dispatch physical models on star-relative phase/distance, each (K, T)."""
         if jnp.size(wavelength_nm) != 1:
             raise ValueError("need one wavelength; use contrast_cube")
-        per_planet = [
-            p.contrast(self.trig_solver, wavelength_nm, time_jd, star=self.star)
-            for p in self.planets
-        ]
-        return jnp.concatenate(per_planet, axis=0)
+        eph = self.ephemeris(time_jd) if ephemeris is None else ephemeris
+        phase = eph.phase_angle_rad(eph.scene_planet_indices, 0)
+        distance = eph.distance_AU(eph.scene_planet_indices, 0)
+        values = []
+        start = 0
+        for planet in self.planets:
+            stop = start + planet.n_planets
+            geometry = dict(
+                phase_angle_rad=phase[start:stop],
+                dist_AU=distance[start:stop],
+                Rp_Rearth=planet.Rp_Rearth,
+                time_jd=time_jd,
+                star=self.star,
+            )
+            model = planet.physical_model
+            values.append(
+                model.spec_flux_density(wavelength_nm, **geometry)
+                if flux
+                else model.contrast_at_time(wavelength_nm=wavelength_nm, **geometry)
+            )
+            start = stop
+        return (
+            jnp.concatenate(values, axis=0) if values else jnp.empty((0, time_jd.size))
+        )
 
-    def contrast_cube(self, wavelengths_nm: Array, time_jd: Array) -> Array:
+    def contrasts(
+        self, wavelength_nm: Array, time_jd: Array, *, ephemeris=None
+    ) -> Array:
+        """Per-planet contrast at a scalar wavelength [nm], shape ``(K_total, T)``."""
+        return self._photometry(wavelength_nm, time_jd, ephemeris)
+
+    def contrast_cube(
+        self, wavelengths_nm: Array, time_jd: Array, *, ephemeris=None
+    ) -> Array:
         """Per-planet contrast at each wavelength, shape ``(W, K_total, T)``.
 
         Args:
             wavelengths_nm: Wavelengths [nm], shape ``(W,)``.
             time_jd: Observation Julian Dates, shape ``(T,)``.
+            ephemeris: Optional scene ephemeris solved at these dates.
         """
-        return jax.vmap(lambda w: self.contrasts(w, time_jd))(
+        eph = self.ephemeris(time_jd) if ephemeris is None else ephemeris
+        return jax.vmap(lambda w: self.contrasts(w, time_jd, ephemeris=eph))(
             jnp.asarray(wavelengths_nm)
         )
 
     def bin_mean_contrast_cube(
-        self, centers_nm: Array, widths_nm: Array, time_jd: Array, *, n_nodes: int = 4
+        self,
+        centers_nm: Array,
+        widths_nm: Array,
+        time_jd: Array,
+        *,
+        n_nodes: int = 4,
+        ephemeris=None,
     ) -> Array:
         """Ratio of bin-integrated planet and star photons, ``(W, K_total, T)``.
 
@@ -148,8 +231,9 @@ class System(eqx.Module):
         a conservative full-table cap. Close over concrete bins when compiling
         to retain bounded work.
         """
+        eph = self.ephemeris(time_jd) if ephemeris is None else ephemeris
         numerator = self.bin_mean_planet_flux_densities(
-            centers_nm, widths_nm, time_jd, n_nodes=n_nodes
+            centers_nm, widths_nm, time_jd, n_nodes=n_nodes, ephemeris=eph
         )
         knots = self.star.quadrature_knots_nm
         denominator = bin_mean(
@@ -165,11 +249,13 @@ class System(eqx.Module):
         safe_denominator = jnp.where(point_bin[:, None], 1.0, denominator)
         ratio = numerator / safe_denominator[:, None, :]
         return jnp.where(
-            point_bin[:, None, None], self.contrast_cube(centers, time_jd), ratio
+            point_bin[:, None, None],
+            self.contrast_cube(centers, time_jd, ephemeris=eph),
+            ratio,
         )
 
     def band_contrasts(
-        self, bandpass: Bandpass, time_jd: Array, *, n_nodes: int = 4
+        self, bandpass: Bandpass, time_jd: Array, *, n_nodes: int = 4, ephemeris=None
     ) -> Array:
         """Ratio of band-integrated planet and star photons, ``(K_total, T)``.
 
@@ -181,6 +267,7 @@ class System(eqx.Module):
         curvature or additional planetary features. The integrated stellar
         photon flux must be nonzero.
         """
+        eph = self.ephemeris(time_jd) if ephemeris is None else ephemeris
         centers = jnp.atleast_1d((bandpass.low_nm + bandpass.high_nm) / 2)
         widths = jnp.atleast_1d(bandpass.high_nm - bandpass.low_nm)
         knots = bandpass.wavelength_nm
@@ -193,7 +280,7 @@ class System(eqx.Module):
             weight_fn=bandpass,
         )
         numerator = bin_mean(
-            lambda w: self.planet_flux_densities(w, time_jd),
+            lambda w: self.planet_flux_densities(w, time_jd, ephemeris=eph),
             centers,
             widths,
             **quadrature,
@@ -207,7 +294,13 @@ class System(eqx.Module):
         return numerator / denominator[None, :]
 
     def bin_mean_planet_flux_densities(
-        self, centers_nm: Array, widths_nm: Array, time_jd: Array, *, n_nodes: int = 4
+        self,
+        centers_nm: Array,
+        widths_nm: Array,
+        time_jd: Array,
+        *,
+        n_nodes: int = 4,
+        ephemeris=None,
     ) -> Array:
         """Band-mean planet flux [ph/s/m^2/nm], shape ``(W, K_total, T)``.
 
@@ -219,9 +312,10 @@ class System(eqx.Module):
         traced geometry uses a conservative full-table cap. Close over concrete
         bins when compiling to retain bounded work.
         """
+        eph = self.ephemeris(time_jd) if ephemeris is None else ephemeris
         knots = self.star.quadrature_knots_nm
         return bin_mean(
-            lambda w: self.planet_flux_densities(w, time_jd),
+            lambda w: self.planet_flux_densities(w, time_jd, ephemeris=eph),
             centers_nm,
             widths_nm,
             n_nodes=n_nodes,
@@ -229,31 +323,23 @@ class System(eqx.Module):
             max_knots=_model_max_knots(centers_nm, widths_nm, knots),
         )
 
-    def planet_flux_densities(self, wavelength_nm: Array, time_jd: Array) -> Array:
+    def planet_flux_densities(
+        self, wavelength_nm: Array, time_jd: Array, *, ephemeris=None
+    ) -> Array:
         """Per-planet flux density [ph/s/m^2/nm], shape ``(K_total, T)``."""
-        per_planet = [
-            p.spec_flux_density(
-                self.trig_solver, wavelength_nm, time_jd, star=self.star
-            )
-            for p in self.planets
-        ]
-        return jnp.concatenate(per_planet, axis=0)
+        return self._photometry(wavelength_nm, time_jd, ephemeris, flux=True)
 
     def alpha_dMag(
-        self, time_jd: Array, *, wavelength_nm: float = 600.0
+        self, time_jd: Array, *, wavelength_nm: float = 600.0, ephemeris=None
     ) -> tuple[Array, Array]:
         """Per-planet separation + dMag at wavelength_nm (default 600 nm).
 
         Each result has shape ``(K_total, T)``; wavelength_nm is scalar.
         """
-        per_planet = [
-            p.alpha_dMag(
-                self.trig_solver, time_jd, star=self.star, wavelength_nm=wavelength_nm
-            )
-            for p in self.planets
-        ]
-        alpha = jnp.concatenate([a for a, _ in per_planet], axis=0)
-        dMag = jnp.concatenate([m for _, m in per_planet], axis=0)
+        eph = self.ephemeris(time_jd) if ephemeris is None else ephemeris
+        alpha = eph.separation_arcsec(eph.scene_planet_indices, 0)
+        contrast = self.contrasts(jnp.asarray(wavelength_nm), time_jd, ephemeris=eph)
+        dMag = -2.5 * jnp.log10(contrast + jnp.finfo(contrast.dtype).tiny)
         return alpha, dMag
 
     def __repr__(self) -> str:

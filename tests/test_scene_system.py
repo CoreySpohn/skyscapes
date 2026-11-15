@@ -7,7 +7,19 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from hwoutils.constants import AU2m, G_si, Mearth2kg, Msun2kg, Rearth2m, c, d2s, h, k_B
+from hwoutils.constants import (
+    AU2m,
+    G_si,
+    Mearth2kg,
+    Msun2kg,
+    Rearth2m,
+    c,
+    d2s,
+    h,
+    k_B,
+    pc2AU,
+    rad2arcsec,
+)
 from hwoutils.conversions import photons_per_nm_per_m2_to_jy
 from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.orbit import KeplerianOrbit
@@ -88,7 +100,11 @@ def test_system_contrasts_stacks_planets():
 
 
 def test_system_spec_flux_density_per_planet():
-    """Fails if flux dispatch changes the recorded planet fluxes or contrasts."""
+    """Pin flux dispatch to recorded Jacobi/Markley values at rtol 1e-14.
+
+    Truth is the circular classical chain with current masses and elements;
+    this float64 tolerance permits rounding without grid interpolation error.
+    """
     star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
     p1 = _make_planet(1.0, 0.3, 1.0)
     p2 = _make_planet(5.0, 0.5, 2.0)
@@ -96,12 +112,12 @@ def test_system_spec_flux_density_per_planet():
     times = jnp.array([0.0, 100.0])
     f = sys_obj.planet_flux_densities(jnp.array(600.0), times)
     c = sys_obj.contrasts(jnp.array(600.0), times)
-    # Recorded from the same fixture before model-level flux dispatch.
+    # Recorded from the circular Jacobi chain with Markley propagation.
     np.testing.assert_allclose(
         c,
         [
-            [1.7358140773855922e-10, 4.759592469336877e-10],
-            [4.628837539694912e-11, 5.6348368911253246e-11],
+            [1.7358140773855917e-10, 4.759592439468622e-10],
+            [4.628831980300861e-11, 5.6348425008226415e-11],
         ],
         rtol=1e-14,
         atol=0,
@@ -109,8 +125,8 @@ def test_system_spec_flux_density_per_planet():
     np.testing.assert_allclose(
         f,
         [
-            [0.17358140773855923, 0.47595924693368774],
-            [0.04628837539694912, 0.05634836891125325],
+            [0.17358140773855918, 0.47595924394686223],
+            [0.04628831980300861, 0.05634842500822641],
         ],
         rtol=1e-14,
         atol=0,
@@ -357,10 +373,12 @@ def test_planet_flux_preserves_keyword_only_model_overrides():
 
 @pytest.mark.parametrize("mass", [1.0, 1000.0])
 def test_stellar_observables_scale_sign_and_sum(mass):
-    """Fails on stellar sign, mass-ratio, period, or planet-summation errors.
+    """Fails on stellar sign, mass-ratio, period, or barycentric balance errors.
 
     Truth is two-body barycentric balance and the circular Kepler RV
-    amplitude derived from G, masses, a and inclination. Float64 algebra
+    amplitude derived from G, masses, a and inclination; multiple planets
+    obey mass-weighted barycentric balance instead of independent summation.
+    Float64 algebra
     permits rtol 3e-14, atol 0; sign assertions have no tolerance.
     """
     star = FlatStar(Msun2kg, 10.0, 1e9)
@@ -387,14 +405,26 @@ def test_stellar_observables_scale_sign_and_sum(mass):
     assert rv[1] > 0 > velocity[0, 2, 1]
     other = _make_planet(5.0, 0.5, 2.0)
     pair = System(star, (planet, other), SOLVER)
-    second = System(star, (other,), SOLVER)
-    for name in ("star_reflex", "star_radial_velocity"):
-        np.testing.assert_allclose(
-            getattr(pair, name)(times),
-            getattr(single, name)(times) + getattr(second, name)(times),
-            rtol=3e-14,
-            atol=0,
-        )
+    eph = pair.ephemeris(times)
+    mass_ratios = jnp.array([mp, Mearth2kg]) / star.Ms_kg
+    weighted_position = jnp.sum(
+        mass_ratios[:, None, None] * eph.position_AU[1:], axis=0
+    )
+    weighted_velocity = jnp.sum(
+        mass_ratios[:, None, None] * eph.velocity_AU_per_d[1:], axis=0
+    )
+    np.testing.assert_allclose(
+        pair.star_reflex(times),
+        -weighted_position[:, :2].T * (rad2arcsec / (star.dist_pc * pc2AU)),
+        rtol=3e-14,
+        atol=0,
+    )
+    np.testing.assert_allclose(
+        pair.star_radial_velocity(times),
+        -weighted_velocity[:, 2] * (AU2m / d2s),
+        rtol=3e-14,
+        atol=0,
+    )
     batched = System(
         star,
         (jax.tree.map(lambda a, b: jnp.concatenate((a, b)), planet, other),),
@@ -497,3 +527,220 @@ def test_band_contrast_triangle_and_temperature_gradient():
     np.testing.assert_allclose(contrast(800.0), reference, rtol=2e-8, atol=0)
     fd = (contrast(800.008) - contrast(799.992)) / 0.016
     np.testing.assert_allclose(jax.grad(contrast)(800.0), fd, rtol=1e-8, atol=0)
+
+
+def _ephemeris_scene(e=0.05, inc=0.7, masses=(0.001, 0.005)):
+    """Nondegenerate elements with distinct size, phase and physical parameters."""
+    planets = []
+    for index, (a, mass) in enumerate(zip((1.0, 5.0), masses, strict=False)):
+        planet = _make_planet(a, 0.3 + index * 0.2, 1.0 + index)
+        orbit = KeplerianOrbit(
+            a_AU=jnp.array([a]),
+            e=jnp.array([e]),
+            i_rad=jnp.array([inc]),
+            W_rad=jnp.array([0.4]),
+            w_rad=jnp.array([0.7 + index * 0.4]),
+            M0_rad=jnp.array([0.2 + index * 1.5]),
+            t0_d=jnp.array([23.0 + index * 11]),
+        )
+        planets.append(
+            eqx.tree_at(
+                lambda p: (p.orbit, p.Mp_Mearth),
+                planet,
+                (orbit, jnp.array([mass * Msun2kg / Mearth2kg])),
+            )
+        )
+    return System(FlatStar(Msun2kg, 12.0, 1e9), tuple(planets), SOLVER)
+
+
+def _scene_observables(system, times, **kwargs):
+    """Read every geometry consumer with fixed, small spectral quadrature."""
+    waves, widths = jnp.array([500.0, 700.0]), jnp.array([40.0, 0.0])
+    return dict(
+        positions=system.positions(times, **kwargs),
+        position_angles=system.position_angles(times, **kwargs),
+        star_reflex=system.star_reflex(times, **kwargs),
+        star_radial_velocity=system.star_radial_velocity(times, **kwargs),
+        contrasts=system.contrasts(waves[0], times, **kwargs),
+        contrast_cube=system.contrast_cube(waves, times, **kwargs),
+        bin_mean_contrast_cube=system.bin_mean_contrast_cube(
+            waves, widths, times, n_nodes=2, **kwargs
+        ),
+        band_contrasts=system.band_contrasts(
+            Bandpass.tophat(600.0, 80.0), times, n_nodes=2, **kwargs
+        ),
+        bin_mean_planet_flux_densities=system.bin_mean_planet_flux_densities(
+            waves, widths, times, n_nodes=2, **kwargs
+        ),
+        planet_flux_densities=system.planet_flux_densities(waves[0], times, **kwargs),
+        alpha_dMag=jnp.stack(system.alpha_dMag(times, **kwargs)),
+    )
+
+
+def _independent_observables(planet, star, times):
+    """Planet is the independent two-body truth; grey spectra integrate exactly."""
+    from orbix.kepler.markley import solve_trig
+
+    contrast = planet.contrast(solve_trig, jnp.asarray(500.0), times, star=star)
+    flux = planet.spec_flux_density(solve_trig, jnp.asarray(500.0), times, star=star)
+    return dict(
+        positions=planet.position_arcsec(solve_trig, times, star=star),
+        position_angles=planet.position_angle_deg(solve_trig, times, star=star),
+        star_reflex=jnp.sum(
+            planet.reflex_position_arcsec(solve_trig, times, star=star), axis=1
+        ),
+        star_radial_velocity=jnp.sum(
+            planet.radial_velocity_m_s(solve_trig, times, star=star), axis=0
+        ),
+        contrasts=contrast,
+        contrast_cube=jnp.stack([contrast, contrast]),
+        bin_mean_contrast_cube=jnp.stack([contrast, contrast]),
+        band_contrasts=contrast,
+        bin_mean_planet_flux_densities=jnp.stack([flux, flux]),
+        planet_flux_densities=flux,
+        alpha_dMag=jnp.stack(planet.alpha_dMag(solve_trig, times, star=star)),
+    )
+
+
+@pytest.mark.parametrize("e,inc", [(1e-6, 0.7), (0.6, 1.1), (0.2, 2.6)])
+def test_ephemeris_single_planet_conventions(e, inc):
+    """Catch epoch, sky, mass, phase and RV-sign changes against Planet/Markley.
+
+    Truth is Planet's independent two-body methods using solve_trig (Markley
+    1995). rtol 3e-13 plus 3e-13 absolute allows float64 basis/epoch roundoff;
+    contrast and flux use relative tolerance only to protect tiny signals.
+    """
+    system = _ephemeris_scene(e, inc, masses=(0.01,))
+    times = jnp.array([-100.0, 23.0, 200.0, 700.0])
+    eph = system.ephemeris(times)
+    actual = _scene_observables(system, times, ephemeris=eph)
+    expected = _independent_observables(system.planets[0], system.star, times)
+    for name, want in expected.items():
+        absolute = 0 if "contrast" in name or "flux" in name else 3e-13
+        np.testing.assert_allclose(
+            actual[name], want, rtol=3e-13, atol=absolute, err_msg=name
+        )
+
+
+@pytest.mark.parametrize("batched", [False, True])
+def test_ephemeris_scene_order_and_reuse(batched, monkeypatch):
+    """Catch sorting or reuse regressions against a permuted identical scene.
+
+    Truth is the same inner-to-outer Jacobi chain in both scenes; require
+    exact arrays for cached/default paths and reordered arrays (no roundoff
+    changes are needed). Both tuple modules and K=2 modules are exercised.
+    """
+    from orbix.kepler import Halley
+
+    system = _ephemeris_scene()
+    reverse = eqx.tree_at(lambda s: s.planets, system, system.planets[::-1])
+    if batched:
+        reverse = eqx.tree_at(
+            lambda s: s.planets,
+            reverse,
+            (jax.tree.map(lambda a, b: jnp.concatenate((a, b)), *reverse.planets),),
+        )
+    times = jnp.array([-100.0, 23.0, 200.0, 700.0])
+    defaults = _scene_observables(system, times)
+    eph, reversed_eph = system.ephemeris(times), reverse.ephemeris(times)
+    np.testing.assert_allclose(
+        system.ephemeris(times, solver=Halley()).position_AU,
+        eph.position_AU,
+        rtol=3e-14,
+        atol=3e-14,
+    )
+
+    def unexpected_solve(*args, **kwargs):
+        raise AssertionError("A supplied ephemeris must never solve again")
+
+    monkeypatch.setattr(System, "ephemeris", unexpected_solve)
+    shared = _scene_observables(system, times, ephemeris=eph)
+    reordered = _scene_observables(reverse, times, ephemeris=reversed_eph)
+    for name, want in defaults.items():
+        np.testing.assert_array_equal(shared[name], want, err_msg=name)
+        axis = 1 if name in ("positions", "alpha_dMag") or want.ndim == 3 else 0
+        want = want if name.startswith("star_") else jnp.flip(want, axis=axis)
+        np.testing.assert_array_equal(reordered[name], want, err_msg=name)
+
+
+@pytest.mark.parametrize("massless", [False, True])
+def test_ephemeris_jacobi_balance_and_independent_limit(massless):
+    """Catch independent reflex summation or incorrect zero-mass handling.
+
+    Truth: sum(m*r)=sum(m*v)=0 (Jacobi barycentric balance), with atol
+    4e-17 Msun AU and 4e-19 Msun AU/day for x64 cancellation. For masses
+    .001/.005 Msun at 1/5 AU, the relative maximum stellar-offset change
+    from independent Planet/Markley orbits must be nonzero and below .0033
+    (over three times the measured .00106742). Massless values use 3e-13
+    relative/absolute float64 tolerance, with relative-only photometry.
+    """
+    masses = (0.0, 0.0) if massless else (0.001, 0.005)
+    system = _ephemeris_scene(masses=masses)
+    if massless:
+        # Unknown nonfinite and negative masses must both become test particles.
+        system = eqx.tree_at(
+            lambda s: (s.planets[0].Mp_Mearth, s.planets[1].Mp_Mearth),
+            system,
+            (jnp.array([jnp.nan]), jnp.array([-1.0])),
+        )
+    times = jnp.array([-100.0, 23.0, 200.0, 700.0])
+    eph = system.ephemeris(times)
+    weights = jnp.array([1.0, *masses])
+    np.testing.assert_allclose(
+        jnp.einsum("k,ktc->tc", weights, eph.position_AU), 0, atol=4e-17
+    )
+    np.testing.assert_allclose(
+        jnp.einsum("k,ktc->tc", weights, eph.velocity_AU_per_d), 0, atol=4e-19
+    )
+    independent = [
+        _independent_observables(p, system.star, times) for p in system.planets
+    ]
+    if massless:
+        actual = _scene_observables(system, times, ephemeris=eph)
+        for name, got in actual.items():
+            if name.startswith("star_"):
+                want = sum(item[name] for item in independent)
+            else:
+                axis = 1 if name in ("positions", "alpha_dMag") or got.ndim == 3 else 0
+                want = jnp.concatenate([item[name] for item in independent], axis=axis)
+            absolute = 0 if "contrast" in name or "flux" in name else 3e-13
+            np.testing.assert_allclose(
+                got, want, rtol=3e-13, atol=absolute, err_msg=name
+            )
+    else:
+        control = sum(item["star_reflex"] for item in independent)
+        offsets = system.star_reflex(times, ephemeris=eph)
+        relative = jnp.max(jnp.linalg.norm(offsets - control, axis=0)) / jnp.max(
+            jnp.linalg.norm(control, axis=0)
+        )
+        assert 0 < relative < 0.0033
+
+
+def test_ephemeris_shared_jit_gradient():
+    """Catch host conversion, stale elements, or missing shared-state derivatives.
+
+    Truth is central differences of a position at a +/-1e-5 AU step; rtol
+    1e-8, atol 1e-10 covers second-order truncation and x64 cancellation.
+    Shared JIT positions and angles agree with eager values to 3e-13.
+    """
+    system = _ephemeris_scene()
+    times = jnp.array([-100.0, 23.0, 200.0, 700.0])
+
+    @jax.jit
+    def read(a):
+        varied = eqx.tree_at(lambda s: s.planets[0].orbit.a_AU, system, jnp.array([a]))
+        eph = varied.ephemeris(times)
+        return varied.positions(times, ephemeris=eph), varied.position_angles(
+            times, ephemeris=eph
+        )
+
+    position, angle = read(1.0)
+    np.testing.assert_allclose(
+        position, system.positions(times), rtol=3e-13, atol=3e-13
+    )
+    np.testing.assert_allclose(
+        angle, system.position_angles(times), rtol=3e-13, atol=3e-13
+    )
+    derivative = jax.jit(jax.grad(lambda a: read(a)[0][0, 0, 2]))(1.0)
+    finite_difference = (read(1.00001)[0][0, 0, 2] - read(0.99999)[0][0, 0, 2]) / 2e-5
+    np.testing.assert_allclose(derivative, finite_difference, rtol=1e-8, atol=1e-10)
