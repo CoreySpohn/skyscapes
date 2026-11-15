@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from astropy.io import fits
+from hwoutils.epoch import Epoch
 
 from skyscapes.disk import ExovistaDisk
 from skyscapes.io import from_exovista, get_earth_like_planet_indices
@@ -221,3 +222,31 @@ def test_exovista_cube_is_used_as_written(fits_fixture):
     with fits.open(fits_fixture) as hdul:
         expected = hdul[2].data[:-1].astype(np.float32)
     np.testing.assert_array_equal(disk.contrast_cube, expected)
+
+
+def test_exovista_supplied_epoch_keeps_absolute_dates(fits_fixture):
+    """A supplied scene epoch moves the time origin, not the scene.
+
+    The same Julian dates give the same sky positions and contrasts whether
+    the epoch is the file's first timestamp or one 1000.25 days earlier.
+    Offsets are formed in float64 on the host, so the only difference is
+    rounding of the day offsets (1e-10 relative is far above it).
+    """
+    kwargs = dict(planet_indices=[0, 2], load_disk=False, planet_spectra="time")
+    default = from_exovista(fits_fixture, **kwargs)
+    shared = Epoch(2450544.0, 0.75)
+    moved = from_exovista(fits_fixture, **kwargs, epoch=shared)
+    assert moved.epoch == shared
+    dates = [2451545.0, 2451645.5, 2451795.0]
+    t_default = jnp.asarray(default.epoch.days(dates))
+    t_moved = jnp.asarray(moved.epoch.days(dates))
+    np.testing.assert_allclose(t_moved - t_default, 1000.25, rtol=0, atol=1e-9)
+    np.testing.assert_allclose(
+        moved.positions(t_moved), default.positions(t_default), rtol=1e-10, atol=0
+    )
+    np.testing.assert_allclose(
+        moved.contrasts(600.0, t_moved),
+        default.contrasts(600.0, t_default),
+        rtol=1e-10,
+        atol=0,
+    )

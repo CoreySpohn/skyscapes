@@ -173,7 +173,7 @@ def _angular_diameter_arcsec(header) -> float:
 def _simulation_times_d(elapsed_years, epoch: Epoch) -> np.ndarray:
     """Convert simulation years to days from the scene epoch on the host."""
     elapsed_d = np.asarray(elapsed_years, dtype=np.float64) * (yr2s / d2s)
-    return elapsed_d + Epoch(J2000_JD).days_between(epoch)
+    return elapsed_d + Epoch(J2000_JD, scale=epoch.scale).days_between(epoch)
 
 
 def _star_extension(hdul: fits.HDUList) -> int:
@@ -498,6 +498,7 @@ def from_exovista(
     load_disk: bool = True,
     *,
     planet_spectra: Literal["auto", "time", "phase"] = "auto",
+    epoch: Epoch | None = None,
 ) -> System:
     """Load an ExoVista FITS file into a ``scene.System``.
 
@@ -507,9 +508,9 @@ def from_exovista(
     chart on ``System.midplane_*``, used by parametric disks and outlines.
     These angles are not applied again to the states or loaded image.
     Elapsed simulation years use exactly 365.25 days per year and an
-    assigned J2000 origin. The first stellar timestamp sets the scene epoch,
-    split into whole and fractional days. The file states no time scale;
-    the epoch uses the default ``tdb`` label without a scale conversion.
+    assigned J2000 origin. By default the first stellar timestamp sets the
+    scene epoch, split into whole and fractional days. The file states no
+    time scale; the epoch's label is used without a scale conversion.
     Every stored time and orbit reference is converted in NumPy float64
     to days from the scene epoch before transfer to JAX. Enable
     ``jax_enable_x64`` before loading to preserve orbital-state precision.
@@ -528,6 +529,9 @@ def from_exovista(
             no extrapolation beyond a multi-epoch baseline. A single epoch
             is a constant snapshot. ``phase`` explicitly assumes contrast
             is a function of phase alone, discarding activity history.
+        epoch: Scene epoch that stored and observation times are measured
+            from. ``None`` uses the first stellar timestamp. Pass a shared
+            epoch to place several scenes on one clock.
 
     Returns:
         ``scene.System`` with star, planets (tuple), disk, and midplane metadata.
@@ -574,7 +578,8 @@ def from_exovista(
 
         first_d = float(hdul[star_ext].data[0, 0]) * (yr2s / d2s)
         whole_d = np.floor(first_d)
-        epoch = Epoch(J2000_JD + whole_d, first_d - whole_d)
+        if epoch is None:
+            epoch = Epoch(J2000_JD + whole_d, first_d - whole_d)
         star = _load_star(hdul, epoch, fits_ext=star_ext)
         star_mass_Msun = float(star_header["MASS"])
         dist_pc = float(star_header["DIST"])
