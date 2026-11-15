@@ -54,6 +54,12 @@ class Planet(eqx.Module):
         """Number of planets ``K`` carried by this composed module."""
         return int(self.Rp_Rearth.shape[0])
 
+    def planet_mass_kg(self) -> Array:
+        """Finite positive planet mass [kg], shape ``(K,)``; otherwise zero."""
+        mp_kg = self.Mp_Mearth * Mearth2kg
+        known = jnp.isfinite(mp_kg) & (mp_kg > 0.0)
+        return jnp.where(known, mp_kg, 0.0)
+
     def central_mass_kg(self, *, star: AbstractStar) -> Array:
         """Mass that sets each planet's orbital period [kg], shape ``(K,)``.
 
@@ -65,9 +71,7 @@ class Planet(eqx.Module):
         vector use the same sum, so loading and propagation share one
         gravitational parameter.
         """
-        mp_kg = self.Mp_Mearth * Mearth2kg
-        known = jnp.isfinite(mp_kg) & (mp_kg > 0.0)
-        return star.Ms_kg + jnp.where(known, mp_kg, 0.0)
+        return star.Ms_kg + self.planet_mass_kg()
 
     def mean_anomaly(self, time_jd: Array, *, star: AbstractStar) -> Array:
         """Mean anomaly mod 360 [deg], shape ``(K, T)``.
@@ -118,6 +122,45 @@ class Planet(eqx.Module):
         ra = r_AU[:, 0, :] * scale
         dec = r_AU[:, 1, :] * scale
         return jnp.stack([ra, dec], axis=0)
+
+    def position_angle_deg(
+        self, trig_solver, time_jd: Array, *, star: AbstractStar
+    ) -> Array:
+        """Position angle east of north in ``[0, 360)``, shape ``(K, T)``.
+
+        The angle is undefined at zero projected separation.
+        """
+        return self.orbit.position_angle_deg(
+            trig_solver, time_jd, Ms_kg=star.Ms_kg, Mp_kg=self.planet_mass_kg()
+        )
+
+    def reflex_position_arcsec(
+        self, trig_solver, time_jd: Array, *, star: AbstractStar
+    ) -> Array:
+        """Stellar (east, north) barycentric offset [arcsec], ``(2, K, T)``.
+
+        Each planet contributes an independent two-body reflex orbit.
+        Unknown planet mass contributes zero.
+        """
+        offsets = self.orbit.reflex_position_arcsec(
+            trig_solver,
+            time_jd,
+            Ms_kg=star.Ms_kg,
+            Mp_kg=self.planet_mass_kg(),
+            dist_pc=star.dist_pc,
+        )
+        return jnp.stack(offsets, axis=0)
+
+    def radial_velocity_m_s(
+        self, trig_solver, time_jd: Array, *, star: AbstractStar
+    ) -> Array:
+        """Stellar radial velocity [m/s], positive receding, shape ``(K, T)``.
+
+        No systemic velocity is added. Unknown planet mass contributes zero.
+        """
+        return self.orbit.radial_velocity_m_s(
+            trig_solver, time_jd, Ms_kg=star.Ms_kg, Mp_kg=self.planet_mass_kg()
+        )
 
     def alpha_dMag(
         self,

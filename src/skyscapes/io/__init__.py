@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from .bandpass import bandpass_from_table
 from .castelli_kurucz import castelli_kurucz_surface_flux, from_castelli_kurucz
 from .exovista import from_exovista, get_earth_like_planet_indices
 from .phoenix import from_phoenix, phoenix_surface_flux
 
 __all__ = [
+    "bandpass_from_table",
     "castelli_kurucz_surface_flux",
     "from_castelli_kurucz",
     "from_exovista",

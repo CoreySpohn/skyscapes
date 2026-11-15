@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import equinox as eqx
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from hwoutils.constants import G, Mearth2kg, Rearth2AU
+from hwoutils.constants import G, Mearth2kg, Rearth2AU, pc2AU, rad2arcsec
 from orbix.equations.orbit import mean_motion, period_n
 from orbix.equations.phase import lambert_phase_exact
 from orbix.kepler.shortcuts.grid import get_grid_solver
@@ -271,3 +273,74 @@ def test_planet_propagate_passes_orbix_through_exactly():
     actual = p.propagate(SOLVER, times, star=_STAR)
     for got, want in zip(actual, expected, strict=True):
         np.testing.assert_array_equal(got, want)
+
+
+@pytest.mark.parametrize("mass", [1.0, float("nan"), -1.0, float("inf"), 0.0])
+def test_planet_mass_and_legacy_observables(mass):
+    """Fails if mass sanitization changes existing positions or contrasts.
+
+    Truth is the pre-addition expressions evaluated inline on the existing
+    fixture; require exact equality because their arithmetic is unchanged.
+    """
+    p = eqx.tree_at(lambda p: p.Mp_Mearth, _single_planet(), jnp.array([mass]))
+    times = jnp.array([0.0, 42.0, 200.0])
+    mp = p.Mp_Mearth * Mearth2kg
+    old_mass = _STAR.Ms_kg + jnp.where(jnp.isfinite(mp) & (mp > 0), mp, 0.0)
+    np.testing.assert_array_equal(p.central_mass_kg(star=_STAR), old_mass)
+    np.testing.assert_array_equal(p.planet_mass_kg(), [Mearth2kg if mass == 1 else 0])
+    r, phase, dist = p.orbit.propagate(SOLVER, times, Ms_kg=old_mass)
+    scale = rad2arcsec / (_STAR.dist_pc * pc2AU)
+    old_position = jnp.stack([r[:, 0, :] * scale, r[:, 1, :] * scale])
+    old_contrast = p.physical_model.contrast_at_time(
+        phase_angle_rad=phase,
+        dist_AU=dist,
+        wavelength_nm=jnp.asarray(600.0),
+        Rp_Rearth=p.Rp_Rearth,
+        time_jd=times,
+        star=_STAR,
+    )
+    system = System(_STAR, (p,), SOLVER)
+    np.testing.assert_array_equal(system.positions(times), old_position)
+    np.testing.assert_array_equal(
+        system.contrasts(jnp.asarray(600.0), times), old_contrast
+    )
+
+
+@pytest.mark.parametrize("node_deg, expected", [(90.0, 90.0), (0.0, 0.0)])
+def test_position_angle_cardinal_anchors(node_deg, expected):
+    """Fails on an east/north angle swap; geometric axes give 90/0 degrees.
+
+    At the ascending node PA equals the node angle; 2e-14 deg absolute
+    tolerance allows float64 trigonometric roundoff, not a sign convention.
+    """
+    p = _circular_planet(jnp.pi / 3, W_rad=jnp.deg2rad(node_deg))
+    times = jnp.zeros(1)
+    np.testing.assert_allclose(
+        p.position_angle_deg(SOLVER, times, star=_STAR), expected, rtol=0, atol=2e-14
+    )
+    np.testing.assert_allclose(
+        System(_STAR, (p,), SOLVER).position_angles(times), expected, rtol=0, atol=2e-14
+    )
+
+
+@pytest.mark.parametrize(
+    "observable", ["reflex_position_arcsec", "radial_velocity_m_s"]
+)
+def test_unknown_mass_zero_observables_and_orbit_gradients(observable):
+    """Fails if unknown mass leaks NaNs into a stellar signal or its gradient.
+
+    A zero-mass body exerts zero force: both values and all seven orbital
+    derivatives must be exactly zero (no numerical tolerance needed).
+    """
+    p = eqx.tree_at(lambda p: p.Mp_Mearth, _single_planet(), jnp.array([jnp.nan]))
+    times = jnp.array([0.0, 42.0])
+
+    def signal(orbit):
+        varied = eqx.tree_at(lambda p: p.orbit, p, orbit)
+        return getattr(varied, observable)(SOLVER, times, star=_STAR)
+
+    np.testing.assert_array_equal(signal(p.orbit), 0.0)
+    gradient = jax.grad(lambda orbit: jnp.sum(signal(orbit)))(p.orbit)
+    for leaf in jax.tree.leaves(gradient):
+        assert jnp.all(jnp.isfinite(leaf))
+        np.testing.assert_array_equal(leaf, 0.0)

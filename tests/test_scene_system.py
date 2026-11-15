@@ -7,7 +7,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from hwoutils.constants import Msun2kg
+from hwoutils.constants import AU2m, G_si, Mearth2kg, Msun2kg, Rearth2m, c, d2s, h, k_B
 from hwoutils.conversions import photons_per_nm_per_m2_to_jy
 from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.orbit import KeplerianOrbit
@@ -20,8 +20,8 @@ from skyscapes.physical_model import (
     LambertianPhysicalModel,
     SumPhysicalModel,
 )
-from skyscapes.scene import FlatStar, Planet, Star, System
-from skyscapes.spectral import bin_mean
+from skyscapes.scene import BlackbodyStar, FlatStar, Planet, Star, System
+from skyscapes.spectral import Bandpass, bin_mean
 
 SOLVER = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
 
@@ -353,3 +353,147 @@ def test_planet_flux_preserves_keyword_only_model_overrides():
         SOLVER, jnp.asarray(500.0), jnp.array([0.0, 1.0]), star=star
     )
     np.testing.assert_allclose(actual, [[3e-10, 6e-10]], rtol=1e-15, atol=0)
+
+
+@pytest.mark.parametrize("mass", [1.0, 1000.0])
+def test_stellar_observables_scale_sign_and_sum(mass):
+    """Fails on stellar sign, mass-ratio, period, or planet-summation errors.
+
+    Truth is two-body barycentric balance and the circular Kepler RV
+    amplitude derived from G, masses, a and inclination. Float64 algebra
+    permits rtol 3e-14, atol 0; sign assertions have no tolerance.
+    """
+    star = FlatStar(Msun2kg, 10.0, 1e9)
+    planet = eqx.tree_at(
+        lambda p: p.Mp_Mearth, _make_planet(1.0, 0.3, 1.0), jnp.array([mass])
+    )
+    mp = mass * Mearth2kg
+    period_s = 2 * np.pi * np.sqrt(AU2m**3 / (G_si * (star.Ms_kg + mp)))
+    times = jnp.asarray([0.0, period_s / d2s / 2])
+    single = System(star, (planet,), SOLVER)
+    reflex = single.star_reflex(times)
+    np.testing.assert_allclose(
+        reflex,
+        -mp / (star.Ms_kg + mp) * single.positions(times)[:, 0],
+        rtol=3e-14,
+        atol=0,
+    )
+    assert jnp.all(jnp.sum(reflex * single.positions(times)[:, 0], axis=0) < 0)
+    amplitude = (2 * np.pi * G_si / period_s) ** (1 / 3) * mp * np.sin(np.pi / 3)
+    amplitude /= (star.Ms_kg + mp) ** (2 / 3)
+    rv = single.star_radial_velocity(times)
+    np.testing.assert_allclose(rv, [-amplitude, amplitude], rtol=3e-14, atol=0)
+    velocity = planet.orbit.velocity_AU_d(SOLVER, times, Ms_kg=star.Ms_kg, Mp_kg=mp)
+    assert rv[1] > 0 > velocity[0, 2, 1]
+    other = _make_planet(5.0, 0.5, 2.0)
+    pair = System(star, (planet, other), SOLVER)
+    second = System(star, (other,), SOLVER)
+    for name in ("star_reflex", "star_radial_velocity"):
+        np.testing.assert_allclose(
+            getattr(pair, name)(times),
+            getattr(single, name)(times) + getattr(second, name)(times),
+            rtol=3e-14,
+            atol=0,
+        )
+    batched = System(
+        star,
+        (jax.tree.map(lambda a, b: jnp.concatenate((a, b)), planet, other),),
+        SOLVER,
+    )
+    for name in ("star_reflex", "star_radial_velocity", "position_angles"):
+        np.testing.assert_allclose(
+            getattr(batched, name)(times),
+            getattr(pair, name)(times),
+            rtol=3e-14,
+            atol=0,
+        )
+
+
+@pytest.mark.parametrize("tabulated", [False, True])
+def test_band_contrast_tophat_and_narrow_limits(tabulated):
+    """Fails if a band loses stellar knots, photon weighting, or its point limit.
+
+    Truth is the existing top-hat quadrature (rtol 3e-14 for float64), and
+    monochromatic contrast for a 1e-4 nm band (rtol 1e-10 for curvature).
+    """
+    wave = jnp.array([4000.0, 4700.0, 4900.0, 6000.0])
+    star = BlackbodyStar(Msun2kg, 10.0, 5772.0, 6.957e8)
+    if tabulated:
+        star = Star(
+            Ms_kg=Msun2kg,
+            dist_pc=10.0,
+            wavelengths_nm=wave,
+            times_jd=jnp.array([0.0, 100.0]),
+            flux_density_jy=photons_per_nm_per_m2_to_jy(
+                jnp.array([1.0, 8.0, 2.0, 5.0]), wave
+            )[:, None]
+            * jnp.array([[1.0, 2.0]]),
+            interpolation_method="linear",
+        )
+    planet = eqx.tree_at(
+        lambda p: p.physical_model,
+        _make_planet(1.0, 0.3, 1.0),
+        BlackbodyPhysicalModel(jnp.array([800.0])),
+    )
+    other = eqx.tree_at(lambda p: p.physical_model.teff_K, planet, jnp.array([1100.0]))
+    system = System(star, (planet, other), SOLVER)
+    times = jnp.array([0.0, 100.0])
+    band = Bandpass.tophat(5000.0, 1600.0)
+    actual = eqx.filter_jit(lambda: system.band_contrasts(band, times))()
+    expected = system.bin_mean_contrast_cube(
+        jnp.array([5000.0]), jnp.array([1600.0]), times
+    )[0]
+    np.testing.assert_allclose(actual, expected, rtol=3e-14, atol=0)
+    batched = System(
+        star,
+        (jax.tree.map(lambda a, b: jnp.concatenate((a, b)), planet, other),),
+        SOLVER,
+    )
+    np.testing.assert_allclose(
+        batched.band_contrasts(band, times), actual, rtol=3e-14, atol=0
+    )
+    np.testing.assert_allclose(
+        system.band_contrasts(Bandpass.tophat(5000.0, 1e-4), times),
+        system.contrasts(jnp.asarray(5000.0), times),
+        rtol=1e-10,
+        atol=0,
+    )
+
+
+def test_band_contrast_triangle_and_temperature_gradient():
+    """Fails on omitted transmission knots, energy weighting, or broken gradients.
+
+    Truth is NumPy Planck photon spectra with 20001-point trapezoids, rtol
+    2e-8 (second-order mesh error plus order-four quadrature on each side).
+    The temperature derivative uses central differences at 0.008 K; rtol
+    1e-8 allows second-order truncation and float64 cancellation.
+    """
+    star = BlackbodyStar(Msun2kg, 10.0, 5772.0, 6.957e8)
+    planet = eqx.tree_at(
+        lambda p: p.physical_model,
+        _make_planet(1.0, 0.3, 1.0),
+        BlackbodyPhysicalModel(jnp.array([800.0])),
+    )
+    system = System(star, (planet,), SOLVER)
+    band = Bandpass(jnp.array([4000.0, 4700.0, 6000.0]), jnp.array([0.0, 1.0, 0.0]))
+    times = jnp.zeros(1)
+    wave = np.linspace(4000.0, 6000.0, 20001)
+    response = np.interp(wave, [4000.0, 4700.0, 6000.0], [0.0, 1.0, 0.0])
+
+    def photons(teff, radius):
+        lam = wave * 1e-9
+        return radius**2 / (lam**4 * np.expm1(h * c / (lam * k_B * teff)))
+
+    reference = np.trapezoid(response * photons(800.0, Rearth2m), wave)
+    reference /= np.trapezoid(response * photons(5772.0, star.radius_m), wave)
+
+    @jax.jit
+    def contrast(teff):
+        varied = eqx.tree_at(
+            lambda s: s.planets[0].physical_model.teff_K, system, jnp.array([teff])
+        )
+        return varied.band_contrasts(band, times)[0, 0]
+
+    np.testing.assert_allclose(contrast(800.0), reference, rtol=2e-8, atol=0)
+    fd = (contrast(800.008) - contrast(799.992)) / 0.016
+    np.testing.assert_allclose(jax.grad(contrast)(800.0), fd, rtol=1e-8, atol=0)

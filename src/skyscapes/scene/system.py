@@ -17,7 +17,7 @@ from jaxtyping import Array
 
 from .._repr import indent
 from ..disk import AbstractDisk
-from ..spectral import _model_max_knots, bin_mean
+from ..spectral import Bandpass, _model_max_knots, bin_mean
 from .planet import Planet
 from .star import AbstractStar
 
@@ -63,6 +63,50 @@ class System(eqx.Module):
             for p in self.planets
         ]
         return jnp.concatenate(per_planet, axis=1)
+
+    def position_angles(self, time_jd: Array) -> Array:
+        """Position angles east of north in ``[0, 360)``, ``(K_total, T)``."""
+        return jnp.concatenate(
+            [
+                p.position_angle_deg(self.trig_solver, time_jd, star=self.star)
+                for p in self.planets
+            ],
+            axis=0,
+        )
+
+    def star_reflex(self, time_jd: Array) -> Array:
+        """Sum stellar (east, north) barycentric offsets [arcsec], ``(2, T)``.
+
+        Each planet is treated as an independent two-body orbit with the
+        star; planet-planet interactions are not included.
+        """
+        return sum(
+            (
+                jnp.sum(
+                    p.reflex_position_arcsec(self.trig_solver, time_jd, star=self.star),
+                    axis=1,
+                )
+                for p in self.planets
+            ),
+            jnp.zeros((2, time_jd.size)),
+        )
+
+    def star_radial_velocity(self, time_jd: Array) -> Array:
+        """Sum stellar radial velocities [m/s], positive receding, ``(T,)``.
+
+        Each planet is an independent two-body orbit with the star.
+        No systemic velocity is added.
+        """
+        return sum(
+            (
+                jnp.sum(
+                    p.radial_velocity_m_s(self.trig_solver, time_jd, star=self.star),
+                    axis=0,
+                )
+                for p in self.planets
+            ),
+            jnp.zeros_like(time_jd, dtype=float),
+        )
 
     def contrasts(self, wavelength_nm: Array, time_jd: Array) -> Array:
         """Per-planet contrast at a scalar wavelength [nm], shape ``(K_total, T)``."""
@@ -123,6 +167,44 @@ class System(eqx.Module):
         return jnp.where(
             point_bin[:, None, None], self.contrast_cube(centers, time_jd), ratio
         )
+
+    def band_contrasts(
+        self, bandpass: Bandpass, time_jd: Array, *, n_nodes: int = 4
+    ) -> Array:
+        """Ratio of band-integrated planet and star photons, ``(K_total, T)``.
+
+        Multiply photon flux densities by the photon-counting transmission.
+        Split quadrature at both the bandpass table and stellar spectral
+        knots. ``n_nodes`` is the Gauss-Legendre order per interval: linear
+        transmission is exact at order one, its product with a linear
+        spectrum at order two. Increase the order to resolve smooth spectral
+        curvature or additional planetary features. The integrated stellar
+        photon flux must be nonzero.
+        """
+        centers = jnp.atleast_1d((bandpass.low_nm + bandpass.high_nm) / 2)
+        widths = jnp.atleast_1d(bandpass.high_nm - bandpass.low_nm)
+        knots = bandpass.wavelength_nm
+        if self.star.quadrature_knots_nm is not None:
+            knots = jnp.sort(jnp.concatenate((knots, self.star.quadrature_knots_nm)))
+        quadrature = dict(
+            n_nodes=n_nodes,
+            knots_nm=knots,
+            max_knots=_model_max_knots(centers, widths, knots),
+            weight_fn=bandpass,
+        )
+        numerator = bin_mean(
+            lambda w: self.planet_flux_densities(w, time_jd),
+            centers,
+            widths,
+            **quadrature,
+        )[0]
+        denominator = bin_mean(
+            lambda w: jax.vmap(lambda t: self.star.spec_flux_density(w, t))(time_jd),
+            centers,
+            widths,
+            **quadrature,
+        )[0]
+        return numerator / denominator[None, :]
 
     def bin_mean_planet_flux_densities(
         self, centers_nm: Array, widths_nm: Array, time_jd: Array, *, n_nodes: int = 4

@@ -44,8 +44,10 @@ from . import (
 )
 from .io import from_exovista
 from .scene import Scene, System
+from .spectral import Bandpass
 
 __all__ = [
+    "Bandpass",
     "Scene",
     "System",
     "__version__",

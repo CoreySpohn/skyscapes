@@ -5,6 +5,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from skyscapes import Bandpass
+from skyscapes.io import bandpass_from_table
 from skyscapes.spectral import bin_mean
 
 
@@ -93,3 +95,73 @@ def test_cap_errors():
         jax.jit(lambda c: bin_mean(lambda x: x, c, widths, knots_nm=knots))(centers)
     with pytest.raises(ValueError, match=r"Traced.*max_knots"):
         jax.jit(lambda k: bin_mean(lambda x: x, centers, widths, knots_nm=k))(knots)
+
+
+@pytest.mark.parametrize(
+    "unit, scale, delimiter",
+    [("nm", 1.0, " "), ("um", 1000.0, ","), ("angstrom", 0.1, " ")],
+)
+def test_bandpass_table_and_exact_moments(tmp_path, unit, scale, delimiter):
+    """Fails on wavelength units, interpolation, or unresolved response knots.
+
+    Truth is a triangle with vertices (400,0), (500,1), (700,0): area 150 nm
+    and centroid 1600/3 nm. Two-node Gaussian integration is exact for the
+    quadratic first moment; rtol 2e-14 allows float64 rounding. Table values
+    round-trip to rtol 2e-15, including decimal unit-conversion roundoff.
+    """
+    path = tmp_path / "band.txt"
+    np.savetxt(
+        path,
+        np.array([[400 / scale, 0], [500 / scale, 1], [700 / scale, 0]]),
+        delimiter=delimiter,
+        header="wavelength, transmission",
+    )
+    band = bandpass_from_table(path, wavelength_unit=unit)
+    assert isinstance(band, Bandpass)
+    np.testing.assert_allclose(band.wavelength_nm, [400, 500, 700], rtol=2e-15, atol=0)
+    np.testing.assert_array_equal(band.transmission, [0, 1, 0])
+    np.testing.assert_allclose(
+        band(jnp.array([399, 450, 600, 701])), [0, 0.5, 0.5, 0], rtol=2e-14, atol=0
+    )
+    assert band.low_nm == 400
+    assert band.high_nm == 700
+    np.testing.assert_allclose(band.mean_nm, 1600 / 3, rtol=2e-14, atol=0)
+    area_mean = bin_mean(
+        band,
+        jnp.array([550.0]),
+        jnp.array([300.0]),
+        n_nodes=1,
+        knots_nm=band.wavelength_nm,
+    )
+    np.testing.assert_allclose(area_mean, 0.5, rtol=2e-14, atol=0)
+    np.testing.assert_allclose(
+        Bandpass.tophat(550, 100).mean_nm, 550, rtol=2e-14, atol=0
+    )
+    # Decimal endpoints can move across a knot when reconstructed from a bin.
+    np.testing.assert_allclose(
+        Bandpass([0.4, 1.0], [1.0, 1.0]).mean_nm, 0.7, rtol=2e-14, atol=0
+    )
+
+
+@pytest.mark.parametrize(
+    "wave, response",
+    [
+        ([500], [1]),
+        ([500, 400], [1, 1]),
+        ([400, 400], [1, 1]),
+        ([400, 500], [-1, 1]),
+        ([400, 500], [0, 0]),
+        ([400, float("nan")], [1, 1]),
+        ([400, 500], [1, float("inf")]),
+        ([[400, 500]], [[1, 1]]),
+        ([400, 500], [1]),
+    ],
+)
+def test_bandpass_rejects_invalid_tables(wave, response):
+    """Fails if undefined passbands construct; exact validation, no tolerance.
+
+    Linear interpolation needs two ordered finite positive wavelengths and
+    matching finite nonnegative responses with nonzero integral.
+    """
+    with pytest.raises(ValueError):
+        Bandpass(wave, response)
