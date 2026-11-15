@@ -201,7 +201,7 @@ def test_spectrum_star_interpolates():
     flux_jy = jnp.ones((wl.size, t.size))
     s = Star(
         wavelengths_nm=wl,
-        times_jd=t,
+        times_d=t,
         flux_density_jy=flux_jy,
     )
     f = s.spec_flux_density(600.0, 5.0, dist_pc=10.0)
@@ -216,7 +216,7 @@ def test_spectrum_star_isinstance():
     t = jnp.linspace(0.0, 1.0, 3)
     s = Star(
         wavelengths_nm=wl,
-        times_jd=t,
+        times_d=t,
         flux_density_jy=jnp.zeros((wl.size, t.size)),
     )
     assert isinstance(s, AbstractStar)
@@ -229,7 +229,7 @@ def test_spectrum_star_wavelength_coverage(n_epochs):
     t = jnp.linspace(0.0, 10.0, n_epochs)
     s = Star(
         wavelengths_nm=wl,
-        times_jd=t,
+        times_d=t,
         flux_density_jy=jnp.ones((wl.size, t.size)),
     )
     assert s.wavelengths_nm is wl
@@ -298,7 +298,7 @@ def test_bin_flux_linear_partial_intervals(n_epochs):
     jy = photons_per_nm_per_m2_to_jy(photons, wave)
     star = Star(
         wavelengths_nm=wave,
-        times_jd=times,
+        times_d=times,
         flux_density_jy=jy[:, None] * (1 + times[None, :]),
         interpolation_method="linear",
     )

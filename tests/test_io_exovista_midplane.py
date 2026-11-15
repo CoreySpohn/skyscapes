@@ -32,7 +32,7 @@ def midplane_measurements(fits_fixture):
         jnp.asarray(value)
         for value in (
             wavelength_nm,
-            2451545.0,
+            system.epoch.days(2451545.0),
             system.midplane_inc_deg,
             system.midplane_pa_deg,
         )
@@ -84,7 +84,7 @@ def midplane_measurements(fits_fixture):
     try:
         viz.plot_system(
             system,
-            2451545.0,
+            system.epoch.days(2451545.0),
             ax=ax,
             disk_radii_AU=(float(parametric.rmin_AU), float(parametric.rmax_AU)),
         )

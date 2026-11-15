@@ -80,7 +80,7 @@ def test_exovista_sky_positions_round_trip(known_orbit_file):
     with fits.open(path) as hdul:
         rows = hdul[6].data.astype(np.float64)
         star_rows = hdul[5].data.astype(np.float64)
-    times = J2000_JD + rows[:, 0] * (yr2s / d2s)
+    times = system.epoch.days(J2000_JD + rows[:, 0] * (yr2s / d2s))
     relative = rows[:, 9:12] - star_rows[:, 9:12]
     expected = np.stack([-relative[:, 0], relative[:, 1]]) / system.dist_pc
     positions = system.positions(times)
@@ -170,7 +170,7 @@ def test_exovista_phase_matches_fits_observer_direction(known_orbit_file):
     system = from_exovista(path, load_disk=False, planet_spectra="phase")
     with fits.open(path) as hdul:
         rows = hdul[6].data.astype(np.float64)
-    times = J2000_JD + rows[:, 0] * (yr2s / d2s)
+    times = system.epoch.days(J2000_JD + rows[:, 0] * (yr2s / d2s))
     expected_cosine = -rows[:, 11] / np.linalg.norm(rows[:, 9:12], axis=1)
     phase = system.ephemeris(times).phase_angle_rad(1)[None, :]
     np.testing.assert_allclose(np.cos(phase[0]), expected_cosine, atol=2e-6)
@@ -189,6 +189,7 @@ def test_exovista_phase_model_preserves_analytic_light_curve(known_orbit_file):
         rows[:, 16:] = contrast[:, None] * np.array([1.0, 2.0, 3.0])
         times = J2000_JD + rows[:, 0].astype(np.float64) * (yr2s / d2s)
     system = from_exovista(path, load_disk=False, planet_spectra="phase")
+    times = system.epoch.days(times)
     np.testing.assert_allclose(
         system.contrasts(600.0, times)[0], 2 * contrast, rtol=2e-6, atol=0
     )

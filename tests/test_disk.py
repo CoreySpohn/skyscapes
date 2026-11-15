@@ -18,7 +18,7 @@ def test_exovista_disk_flux_shape():
     )
     sb = d.surface_brightness(
         wavelength_nm=jnp.array(500.0),
-        time_jd=jnp.array(0.0),
+        time_d=jnp.array(0.0),
         incl_deg=jnp.array(60.0),
         pa_deg=jnp.array(0.0),
         dist_pc=10.0,

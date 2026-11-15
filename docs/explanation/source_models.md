@@ -78,10 +78,10 @@ jax.config.update("jax_enable_x64", True)
 from skyscapes.scene import Star, FlatStar, BlackbodyStar
 import jax.numpy as jnp
 
-# Realistic: wavelength + time dependence
+# Realistic: wavelength + time dependence; days from the scene epoch
 star = Star(
     wavelengths_nm=jnp.linspace(400, 1000, 60),
-    times_jd=jnp.array([2_460_000.0, 2_460_730.5]),
+    times_d=jnp.array([0.0, 730.5]),
     flux_density_jy=...,  # shape (n_wl, n_time)
 )
 
@@ -97,12 +97,12 @@ blackbody = BlackbodyStar(
 )
 
 # All implement the same interface
-print(star.spec_flux_density(wavelength_nm=550.0, time_jd=2_460_365.0))
-print(flat.spec_flux_density(wavelength_nm=550.0, time_jd=2_460_365.0))
+print(star.spec_flux_density(wavelength_nm=550.0, time_d=365.0))
+print(flat.spec_flux_density(wavelength_nm=550.0, time_d=365.0))
 print(
     blackbody.spec_flux_density(
         wavelength_nm=550.0,
-        time_jd=2_460_365.0,
+        time_d=365.0,
         dist_pc=10.0,
     )
 )
@@ -120,7 +120,7 @@ the observer flux in photons/s/m^2/nm. Following Rybicki and Lightman
 observer. Supply `dist_pc` when evaluating its flux or
 `diameter_arcsec(*, dist_pc)`. Apparent-flux `Star` and `FlatStar` accept
 an optional distance argument but ignore it. Wavelengths are in nanometers,
-and the result retains their shape. The spectrum is static, so `time_jd` is ignored. Both `jax.jit`
+and the result retains their shape. The spectrum is static, so `time_d` is ignored. Both `jax.jit`
 and `jax.vmap` over wavelength are supported.
 
 `flux_density_jy` is the observer's disk-integrated spectral flux
@@ -138,7 +138,7 @@ as a tuple of Python floats. Both properties are read-only.
 ### Imported starspots and metadata
 
 `Star.spots` is either `None` or a `StarSpots` object imported from the
-optional ExoVista spot extension. It stores `times_jd` and geometry
+optional ExoVista spot extension. It stores `times_d` and geometry
 arrays with shape `(n_times, n_spots)`:
 
 | Field | Meaning |
@@ -163,13 +163,17 @@ across the stellar disk.
 ### ExoVista layouts and time conventions
 
 Enable `jax_enable_x64` before calling `from_exovista`; the importer
-requires it to preserve epoch and orbital-state precision and raises
+requires it to preserve orbital-state precision and raises
 `ValueError` when x64 is disabled. ExoVista stores elapsed simulation
 years. The importer assigns simulation time zero to J2000.0 and
 converts Julian years using
-`time_jd = 2451545.0 + 365.25 * elapsed_years`. This assigned origin is
+`absolute_dates = 2451545.0 + 365.25 * elapsed_years`. This assigned origin is
 not a measured observation date, and the year values are not calendar
-decimal years.
+decimal years. The first stellar timestamp sets `system.epoch`, split
+into whole and fractional days on the host. The file states no time scale;
+the default `tdb` label applies without conversion. Stored stellar, spot,
+planet-table, and orbit reference times are days from this scene epoch,
+converted in NumPy float64 before transfer to JAX.
 
 The importer locates the star and planets using their FITS headers.
 It supports the legacy stellar extension and the newer layout with a
@@ -183,7 +187,7 @@ importer converts them to the (east, north, away) chart and builds the
 shared `System.dynamics` Jacobi chain. Dynamics owns the stellar and
 planetary masses and the observer distance; these are available through
 `System.star_mass_Msun`, `System.planet_mass_Msun`, and `System.dist_pc`.
-`System.ephemeris(time_jd)` propagates the shared system with Markley by
+`System.ephemeris(time_d)` propagates the shared system with Markley by
 default. Its barycentric states support star-relative planet geometry,
 stellar reflex motion, and radial velocity without separate orbit solves.
 
@@ -284,9 +288,10 @@ go into `System.planets` as a tuple of `Planet` instances.
 arrays in flattened scene order. It sorts the Jacobi chain by `a_AU` on
 the host by default; supply an explicit `order` permutation when building
 from traced elements. The scene keeps the original planet order for
-observables. `epoch_d` and `time_jd` use the same numeric day origin.
-Observation times are passed to orbix unchanged; the supplied `Epoch` is
-reference metadata and is not subtracted in this API.
+observables. `epoch_d`, `time_d`, and stored `times_d` are days from the
+scene epoch. The read-only `system.epoch` returns `dynamics.frame.epoch`.
+Convert absolute dates once on the host with
+`time_d = system.epoch.days(absolute_dates)`; pass only offsets to JAX.
 
 ```python
 # Two planets sharing a Lambertian physical model

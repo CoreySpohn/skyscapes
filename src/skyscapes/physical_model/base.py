@@ -37,7 +37,7 @@ class AbstractPhysicalModel(eqx.Module):
         phase_angle_rad: Array,
         dist_AU: Array,
         Rp_Rearth: Array,
-        time_jd: Array,
+        time_d: Array,
         star,
         dist_pc: Array,
     ) -> Array:
@@ -51,7 +51,7 @@ class AbstractPhysicalModel(eqx.Module):
             phase_angle_rad: Phase angle [rad], shape ``(K, T)``.
             dist_AU: Star-planet distance [AU], shape ``(K, T)``.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
-            time_jd: Observation Julian Dates, shape ``(T,)``.
+            time_d: Observation times in days from the scene epoch, shape ``(T,)``.
             dist_pc: Observer distance supplied by the system [pc].
             star: Host ``AbstractStar``, providing observer flux.
 
@@ -63,13 +63,11 @@ class AbstractPhysicalModel(eqx.Module):
             dist_AU=dist_AU,
             wavelength_nm=wavelength_nm,
             Rp_Rearth=Rp_Rearth,
-            time_jd=time_jd,
+            time_d=time_d,
             star=star,
             dist_pc=dist_pc,
         )
-        return contrast * star.spec_flux_density(
-            wavelength_nm, time_jd, dist_pc=dist_pc
-        )
+        return contrast * star.spec_flux_density(wavelength_nm, time_d, dist_pc=dist_pc)
 
     @abstractmethod
     def contrast(
@@ -101,14 +99,14 @@ class AbstractPhysicalModel(eqx.Module):
         wavelength_nm: Array,
         Rp_Rearth: Array,
         *,
-        time_jd: Array,
+        time_d: Array,
         star=None,
         dist_pc: Array | None = None,
     ) -> Array:
         """Return contrast with the observation epochs and the host star available.
 
         The default forwards the four radiative arguments to ``contrast``
-        and ignores ``time_jd`` and ``star``. Existing phase-dependent models
+        and ignores ``time_d`` and ``star``. Existing phase-dependent models
         therefore keep their behavior without implementing another method.
         A model whose planet flux does not scale with the star's (thermal
         emission) overrides this method and divides by the star's flux.
@@ -118,7 +116,7 @@ class AbstractPhysicalModel(eqx.Module):
             dist_AU: Star-planet distance [AU], shape ``(K, T)``.
             wavelength_nm: Scalar wavelength [nm], as accepted by ``contrast``.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
-            time_jd: Observation Julian Dates, shape ``(T,)``.
+            time_d: Observation times in days from the scene epoch, shape ``(T,)``.
             dist_pc: Observer distance supplied by the system [pc].
             star: The host ``AbstractStar``; ``System`` always supplies it.
 

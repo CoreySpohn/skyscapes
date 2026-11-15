@@ -279,13 +279,16 @@ class ExovistaParametricDisk(AbstractDisk):
     def surface_brightness(
         self,
         wavelength_nm: Array,
-        time_jd: Array,
+        time_d: Array,
         incl_deg: Array,
         pa_deg: Array,
         *,
         dist_pc: Array,
     ) -> Array:
-        """Render the ExoVista-style disk on a sky-plane grid."""
+        """Render the ExoVista-style disk on a sky-plane grid.
+
+        ``time_d`` is days from the scene epoch.
+        """
         Ag = interpax.interp1d(
             wavelength_nm,
             self.wavelengths_nm,

@@ -7,8 +7,9 @@ from jaxtyping import Array
 class StarSpots(eqx.Module):
     """Recorded spot geometry and component temperatures.
 
-    Geometry arrays have shape ``(n_times, n_spots)``. ``area_m2`` is
-    the total spot area, including the umbra; ``area_ratio`` is total
+    ``times_d`` stores days from the scene epoch; the owning scene holds
+    the epoch metadata. Geometry arrays have shape ``(n_times, n_spots)``.
+    ``area_m2`` is the total spot area, including the umbra; ``area_ratio`` is total
     spot area divided by umbra area, as used by ExoVista. Longitudes
     and latitudes retain the source's stellar coordinate convention.
 
@@ -18,7 +19,7 @@ class StarSpots(eqx.Module):
     unknown in files that omit the corresponding header cards.
     """
 
-    times_jd: Array
+    times_d: Array
     latitude_deg: Array
     longitude_deg: Array
     area_m2: Array

@@ -45,7 +45,7 @@ class ExovistaDisk(AbstractDisk):
     def surface_brightness(
         self,
         wavelength_nm: Array,
-        time_jd: Array,
+        time_d: Array,
         incl_deg: Array,
         pa_deg: Array,
         *,
@@ -53,7 +53,9 @@ class ExovistaDisk(AbstractDisk):
     ) -> Array:
         """Contrast map at the requested wavelength, shape ``(ny, nx)``.
 
-        ``time_jd``, ``incl_deg``, ``pa_deg``, and ``dist_pc`` are part of the
+        ``time_d`` is days from the scene epoch.
+
+        ``time_d``, ``incl_deg``, ``pa_deg``, and ``dist_pc`` are part of the
         AbstractDisk interface but ignored here: the cube is a single
         time snapshot with disk geometry already baked in by the loader.
         """

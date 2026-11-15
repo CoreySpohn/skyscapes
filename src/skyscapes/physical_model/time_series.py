@@ -11,7 +11,7 @@ from .base import AbstractPhysicalModel
 
 
 class TimeSeriesPhysicalModel(AbstractPhysicalModel):
-    """Tabulated planet-to-star contrast over wavelength and Julian Date.
+    """Tabulated planet-to-star contrast over wavelength and days from the scene epoch.
 
     Linear interpolation preserves nonnegative contrast inside the table.
     Multiple epochs define bounded temporal support: queries before the
@@ -25,19 +25,19 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
 
     Attributes:
         wavelengths_nm: Finite, strictly increasing grid [nm], shape ``(W,)``.
-        times_jd: Finite, strictly increasing Julian Dates, shape ``(T,)``.
-            Use float64 for subday resolution at modern Julian Dates.
+        times_d: Finite, strictly increasing days from the scene epoch,
+            shape ``(T,)``. The owning scene supplies the epoch metadata.
         contrast_grid: Finite, nonnegative flux ratios, shape ``(K, W, T)``.
             Storage dtype is retained, including float32 contrast cubes.
     """
 
     wavelengths_nm: Array = eqx.field(converter=jnp.asarray)
-    times_jd: Array = eqx.field(converter=jnp.asarray)
+    times_d: Array = eqx.field(converter=jnp.asarray)
     contrast_grid: Array = eqx.field(converter=jnp.asarray)
 
     def __check_init__(self):
         """Reject invalid table coordinates and contrasts before evaluation."""
-        for name in ("wavelengths_nm", "times_jd"):
+        for name in ("wavelengths_nm", "times_d"):
             grid = np.asarray(getattr(self, name))
             if grid.ndim != 1 or grid.size == 0:
                 raise ValueError(f"{name} must be a nonempty one-dimensional grid")
@@ -51,7 +51,7 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
         contrast = np.asarray(self.contrast_grid)
         if contrast.ndim != 3 or contrast.shape[1:] != (
             self.wavelengths_nm.size,
-            self.times_jd.size,
+            self.times_d.size,
         ):
             raise ValueError(
                 "contrast_grid must have shape (K, W, T) matching the grids"
@@ -72,7 +72,7 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
     ) -> Array:
         """Require physical epochs rather than substituting orbital phase."""
         raise ValueError(
-            "Use contrast_at_time(..., time_jd=...) for a time-series model"
+            "Use contrast_at_time(..., time_d=...) for a time-series model"
         )
 
     def contrast_at_time(
@@ -82,7 +82,7 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
         wavelength_nm: Array,
         Rp_Rearth: Array,
         *,
-        time_jd: Array,
+        time_d: Array,
         star=None,
         dist_pc: Array | None = None,
     ) -> Array:
@@ -93,7 +93,8 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
             dist_AU: Star-planet distance [AU]; ignored.
             wavelength_nm: Scalar wavelength, or one wavelength per query epoch.
             Rp_Rearth: Planet radius [Earth radii]; ignored.
-            time_jd: Observation Julian Dates, shape ``(T_query,)``.
+            time_d: Observation times in days from the scene epoch,
+                shape ``(T_query,)``.
             star: The host star; ignored.
             dist_pc: Observer distance [pc]; ignored.
 
@@ -102,17 +103,17 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
         """
         dtype = jnp.result_type(
             wavelength_nm,
-            time_jd,
+            time_d,
             self.wavelengths_nm,
-            self.times_jd,
+            self.times_d,
             self.contrast_grid,
             jnp.float32,
         )
-        times = jnp.atleast_1d(jnp.asarray(time_jd, dtype=dtype))
+        times = jnp.atleast_1d(jnp.asarray(time_d, dtype=dtype))
         wavelengths = jnp.broadcast_to(
             jnp.asarray(wavelength_nm, dtype=dtype), times.shape
         )
-        time_grid = self.times_jd.astype(dtype)
+        time_grid = self.times_d.astype(dtype)
         wavelength_grid = self.wavelengths_nm.astype(dtype)
         contrast_grid = self.contrast_grid.astype(dtype)
 

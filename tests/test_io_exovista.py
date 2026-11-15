@@ -135,7 +135,7 @@ def test_exovista_flux_preserved_with_standard_phase(
     system = from_exovista(
         fits_fixture, planet_indices=[0, 2, 4], load_disk=False, planet_spectra=mode
     )
-    times = jnp.array([2451545.0, 2451645.0, 2451795.0])
+    times = jnp.asarray(system.epoch.days([2451545.0, 2451645.0, 2451795.0]))
     np.testing.assert_allclose(
         system.contrasts(600.0, times), expected_contrast, rtol=1e-6, atol=0
     )
@@ -165,7 +165,7 @@ def test_exovista_disk_and_planet_share_east_north_chart(fits_fixture):
     brightness = np.asarray(
         disk.surface_brightness(
             disk.wavelengths_nm[0],
-            jnp.asarray(2451545.0),
+            jnp.asarray(system.epoch.days(2451545.0)),
             jnp.asarray(system.midplane_inc_deg),
             jnp.asarray(system.midplane_pa_deg),
             dist_pc=system.dist_pc,

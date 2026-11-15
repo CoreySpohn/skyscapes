@@ -235,7 +235,7 @@ def _from_surface_flux(
     flux_jy = surface_flux / nm2m * (wavelength_nm * nm2m) ** 2 / c * dilution / Jy
     return Star(
         wavelengths_nm=jnp.asarray(wavelength_nm),
-        times_jd=jnp.zeros(1),
+        times_d=jnp.zeros(1),
         flux_density_jy=jnp.asarray(flux_jy)[:, None],
         ra_deg=ra_deg,
         dec_deg=dec_deg,

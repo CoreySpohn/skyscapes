@@ -55,7 +55,7 @@ helio_lon = obs.helio_ecliptic_longitude_deg(
 
 flux = zodi.spec_flux_density(
     wavelength_nm,
-    time_jd,
+    time_d,
     ecliptic_lat_deg=ecl_lat,
     solar_lon_deg=helio_lon,
 )

@@ -15,7 +15,7 @@ from skyscapes.scene import BlackbodyStar, FlatStar, Planet, System
 H, C, KB = 6.62607015e-34, 299792458.0, 1.380649e-23
 STAR = BlackbodyStar(teff_K=8840.0, radius_m=1.77 * Rsun2m)
 ARGS = (jnp.zeros((1, 2)), jnp.ones((1, 2)))
-T_JD = jnp.array([0.0, 1.0])
+T_D = jnp.array([0.0, 1.0])
 
 
 def _system(model, star=STAR, rp=15.7):
@@ -57,13 +57,13 @@ def test_contrast_matches_planck_ratio(temperature, wavelength, x64):
         args = (jnp.zeros((1, 2)), jnp.ones((1, 2)))
         times = jnp.array([0.0, 1.0])
         got = model.contrast_at_time(
-            *args, wl, rp, time_jd=times, star=star, dist_pc=dist_pc
+            *args, wl, rp, time_d=times, star=star, dist_pc=dist_pc
         )
         flat = FlatStar(
             flux_phot_per_nm_m2=star.spec_flux_density(wl, times, dist_pc=dist_pc),
         )
         generic = model.contrast_at_time(
-            *args, wl, rp, time_jd=times, star=flat, dist_pc=dist_pc
+            *args, wl, rp, time_d=times, star=flat, dist_pc=dist_pc
         )
         x = H * C / (wavelength * 1e-9 * KB)
         area = (15.7 * 6.3781e6 / star.radius_m) ** 2
@@ -79,7 +79,7 @@ def test_contrast_matches_planck_ratio(temperature, wavelength, x64):
             phase_angle_rad=args[0],
             dist_AU=args[1],
             Rp_Rearth=rp,
-            time_jd=times,
+            time_d=times,
             star=star,
             dist_pc=dist_pc,
         )
@@ -109,7 +109,7 @@ def test_star_twin_has_unit_contrast():
     model = BlackbodyPhysicalModel(teff_K=jnp.array([STAR.teff_K]))
     rp = jnp.array([STAR.radius_m / Rearth2m])
     got = model.contrast_at_time(
-        *ARGS, jnp.asarray(1000.0), rp, time_jd=T_JD, star=STAR, dist_pc=107.5
+        *ARGS, jnp.asarray(1000.0), rp, time_d=T_D, star=STAR, dist_pc=107.5
     )
     assert jnp.allclose(got, 1.0, rtol=1e-5, atol=0.0)
 
@@ -120,7 +120,7 @@ def test_contrast_follows_the_star_model():
     flat = FlatStar(flux_phot_per_nm_m2=3.0)
     rp = jnp.array([15.7])
     got = model.contrast_at_time(
-        *ARGS, jnp.asarray(4400.0), rp, time_jd=T_JD, star=flat, dist_pc=107.5
+        *ARGS, jnp.asarray(4400.0), rp, time_d=T_D, star=flat, dist_pc=107.5
     )
     flux = model.spec_flux_density(jnp.asarray(4400.0), rp, dist_pc=107.5)
     assert jnp.allclose(got, flux[:, None] / 3.0, rtol=1e-6, atol=0.0)
@@ -133,7 +133,7 @@ def test_contrast_without_star_raises():
         model.contrast(*ARGS, jnp.asarray(4400.0), jnp.array([15.7]))
     with pytest.raises(ValueError, match="host star"):
         model.contrast_at_time(
-            *ARGS, jnp.asarray(4400.0), jnp.array([15.7]), time_jd=T_JD
+            *ARGS, jnp.asarray(4400.0), jnp.array([15.7]), time_d=T_D
         )
 
 
@@ -154,18 +154,18 @@ def test_system_contrast_cube_stacks_wavelengths():
         atol=0,
     )
     wl = jnp.array([3900.0, 4400.0, 4900.0])
-    cube = system.contrast_cube(wl, T_JD)
+    cube = system.contrast_cube(wl, T_D)
     assert cube.shape == (3, 1, 2)
     for k in range(3):
-        assert jnp.allclose(cube[k], system.contrasts(wl[k], T_JD), rtol=1e-6, atol=0.0)
-        alpha, dmag = system.alpha_dMag(T_JD, wavelength_nm=wl[k])
+        assert jnp.allclose(cube[k], system.contrasts(wl[k], T_D), rtol=1e-6, atol=0.0)
+        alpha, dmag = system.alpha_dMag(T_D, wavelength_nm=wl[k])
         np.testing.assert_allclose(dmag, -2.5 * jnp.log10(cube[k]), rtol=1e-12)
         np.testing.assert_allclose(
-            alpha, jnp.linalg.norm(system.positions(T_JD), axis=0), rtol=1e-12
+            alpha, jnp.linalg.norm(system.positions(T_D), axis=0), rtol=1e-12
         )
     for default, explicit in zip(
-        system.alpha_dMag(T_JD),
-        system.alpha_dMag(T_JD, wavelength_nm=600.0),
+        system.alpha_dMag(T_D),
+        system.alpha_dMag(T_D, wavelength_nm=600.0),
         strict=True,
     ):
         np.testing.assert_array_equal(default, explicit)
@@ -175,7 +175,7 @@ def test_system_contrast_cube_stacks_wavelengths():
 def test_system_contrast_cube_reflected_light():
     """A grey reflector gives the same contrast at every wavelength."""
     system = _system(LambertianPhysicalModel(Ag=jnp.array([0.3])), rp=1.0)
-    cube = system.contrast_cube(jnp.array([500.0, 900.0]), T_JD)
+    cube = system.contrast_cube(jnp.array([500.0, 900.0]), T_D)
     assert cube.shape == (2, 1, 2)
     assert jnp.array_equal(cube[0], cube[1])
 
@@ -186,7 +186,7 @@ def test_temperature_gradient_matches_finite_difference():
 
     def log_contrast(teff):
         system = _system(BlackbodyPhysicalModel(teff_K=teff))
-        return jnp.log(system.contrasts(wl, T_JD))[0, 0]
+        return jnp.log(system.contrasts(wl, T_D))[0, 0]
 
     t0 = jnp.array([1560.0])
     auto = jax.grad(log_contrast)(t0)[0]
@@ -231,7 +231,7 @@ def test_temperature_gradient_is_finite_in_single_precision(
     with jax.enable_x64(False):
         wl = jnp.asarray(wavelength, jnp.float32)
         args = (jnp.zeros((1, 2), jnp.float32), jnp.ones((1, 2), jnp.float32))
-        time_jd = jnp.array([0.0, 1.0], jnp.float32)
+        time_d = jnp.array([0.0, 1.0], jnp.float32)
         rp = jnp.array([15.7], jnp.float32)
 
         def observable(teff):
@@ -240,9 +240,9 @@ def test_temperature_gradient_is_finite_in_single_precision(
                 return model.spec_flux_density(wl, rp, dist_pc=107.5)[0]
             if quantity == "star_flux":
                 star = BlackbodyStar(teff[0], STAR.radius_m)
-                return star.spec_flux_density(wl, time_jd, dist_pc=107.5)
+                return star.spec_flux_density(wl, time_d, dist_pc=107.5)
             out = model.contrast_at_time(
-                *args, wl, rp, time_jd=time_jd, star=STAR, dist_pc=107.5
+                *args, wl, rp, time_d=time_d, star=STAR, dist_pc=107.5
             )
             return jnp.log(out)[0, 0]
 

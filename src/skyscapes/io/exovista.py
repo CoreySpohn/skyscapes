@@ -36,6 +36,7 @@ from hwoutils.constants import (
     yr2s,
 )
 from hwoutils.conversions import au_per_yr_to_m_per_s, mag_to_flux_jy
+from hwoutils.epoch import Epoch
 from orbix.equations.orbit import state_vector_to_keplerian
 from orbix.system import FrameOrbit, phase_angle_rad
 
@@ -169,9 +170,10 @@ def _angular_diameter_arcsec(header) -> float:
     return 2 * rstar * R_sun.to_value(u.m) / (dist * pc2m) * rad2arcsec
 
 
-def _simulation_times_jd(elapsed_years) -> jnp.ndarray:
-    """Assign the arbitrary simulation origin to J2000, using Julian years."""
-    return J2000_JD + jnp.asarray(elapsed_years.astype(np.float64)) * (yr2s / d2s)
+def _simulation_times_d(elapsed_years, epoch: Epoch) -> np.ndarray:
+    """Convert simulation years to days from the scene epoch on the host."""
+    elapsed_d = np.asarray(elapsed_years, dtype=np.float64) * (yr2s / d2s)
+    return elapsed_d + Epoch(J2000_JD).days_between(epoch)
 
 
 def _star_extension(hdul: fits.HDUList) -> int:
@@ -195,15 +197,18 @@ def _body_extensions(hdul: fits.HDUList, star_ext: int) -> list[int]:
     ]
 
 
-def _load_spots(hdul: fits.HDUList, star_ext: int, times_jd) -> StarSpots | None:
-    """Preserve the optional v2.5+ spot extension without inventing evolution."""
+def _load_spots(hdul: fits.HDUList, star_ext: int, times_d) -> StarSpots | None:
+    """Preserve the optional v2.5+ spot extension without inventing evolution.
+
+    ``times_d`` is days from the scene epoch.
+    """
     if star_ext == 4:
         return None
     data = hdul[4].data
     if data is None:
-        data = np.empty((len(times_jd), 0, 4))
+        data = np.empty((len(times_d), 0, 4))
     data = np.asarray(data, dtype=np.float64)
-    if data.ndim != 3 or data.shape[0] != len(times_jd) or data.shape[2] != 4:
+    if data.ndim != 3 or data.shape[0] != len(times_d) or data.shape[2] != 4:
         raise ValueError("ExoVista spots must have shape (n_times, n_spots, 4).")
     if not np.all(np.isfinite(data)) or np.any(data[..., 2] < 0):
         raise ValueError("ExoVista spot records must be finite with nonnegative areas.")
@@ -211,7 +216,7 @@ def _load_spots(hdul: fits.HDUList, star_ext: int, times_jd) -> StarSpots | None
         raise ValueError("ExoVista total-spot/umbra area ratios must be at least one.")
     header = {key.upper(): value for key, value in hdul[star_ext].header.items()}
     return StarSpots(
-        times_jd=times_jd,
+        times_d=times_d,
         latitude_deg=jnp.asarray(data[..., 0]),
         longitude_deg=jnp.asarray(data[..., 1]),
         area_m2=jnp.asarray(data[..., 2] * cm22m2),
@@ -221,7 +226,7 @@ def _load_spots(hdul: fits.HDUList, star_ext: int, times_jd) -> StarSpots | None
     )
 
 
-def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
+def _load_star(hdul: fits.HDUList, epoch: Epoch, fits_ext: int = 4) -> Star:
     """Load the FITS star extension into a Star."""
     obj_data = hdul[fits_ext].data
     obj_header = hdul[fits_ext].header
@@ -232,7 +237,7 @@ def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
         raise ValueError("ExoVista stellar SPECUNIT must be Jy.")
 
     wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
-    times_jd = _simulation_times_jd(obj_data[:, 0])
+    times_d = jnp.asarray(_simulation_times_d(obj_data[:, 0], epoch))
     spectra = obj_data[:, 16:]
     if fits_ext == 5 and spectral_unit is None:
         spectra = _phoenix_surface_to_observer_jy(spectra, wavelengths_um, obj_header)
@@ -249,10 +254,10 @@ def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
         diameter_arcsec=diameter_arcsec,
         luminosity_Lsun=luminosity_Lsun,
         wavelengths_nm=wavelengths_nm,
-        times_jd=times_jd,
+        times_d=times_d,
         flux_density_jy=flux_density_jy,
         interpolation_method="linear",
-        spots=_load_spots(hdul, fits_ext, times_jd),
+        spots=_load_spots(hdul, fits_ext, times_d),
         metadata={
             key.upper(): value
             for key, value in obj_header.items()
@@ -279,6 +284,7 @@ def _load_single_planet(
     wavelengths_nm: jnp.ndarray,
     *,
     planet_spectra: Literal["time", "phase"],
+    epoch: Epoch,
 ) -> tuple[Planet, dict, float]:
     """Load one planet and return its appearance, elements and solar mass.
 
@@ -299,8 +305,9 @@ def _load_single_planet(
     obj_data = hdul[fits_ext].data
     obj_header = hdul[fits_ext].header
 
-    times_jd = _simulation_times_jd(obj_data[:, 0])
-    t0 = float(times_jd[0])
+    host_times_d = _simulation_times_d(obj_data[:, 0], epoch)
+    t0 = float(host_times_d[0])
+    times_d = jnp.asarray(host_times_d)
 
     contrast_data = jnp.asarray(obj_data[:, 16:].T.astype(np.float32))
 
@@ -338,7 +345,7 @@ def _load_single_planet(
     if planet_spectra == "time":
         physical_model = TimeSeriesPhysicalModel(
             wavelengths_nm=wavelengths_nm,
-            times_jd=times_jd,
+            times_d=times_d,
             contrast_grid=contrast_data[None, ...],
         )
         return (
@@ -353,7 +360,7 @@ def _load_single_planet(
     orbit = FrameOrbit.from_classical(
         **elements, mu_AU3_per_d2=mu_SI * d2s**2 / AU2m**3
     )
-    position, _ = orbit.at(times_jd)
+    position, _ = orbit.at(times_d)
     beta_deg = jnp.rad2deg(phase_angle_rad(position))
 
     # Sort by beta. Duplicates are fine for interpolation (axisymmetric
@@ -499,9 +506,13 @@ def from_exovista(
     header's midplane (I, PA) becomes (I, -PA modulo 360) in the east/north
     chart on ``System.midplane_*``, used by parametric disks and outlines.
     These angles are not applied again to the states or loaded image.
-    Elapsed simulation years become Julian Dates relative
-    to J2000, with exactly 365.25 days per year. Enable ``jax_enable_x64``
-    before loading to preserve this time coordinate.
+    Elapsed simulation years use exactly 365.25 days per year and an
+    assigned J2000 origin. The first stellar timestamp sets the scene epoch,
+    split into whole and fractional days. The file states no time scale;
+    the epoch uses the default ``tdb`` label without a scale conversion.
+    Every stored time and orbit reference is converted in NumPy float64
+    to days from the scene epoch before transfer to JAX. Enable
+    ``jax_enable_x64`` before loading to preserve orbital-state precision.
 
     Args:
         fits_file: Path to ExoVista FITS file.
@@ -529,7 +540,7 @@ def from_exovista(
     """
     if not jax.config.read("jax_enable_x64"):
         raise ValueError(
-            "ExoVista import requires jax_enable_x64 for Julian Date precision. "
+            "ExoVista import requires jax_enable_x64 for orbital-state precision. "
             'Set jax.config.update("jax_enable_x64", True) before loading.'
         )
     disk_ext = 2
@@ -561,7 +572,10 @@ def from_exovista(
             float(star_header.get("I", 0.0)), float(star_header.get("PA", 0.0))
         )
 
-        star = _load_star(hdul, fits_ext=star_ext)
+        first_d = float(hdul[star_ext].data[0, 0]) * (yr2s / d2s)
+        whole_d = np.floor(first_d)
+        epoch = Epoch(J2000_JD + whole_d, first_d - whole_d)
+        star = _load_star(hdul, epoch, fits_ext=star_ext)
         star_mass_Msun = float(star_header["MASS"])
         dist_pc = float(star_header["DIST"])
         loaded = tuple(
@@ -571,6 +585,7 @@ def from_exovista(
                 star_mass_Msun,
                 wavelengths_nm,
                 planet_spectra=planet_spectra,
+                epoch=epoch,
             )
             for i in planet_indices
         )
@@ -584,6 +599,7 @@ def from_exovista(
         star_mass_Msun=star_mass_Msun,
         planet_mass_Msun=jnp.asarray([item[2] for item in loaded]),
         dist_pc=dist_pc,
+        epoch=epoch,
         **elements,
         disk=disk,
         midplane_inc_deg=midplane_inc_deg,

@@ -161,7 +161,7 @@ def jupiter_system(tmp_path_factory):
 def test_massive_planet_positions_follow_the_two_body_integration(jupiter_system):
     """Sky positions at 41 epochs over ten years match the integrated orbit."""
     system, expected = jupiter_system
-    times = J2000_JD + EPOCH_YEARS * (yr2s / d2s)
+    times = system.epoch.days(J2000_JD + EPOCH_YEARS * (yr2s / d2s))
     positions = system.positions(times)
     error = np.abs(np.asarray(positions[:, 0, :]) - expected)
     # float32 FITS storage allows ~1e-6 arcsec; the omitted planet mass in the

@@ -33,7 +33,7 @@ flowchart TB
 
 `System.planet_flux_densities` calls
 `physical_model.spec_flux_density(wavelength_nm, phase_angle_rad=...,
-dist_AU=..., Rp_Rearth=..., time_jd=..., star=..., dist_pc=...)`. Wavelength is scalar;
+dist_AU=..., Rp_Rearth=..., time_d=..., star=..., dist_pc=...)`. Wavelength is scalar;
 the result has shape `(K, T)` in ph/s/m²/nm. The base implementation
 multiplies `contrast_at_time` by stellar photon flux. Thermal models
 compute observer flux directly, then derive contrast by dividing by the
@@ -46,7 +46,7 @@ flux interface, including sums, with `skyscapes.spectral.bin_mean`.
 
 `System.contrasts` and `System.alpha_dMag` call
 `physical_model.contrast_at_time(phase_angle_rad, dist_AU,
-wavelength_nm, Rp_Rearth, time_jd=..., star=..., dist_pc=...)`. This returns per-planet
+wavelength_nm, Rp_Rearth, time_d=..., star=..., dist_pc=...)`. This returns per-planet
 flux-ratio contrast, shape `(K, T)` for `K` planets and `T` epochs.
 The default `AbstractPhysicalModel.contrast_at_time` ignores the time
 argument and forwards the other arguments to `contrast`, so existing
@@ -143,7 +143,7 @@ the pipeline.
 ### `TimeSeriesPhysicalModel`
 
 Preserves an externally computed contrast history on a
-`(wavelength, Julian Date)` grid for each planet. Linear interpolation
+`(wavelength, days from the scene epoch)` grid for each planet. Linear interpolation
 uses the recorded physical times, including unevenly spaced epochs.
 Two epochs with the same orbital phase can retain different contrasts.
 Phase angle, distance, and radius are accepted for interface
@@ -162,7 +162,7 @@ from skyscapes.physical_model import TimeSeriesPhysicalModel
 
 model = TimeSeriesPhysicalModel(
     wavelengths_nm=jnp.array([500.0, 600.0]),
-    times_jd=jnp.array([2451545.0, 2451546.0]),
+    times_d=jnp.array([0.0, 1.0]),
     contrast_grid=jnp.array([[[1e-10, 2e-10], [3e-10, 4e-10]]]),
     # contrast_grid shape: (K=1, W=2, T=2)
 )
@@ -171,7 +171,7 @@ contrast = model.contrast_at_time(
     dist_AU=jnp.ones((1, 2)),
     wavelength_nm=550.0,
     Rp_Rearth=jnp.ones(1),
-    time_jd=jnp.array([2451545.0, 2451546.0]),
+    time_d=jnp.array([0.0, 1.0]),
 )
 # contrast: [[2e-10, 3e-10]], despite the identical phase angles
 ```
@@ -180,8 +180,9 @@ Both grids must be finite, nonempty, and strictly increasing. The
 contrast cube must have shape `(K, W, T)` and contain finite,
 nonnegative values. Linear interpolation preserves nonnegativity
 within the table. Float32 contrast storage is retained; query
-arithmetic promotes the inputs to a common dtype. Use float64 Julian
-Dates to retain subday resolution.
+arithmetic promotes the inputs to a common dtype. Both `times_d` and
+query `time_d` are days from the owning scene epoch. Convert absolute
+dates on the host with `system.epoch.days(...)` before transfer to JAX.
 
 With multiple epochs, queries outside the recorded time range return
 NaN. A single epoch represents a static snapshot and is valid at any
@@ -389,13 +390,13 @@ import jax
 import jax.numpy as jnp
 
 wavelengths = jnp.linspace(500, 600, 100)
-times_jd = jnp.array([2451545.0])
+times_d = jnp.array([0.0])
 phase = jnp.array([[jnp.pi / 3]])  # (K=1, T=1)
 dist = jnp.array([[1.0]])  # (K=1, T=1)
 Rp = jnp.array([1.0])  # (K=1,)
 
 contrast_spectrum = jax.vmap(
-    lambda wl: model.contrast_at_time(phase, dist, wl, Rp, time_jd=times_jd),
+    lambda wl: model.contrast_at_time(phase, dist, wl, Rp, time_d=times_d),
 )(wavelengths)
 ```
 

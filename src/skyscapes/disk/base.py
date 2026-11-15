@@ -15,7 +15,7 @@ class AbstractDisk(eqx.Module):
     pixel. The concrete ``System`` multiplies by ``star.spec_flux_density``
     to turn that into ph/s/m^2/nm per pixel. Image rows increase north and
     columns increase west (FITS display convention); sky east maps to
-    negative column offset.
+    negative column offset. ``time_d`` is days from the scene epoch.
 
     ``dist_pc``, ``incl_deg`` and ``pa_deg`` are supplied at render time
     rather than stored
@@ -30,13 +30,16 @@ class AbstractDisk(eqx.Module):
     def surface_brightness(
         self,
         wavelength_nm: Array,
-        time_jd: Array,
+        time_d: Array,
         incl_deg: Array,
         pa_deg: Array,
         *,
         dist_pc: Array | None = None,
     ) -> Array:
-        """Return contrast per pixel, shape ``(ny, nx)``."""
+        """Return contrast per pixel, shape ``(ny, nx)``.
+
+        ``time_d`` is days from the scene epoch.
+        """
 
     @abstractmethod
     def spatial_extent(self) -> tuple[float, float]:

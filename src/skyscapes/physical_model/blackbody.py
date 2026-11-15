@@ -32,10 +32,12 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
         dist_pc: Array,
         phase_angle_rad: Array | None = None,
         dist_AU: Array | None = None,
-        time_jd: Array | None = None,
+        time_d: Array | None = None,
         star=None,
     ) -> Array:
         """Observer photon flux [ph/s/m^2/nm].
+
+        ``time_d`` is days from the scene epoch.
 
         The radius is supplied by the planet and ``dist_pc`` by the system.
         Steady emission ignores phase, orbital distance, epoch and host flux.
@@ -63,7 +65,7 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
     ) -> Array:
         """Require the host star: a thermal contrast depends on its flux."""
         raise ValueError(
-            "Use contrast_at_time(..., time_jd=..., star=...) for thermal emission"
+            "Use contrast_at_time(..., time_d=..., star=...) for thermal emission"
         )
 
     def contrast_at_time(
@@ -73,7 +75,7 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
         wavelength_nm: Array,
         Rp_Rearth: Array,
         *,
-        time_jd: Array,
+        time_d: Array,
         star=None,
         dist_pc: Array | None = None,
     ) -> Array:
@@ -85,7 +87,7 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
             dist_AU: Star-planet distance [AU]; ignored.
             wavelength_nm: Wavelength [nm], scalar.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
-            time_jd: Observation Julian Dates, shape ``(T,)``.
+            time_d: Observation times in days from the scene epoch, shape ``(T,)``.
             dist_pc: Observer distance supplied by the system [pc].
             star: The host ``AbstractStar``.
 
@@ -111,11 +113,11 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
             phase_angle_rad=phase_angle_rad,
             dist_AU=dist_AU,
             Rp_Rearth=Rp_Rearth,
-            time_jd=time_jd,
+            time_d=time_d,
             star=star,
             dist_pc=dist_pc,
         )
-        return flux / star.spec_flux_density(wavelength_nm, time_jd, dist_pc=dist_pc)
+        return flux / star.spec_flux_density(wavelength_nm, time_d, dist_pc=dist_pc)
 
     def __repr__(self) -> str:
         """One-line summary of the effective temperature."""

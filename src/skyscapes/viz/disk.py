@@ -75,7 +75,7 @@ def plot_disk_image(
     disk_or_image,
     *,
     wavelength_nm=None,
-    time_jd=0.0,
+    time_d=0.0,
     incl_deg=None,
     pa_deg=None,
     pixel_scale_arcsec=None,
@@ -109,7 +109,7 @@ def plot_disk_image(
             orientation and distance are used), an ``AbstractDisk``, or a
             bare ``(ny, nx)`` contrast map.
         wavelength_nm: Wavelength to render at [nm]. Required for a disk.
-        time_jd: Time to render at [JD].
+        time_d: Time to render at, in days from the scene epoch.
         incl_deg: Midplane inclination [deg], in ``[0, 180]``. Defaults to
             the system's; required for a bare disk; optional for an array
             (outline only). ``i`` and ``180 - i`` at ``pa + 180`` are the
@@ -177,7 +177,7 @@ def plot_disk_image(
             )
         image = disk.surface_brightness(
             jnp.asarray(wavelength_nm, dtype=float),
-            jnp.asarray(time_jd, dtype=float),
+            jnp.asarray(time_d, dtype=float),
             jnp.asarray(incl, dtype=float),
             jnp.asarray(pa, dtype=float),
             dist_pc=dist,

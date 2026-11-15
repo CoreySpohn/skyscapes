@@ -19,7 +19,8 @@ Zodi = AYOZodi | LeinertZodi | PrecomputedZodi
 
 Used as the type annotation on ``Scene.zodi`` and on coronagraphoto's
 ``gen_zodi_count_rate`` / ``sim_zodi``. Each variant must implement
-``spec_flux_density(wavelength_nm, time_jd, ecliptic_lat_deg, solar_lon_deg)``.
+``spec_flux_density(wavelength_nm, time_d, ecliptic_lat_deg, solar_lon_deg)``.
+Here ``time_d`` is days from the scene epoch.
 New variants must be added to this union AND implement that method.
 """
 

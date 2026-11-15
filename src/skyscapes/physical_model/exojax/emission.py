@@ -579,11 +579,13 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         phase_angle_rad: Array,
         dist_AU: Array,
         Rp_Rearth: Array,
-        time_jd: Array,
+        time_d: Array,
         star,
         dist_pc: Array,
     ) -> Array:
         """Observer photon flux [ph/s/m^2/nm], shape ``(K, T)``.
+
+        ``time_d`` is days from the scene epoch.
 
         Wavelength is scalar. The emission is steady and independent of
         phase; ``phase_angle_rad`` supplies the ``(K, T)`` output shape.
@@ -602,7 +604,7 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
     ) -> Array:
         """Require the host star to normalize thermal emission."""
         raise ValueError(
-            "Use contrast_at_time(..., time_jd=..., star=...) for thermal emission"
+            "Use contrast_at_time(..., time_d=..., star=...) for thermal emission"
         )
 
     def contrast_at_time(
@@ -612,11 +614,14 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         wavelength_nm: Array,
         Rp_Rearth: Array,
         *,
-        time_jd: Array,
+        time_d: Array,
         star=None,
         dist_pc: Array | None = None,
     ) -> Array:
-        """Thermal photon flux over stellar flux, shape ``(K, T)``."""
+        """Thermal photon flux over stellar flux, shape ``(K, T)``.
+
+        ``time_d`` is days from the scene epoch.
+        """
         if star is None:
             raise ValueError("ExoJaxEmissionModel needs the host star")
         flux = self.spec_flux_density(
@@ -624,11 +629,11 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
             phase_angle_rad=phase_angle_rad,
             dist_AU=dist_AU,
             Rp_Rearth=Rp_Rearth,
-            time_jd=time_jd,
+            time_d=time_d,
             star=star,
             dist_pc=dist_pc,
         )
-        return flux / star.spec_flux_density(wavelength_nm, time_jd, dist_pc=dist_pc)
+        return flux / star.spec_flux_density(wavelength_nm, time_d, dist_pc=dist_pc)
 
     def __repr__(self) -> str:
         """One-line summary of species, grid and planet count."""

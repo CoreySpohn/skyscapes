@@ -263,7 +263,7 @@ class GraterDisk(AbstractDisk):
     def surface_brightness(
         self,
         wavelength_nm: Array,
-        time_jd: Array,
+        time_d: Array,
         incl_deg: Array,
         pa_deg: Array,
         *,
@@ -271,10 +271,12 @@ class GraterDisk(AbstractDisk):
     ) -> Array:
         """Render the Augereau 1999 scattered-light disk on a sky-plane grid.
 
+        ``time_d`` is days from the scene epoch.
+
         ``wavelength_nm`` selects ``g_HG`` and ``Ag`` via cubic-spline
         interpolation over ``wavelengths_nm`` / ``g_HG_grid`` /
         ``Ag_grid``. Queries outside the grid return NaN.
-        ``time_jd`` is part of the AbstractDisk interface but ignored
+        ``time_d`` is part of the AbstractDisk interface but ignored
         (static disk).
         """
         # Wavelength-dependent scattering coefficients.

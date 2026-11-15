@@ -21,6 +21,7 @@ from hwoutils.constants import (
     rad2arcsec,
 )
 from hwoutils.conversions import photons_per_nm_per_m2_to_jy
+from hwoutils.epoch import Epoch
 from orbix.kepler.markley import solve_trig
 from orbix.orbit import KeplerianOrbit
 
@@ -34,6 +35,8 @@ from skyscapes.physical_model import (
 )
 from skyscapes.scene import BlackbodyStar, FlatStar, Planet, Star, System
 from skyscapes.spectral import Bandpass, bin_mean
+
+from .test_io_exovista_versions import scene_file as exovista_scene_file  # noqa: F401
 
 
 def _system(star, planets, *, a_AU=None, planet_mass_Msun=None, **kwargs):
@@ -208,7 +211,7 @@ def test_bin_contrast_weights_flux_and_has_point_limit(tabulated):
     if tabulated:
         star = Star(
             wavelengths_nm=wave,
-            times_jd=jnp.array([0.0, 200.0]),
+            times_d=jnp.array([0.0, 200.0]),
             flux_density_jy=photons_per_nm_per_m2_to_jy(wave / 500, wave)[:, None]
             * jnp.array([[1.0, 2.0]]),
             interpolation_method="linear",
@@ -256,7 +259,7 @@ def test_sum_flux_preserves_components_bins_and_gradients():
     times = jnp.array([0.0, 100.0])
     star = Star(
         wavelengths_nm=wave,
-        times_jd=times,
+        times_d=times,
         flux_density_jy=photons_per_nm_per_m2_to_jy(1e5 * wave / 5000, wave)[:, None]
         * jnp.array([[1.0, 2.0]]),
         interpolation_method="linear",
@@ -353,7 +356,7 @@ def test_sum_requires_a_component_and_stellar_context():
     with pytest.raises(ValueError, match="star"):
         model.contrast(*args)
     with pytest.raises(ValueError, match="star"):
-        model.contrast_at_time(*args, time_jd=jnp.zeros(1))
+        model.contrast_at_time(*args, time_d=jnp.zeros(1))
 
 
 def test_planet_flux_preserves_keyword_only_model_overrides():
@@ -370,11 +373,11 @@ def test_planet_flux_preserves_keyword_only_model_overrides():
             dist_AU,
             wavelength_nm,
             Rp_Rearth,
-            time_jd,
+            time_d,
             star=None,
             dist_pc=None,
         ):
-            return jnp.ones_like(phase_angle_rad) * (time_jd + 1) * 1e-10
+            return jnp.ones_like(phase_angle_rad) * (time_d + 1) * 1e-10
 
     planet = eqx.tree_at(
         lambda p: p.physical_model, _make_planet(0.3, 1.0), KeywordModel()
@@ -477,7 +480,7 @@ def test_band_contrast_tophat_and_narrow_limits(tabulated):
     if tabulated:
         star = Star(
             wavelengths_nm=wave,
-            times_jd=jnp.array([0.0, 100.0]),
+            times_d=jnp.array([0.0, 100.0]),
             flux_density_jy=photons_per_nm_per_m2_to_jy(
                 jnp.array([1.0, 8.0, 2.0, 5.0]), wave
             )[:, None]
@@ -618,7 +621,7 @@ def _independent_observables(system, times, index=0):
         phase_angle_rad=phase,
         dist_AU=distance,
         Rp_Rearth=planet.Rp_Rearth,
-        time_jd=times,
+        time_d=times,
         star=star,
         dist_pc=system.dist_pc,
     )
@@ -870,7 +873,7 @@ def test_scene_rejects_invalid_body_mapping(mapping):
 
 
 def test_empty_scene_and_reference_epoch():
-    """Fails if the zero-body chain breaks or time_jd is silently offset by epoch."""
+    """Fails if the zero-body chain breaks or time_d is silently offset by epoch."""
     from hwoutils.epoch import Epoch
 
     empty = System.from_classical(
@@ -894,3 +897,117 @@ def test_empty_scene_and_reference_epoch():
     changed_frame = type(scene.dynamics.frame)(scene.dist_pc, Epoch(2451545.0))
     changed = eqx.tree_at(lambda s: s.dynamics.frame, scene, changed_frame)
     np.testing.assert_array_equal(changed.positions(times), scene.positions(times))
+
+
+@pytest.mark.parametrize(
+    "epoch", [Epoch(2451545.0, 0.25), Epoch(2460000.0, 0.75, "tt")]
+)
+def test_scene_epoch_offsets_match_zero_epoch(epoch):
+    """Fails if traced times or orbital epochs use a different origin."""
+    planet = _make_planet(0.3, 1.0)
+    scene = _system(FlatStar(1.0), (planet,), epoch=epoch, epoch_d=23.25)
+    zero = Epoch(scale=epoch.scale)
+    reference = _system(
+        scene.star,
+        scene.planets,
+        epoch=zero,
+        epoch_d=23.25 + epoch.days_between(zero),
+    )
+    dates = epoch.jd(np.array([100.0, 100.125, 3652.5]))
+    assert scene.epoch is scene.dynamics.frame.epoch
+    np.testing.assert_allclose(
+        scene.positions(jnp.asarray(scene.epoch.days(dates))),
+        reference.positions(jnp.asarray(zero.days(dates))),
+        rtol=3e-13,
+        atol=3e-13,
+    )
+
+
+@pytest.mark.parametrize("inclination", [0.0, 0.7])
+def test_scene_epoch_float32_resolution(inclination):
+    """Fails if short time steps are lost to absolute-date float32 rounding.
+
+    A 10 day orbit is observed 30 Julian years after its anomaly reference.
+    Measured maximum position errors (face-on / inclined), in arcsec:
+    offsets: 4.02812733828e-6 / 4.02885493404e-6;
+    absolute dates: 5.70444520780e-4 / 5.70443030665e-4.
+    The tolerance is 1e-5 arcsec (0.01 mas) at 10 pc.
+    """
+    from hwoutils.constants import G
+
+    elapsed_d = 30.0 * 365.25
+    epoch = Epoch(2451545.0 + elapsed_d)
+    axis = (G * Msun2kg * (10.0 / (2 * np.pi)) ** 2) ** (1.0 / 3.0)
+    scene = System.from_classical(
+        FlatStar(1.0),
+        (_make_planet(0.3, 1.0),),
+        star_mass_Msun=1.0,
+        planet_mass_Msun=0.0,
+        dist_pc=10.0,
+        a_AU=axis,
+        e=0.0,
+        i_rad=inclination,
+        W_rad=0.0,
+        w_rad=0.0,
+        M0_rad=0.0,
+        epoch_d=-elapsed_d,
+        epoch=epoch,
+    )
+    times_d = np.arange(11, dtype=np.float64) * 0.01
+    truth = np.asarray(scene.positions(jnp.asarray(times_d)))
+    zero = eqx.tree_at(
+        lambda s: (s.dynamics.orbits.epoch_d, s.dynamics.frame),
+        scene,
+        (
+            scene.dynamics.orbits.epoch_d + epoch.days_between(Epoch()),
+            type(scene.dynamics.frame)(scene.dist_pc, Epoch()),
+        ),
+    )
+    with jax.enable_x64(False):
+        single = jax.tree.map(
+            lambda x: x.astype(jnp.float32) if eqx.is_inexact_array(x) else x, scene
+        )
+        absolute = jax.tree.map(
+            lambda x: x.astype(jnp.float32) if eqx.is_inexact_array(x) else x, zero
+        )
+        actual = eqx.filter_jit(System.positions)(
+            single, time_d=jnp.asarray(times_d, jnp.float32)
+        )
+        negative = eqx.filter_jit(System.positions)(
+            absolute, time_d=jnp.asarray(epoch.jd(times_d), jnp.float32)
+        )
+    error = float(np.max(np.abs(np.asarray(actual) - truth)))
+    negative_error = float(np.max(np.abs(np.asarray(negative) - truth)))
+    assert actual.dtype == jnp.float32
+    assert error < 1e-5
+    assert negative_error > 1e-5
+
+
+@pytest.mark.parametrize(("version", "start_year"), [(2.33, 0.0), (2.6, 30.123456789)])
+def test_exovista_scene_epoch_recovers_dates(request, version, start_year):
+    """Fails if imported times keep absolute dates or lose the fractional start."""
+    from astropy.io import fits
+
+    from skyscapes.io import from_exovista
+
+    path = request.getfixturevalue("exovista_scene_file")(version=version)
+    star_ext = 4 if version < 2.5 else 5
+    with fits.open(path, mode="update") as hdul:
+        years = start_year + np.array([0.0, 0.001, 0.002])
+        for hdu in hdul[star_ext:]:
+            hdu.data[:, 0] = years
+    scene = from_exovista(path, load_disk=False, planet_spectra="time")
+    grids = [scene.star._times_d]
+    grids.extend(p.physical_model.times_d for p in scene.planets)
+    if scene.star.spots is not None:
+        grids.append(scene.star.spots.times_d)
+    for times_d in grids:
+        assert times_d[0] == 0.0
+        np.testing.assert_allclose(
+            scene.epoch.jd(times_d),
+            2451545.0 + years * 365.25,
+            rtol=0,
+            atol=1e-9,
+        )
+    np.testing.assert_array_equal(scene.dynamics.orbits.epoch_d, 0.0)
+    assert scene.epoch.scale == "tdb"

@@ -413,7 +413,7 @@ def test_flux_density_matches_si_planck_at_the_observer(engines):
         phase_angle_rad=jnp.zeros((1, 2)),
         dist_AU=jnp.ones((1, 2)),
         Rp_Rearth=jnp.ones(1),
-        time_jd=times,
+        time_d=times,
         star=star,
         dist_pc=10.0,
     )

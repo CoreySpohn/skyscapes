@@ -51,11 +51,11 @@ def make_disk(g_HG: float = 0.3, Ag: float = 0.5, **overrides) -> GraterDisk:
     return GraterDisk(**defaults)
 
 
-def _render(d: GraterDisk, wavelength_nm=500.0, time_jd=0.0, incl_deg=60.0, pa_deg=0.0):
+def _render(d: GraterDisk, wavelength_nm=500.0, time_d=0.0, incl_deg=60.0, pa_deg=0.0):
     """Convenience: render a disk at default render-time geometry."""
     return d.surface_brightness(
         jnp.array(wavelength_nm),
-        jnp.array(time_jd),
+        jnp.array(time_d),
         jnp.array(incl_deg),
         jnp.array(pa_deg),
         dist_pc=10.0,

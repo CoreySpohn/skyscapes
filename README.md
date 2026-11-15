@@ -89,7 +89,7 @@ optional `Zodi` background:
   and observer distance.
 - **Physical models** — `LambertianPhysicalModel`,
   `GridPhysicalModel` (wavelength/phase contrast tables),
-  `TimeSeriesPhysicalModel` (wavelength/Julian-Date contrast tables),
+  `TimeSeriesPhysicalModel` (wavelength/time-offset contrast tables),
   `PrecomputedPhysicalModel` (cached reflectivity for hot loops),
   `ExoJaxPhysicalModel` (full 2-stream RT via ExoJAX),
   `BlackbodyPhysicalModel` and `ExoJaxEmissionModel` (thermal emission),
@@ -120,10 +120,18 @@ system = from_exovista("path/to/exovista_system.fits", planet_spectra="auto")
 scene = Scene(system=system)
 ```
 
-The importer requires JAX x64 to preserve orbital states and epoch
-precision. ExoVista's elapsed years map to Julian Dates as
+The importer requires JAX x64 to preserve orbital-state precision. ExoVista's elapsed years map to Julian Dates as
 `2451545.0 + 365.25 * elapsed_years`. The importer assigns simulation
 time zero to J2000.0; this origin is not a measured observation date.
+The first stellar timestamp sets `system.epoch` (default `tdb` label;
+the file states no time scale). All stored times and orbit reference times
+are days from that epoch, converted on the host before transfer to JAX.
+
+All evaluation arguments are `time_d`, days from the scene epoch.
+Convert Julian dates once on the host with
+`time_d = system.epoch.days(absolute_dates)`, then pass the offsets to JAX.
+The read-only `system.epoch` is `system.dynamics.frame.epoch`; models
+store only offset arrays such as `times_d`.
 
 `from_exovista` identifies the stellar and planetary extensions from
 their FITS headers, supporting both the legacy layout and the newer
@@ -144,10 +152,10 @@ interpolation by default.
 `Star.spots` and `Star.metadata` preserve source records. Loading spot
 geometry does not yet provide resolved stellar-surface propagation or
 asymmetric stellar leakage through a coronagraph. System contrast methods call
-`contrast_at_time(..., time_jd=..., star=..., dist_pc=...)`; phase-dependent models inherit
+`contrast_at_time(..., time_d=..., star=..., dist_pc=...)`; phase-dependent models inherit
 a default hook that delegates to `contrast`. `System.planet_flux_densities`
 calls the model's `spec_flux_density(wavelength_nm, phase_angle_rad=...,
-dist_AU=..., Rp_Rearth=..., time_jd=..., star=..., dist_pc=...)`, returning `(K, T)`
+dist_AU=..., Rp_Rearth=..., time_d=..., star=..., dist_pc=...)`, returning `(K, T)`
 photon flux in ph/s/m²/nm. Thermal models evaluate flux directly;
 `SumPhysicalModel` adds component fluxes, including through bin integration.
 

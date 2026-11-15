@@ -213,10 +213,10 @@ def test_star_jit_matches_eager():
         fetch=fixture_fetch,
     )
     wavelength_nm = jnp.linspace(3900.0, 5000.0, 64)
-    time_jd = jnp.zeros(())
-    eager = star.spec_flux_density(wavelength_nm, time_jd)
+    time_d = jnp.zeros(())
+    eager = star.spec_flux_density(wavelength_nm, time_d)
     jitted = eqx.filter_jit(lambda s, w, t: s.spec_flux_density(w, t))(
-        star, wavelength_nm, time_jd
+        star, wavelength_nm, time_d
     )
     np.testing.assert_array_max_ulp(np.asarray(jitted), np.asarray(eager), maxulp=4)
 

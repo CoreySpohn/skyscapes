@@ -31,30 +31,30 @@ class TestZodiSourceAYO:
     def test_flux_positive(self, zodi_ayo):
         """Flux density should be positive at all wavelengths within range."""
         wavelengths = [400.0, 550.0, 700.0, 800.0]
-        time_jd = 2460000.0
+        time_d = 0.0
 
         for wl in wavelengths:
-            flux = zodi_ayo.spec_flux_density(wl, time_jd)
+            flux = zodi_ayo.spec_flux_density(wl, time_d)
             assert flux > 0, f"Flux should be positive at {wl} nm"
 
     def test_wavelength_dependence(self, zodi_ayo):
         """Flux should vary with wavelength (solar-like spectrum)."""
-        time_jd = 2460000.0
+        time_d = 0.0
 
-        flux_blue = zodi_ayo.spec_flux_density(400.0, time_jd)
-        flux_red = zodi_ayo.spec_flux_density(700.0, time_jd)
+        flux_blue = zodi_ayo.spec_flux_density(400.0, time_d)
+        flux_red = zodi_ayo.spec_flux_density(700.0, time_d)
 
         # Solar spectrum peaks in visible, so fluxes should differ
         assert flux_blue != flux_red
 
     def test_ignores_position_parameters(self, zodi_ayo):
         """AYO model uses fixed angle assumption, should ignore position."""
-        time_jd = 2460000.0
+        time_d = 0.0
         wavelength = 550.0
 
-        flux_default = zodi_ayo.spec_flux_density(wavelength, time_jd)
+        flux_default = zodi_ayo.spec_flux_density(wavelength, time_d)
         flux_with_pos = zodi_ayo.spec_flux_density(
-            wavelength, time_jd, ecliptic_lat_deg=45.0, solar_lon_deg=90.0
+            wavelength, time_d, ecliptic_lat_deg=45.0, solar_lon_deg=90.0
         )
 
         # AYO model ignores these parameters
@@ -76,25 +76,25 @@ class TestZodiSourceLeinert:
 
     def test_flux_positive(self, zodi_leinert):
         """Flux density should be positive at valid positions."""
-        time_jd = 2460000.0
+        time_d = 0.0
         wavelength = 550.0
 
         flux = zodi_leinert.spec_flux_density(
-            wavelength, time_jd, ecliptic_lat_deg=30.0, solar_lon_deg=90.0
+            wavelength, time_d, ecliptic_lat_deg=30.0, solar_lon_deg=90.0
         )
         assert flux > 0
 
     def test_ecliptic_pole_brighter(self, zodi_leinert):
         """Ecliptic pole should be dimmer than ecliptic plane."""
-        time_jd = 2460000.0
+        time_d = 0.0
         wavelength = 550.0
         solar_lon = 90.0
 
         flux_pole = zodi_leinert.spec_flux_density(
-            wavelength, time_jd, ecliptic_lat_deg=90.0, solar_lon_deg=solar_lon
+            wavelength, time_d, ecliptic_lat_deg=90.0, solar_lon_deg=solar_lon
         )
         flux_plane = zodi_leinert.spec_flux_density(
-            wavelength, time_jd, ecliptic_lat_deg=0.0, solar_lon_deg=solar_lon
+            wavelength, time_d, ecliptic_lat_deg=0.0, solar_lon_deg=solar_lon
         )
 
         # Zodi is brightest in ecliptic plane, dimmer at poles
@@ -102,15 +102,15 @@ class TestZodiSourceLeinert:
 
     def test_solar_longitude_dependence(self, zodi_leinert):
         """Brightness should vary with solar longitude."""
-        time_jd = 2460000.0
+        time_d = 0.0
         wavelength = 550.0
         ecliptic_lat = 30.0
 
         flux_90 = zodi_leinert.spec_flux_density(
-            wavelength, time_jd, ecliptic_lat_deg=ecliptic_lat, solar_lon_deg=90.0
+            wavelength, time_d, ecliptic_lat_deg=ecliptic_lat, solar_lon_deg=90.0
         )
         flux_180 = zodi_leinert.spec_flux_density(
-            wavelength, time_jd, ecliptic_lat_deg=ecliptic_lat, solar_lon_deg=180.0
+            wavelength, time_d, ecliptic_lat_deg=ecliptic_lat, solar_lon_deg=180.0
         )
 
         # Different positions should have different brightness
@@ -119,11 +119,11 @@ class TestZodiSourceLeinert:
     def test_at_table_grid_point(self, zodi_leinert):
         """Test interpolation at exact Leinert table grid points."""
         # Table 17 has data at beta=0 deg, lambda-lambda_sun=90 deg
-        time_jd = 2460000.0
+        time_d = 0.0
         wavelength = 550.0
 
         flux = zodi_leinert.spec_flux_density(
-            wavelength, time_jd, ecliptic_lat_deg=0.0, solar_lon_deg=90.0
+            wavelength, time_d, ecliptic_lat_deg=0.0, solar_lon_deg=90.0
         )
         # Should return a valid value without interpolation issues
         assert jnp.isfinite(flux)
@@ -254,10 +254,10 @@ class TestZodiSourcePhotonFlux:
         photon_flux = jnp.array([1000.0, 1000.0, 1000.0])
         zodi = PrecomputedZodi(wavelengths, photon_flux)
 
-        time_jd = 2460000.0
+        time_d = 0.0
         wavelength = 550.0
 
-        flux = zodi.spec_flux_density(wavelength, time_jd)
+        flux = zodi.spec_flux_density(wavelength, time_d)
         assert jnp.isclose(flux, 1000.0, rtol=0.01)
 
     def test_ignores_position_parameters(self):
@@ -267,9 +267,9 @@ class TestZodiSourcePhotonFlux:
         zodi = PrecomputedZodi(wavelengths, photon_flux)
 
         # Interpolate at same wavelength with different positions
-        flux1 = zodi.spec_flux_density(600.0, 2460000.0)
+        flux1 = zodi.spec_flux_density(600.0, 0.0)
         flux2 = zodi.spec_flux_density(
-            600.0, 2470000.0, ecliptic_lat_deg=45.0, solar_lon_deg=120.0
+            600.0, 10000.0, ecliptic_lat_deg=45.0, solar_lon_deg=120.0
         )
 
         # Should return same value regardless of position
@@ -300,13 +300,13 @@ class TestZodiSourceComparison:
         zodi_ayo = AYOZodi(wavelengths)
         zodi_leinert = LeinertZodi()
 
-        time_jd = 2460000.0
+        time_d = 0.0
         wavelength = 550.0
 
-        flux_ayo = zodi_ayo.spec_flux_density(wavelength, time_jd)
+        flux_ayo = zodi_ayo.spec_flux_density(wavelength, time_d)
         # Leinert at typical coronagraph position (135 deg from sun, mid ecliptic)
         flux_leinert = zodi_leinert.spec_flux_density(
-            wavelength, time_jd, ecliptic_lat_deg=30.0, solar_lon_deg=135.0
+            wavelength, time_d, ecliptic_lat_deg=30.0, solar_lon_deg=135.0
         )
 
         # Should be within a factor of ~2 (same order of magnitude)

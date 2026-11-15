@@ -98,15 +98,15 @@ class AYOZodi(eqx.Module):
     def spec_flux_density(
         self,
         wavelength_nm: float,
-        time_jd: float,
+        time_d: float,
         ecliptic_lat_deg: float = 0.0,
         solar_lon_deg: float = 135.0,
     ) -> float:
         """Return surface brightness in ph/s/m^2/nm per arcsec^2.
 
-        ``time_jd`` and the ecliptic/solar arguments are accepted for
-        interface compatibility but ignored: the AYO convention is a
-        fixed-angle assumption.
+        ``time_d`` (days from the scene epoch) and ecliptic/solar arguments
+        are accepted for interface compatibility but ignored: the AYO
+        convention is a fixed-angle assumption.
         """
         return self._flux_interp(wavelength_nm)
 
@@ -169,7 +169,7 @@ class LeinertZodi(eqx.Module):
     def spec_flux_density(
         self,
         wavelength_nm: float,
-        time_jd: float,
+        time_d: float,
         ecliptic_lat_deg: float = 0.0,
         solar_lon_deg: float = 135.0,
     ) -> float:
@@ -181,7 +181,7 @@ class LeinertZodi(eqx.Module):
 
         Args:
             wavelength_nm: Scalar wavelength in nm.
-            time_jd: Scalar time in Julian days (ignored).
+            time_d: Scalar time in days from the scene epoch (ignored).
             ecliptic_lat_deg: Ecliptic latitude in degrees.
             solar_lon_deg: Solar longitude in degrees.
         """
@@ -266,14 +266,14 @@ class PrecomputedZodi(eqx.Module):
     def spec_flux_density(
         self,
         wavelength_nm: float,
-        time_jd: float,
+        time_d: float,
         ecliptic_lat_deg: float = 0.0,
         solar_lon_deg: float = 135.0,
     ) -> float:
         """Return surface brightness in ph/s/m^2/nm per arcsec^2.
 
-        All arguments other than ``wavelength_nm`` are accepted for
-        interface compatibility but ignored.
+        ``time_d`` is days from the scene epoch. All arguments other than
+        ``wavelength_nm`` are accepted for interface compatibility but ignored.
         """
         return self._flux_interp(wavelength_nm)
 

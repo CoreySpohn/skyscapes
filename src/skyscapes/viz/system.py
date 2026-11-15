@@ -57,9 +57,12 @@ def _star_color(styles):
     return _style.role("star")
 
 
-def _positions_xyz_AU(system, time_jd):
-    """Star-centered sky-frame positions [AU], shape ``(K_total, 3, T)``."""
-    ephemeris = system.ephemeris(time_jd)
+def _positions_xyz_AU(system, time_d):
+    """Star-centered sky-frame positions [AU], shape ``(K_total, 3, T)``.
+
+    ``time_d`` is days from the scene epoch.
+    """
+    ephemeris = system.ephemeris(time_d)
     position = (
         ephemeris.position_AU[jnp.asarray(system.body_index, dtype=int) + 1]
         - ephemeris.position_AU[0]
@@ -69,21 +72,21 @@ def _positions_xyz_AU(system, time_jd):
 
 def plot_system(
     system_or_scene,
-    time_jd=None,
+    time_d=None,
     *,
     view="sky",
     ax=None,
     styles=None,
     planet_labels=None,
-    track_time_jd=None,
+    track_time_d=None,
     disk_radii_AU=None,
     labels=True,
 ):
     """Draw a planetary system: star, planets and disk extent, in one frame.
 
     ``view="sky"`` is the sky-projected scene in arcsec, RA offset
-    increasing to the left: planet positions at ``time_jd`` from
-    ``System.positions``, optional orbit tracks over ``track_time_jd``, and the
+    increasing to the left: planet positions at ``time_d`` from
+    ``System.positions``, optional orbit tracks over ``track_time_d``, and the
     disk's inner and outer truncation rings projected at the system's
     midplane inclination and position angle, with the line of nodes. The
     observer looks along ``+z``, into the page.
@@ -107,8 +110,8 @@ def plot_system(
 
     Args:
         system_or_scene: A ``skyscapes.System`` or ``skyscapes.Scene``.
-        time_jd: Epoch of the planet markers [JD], scalar. Required when the
-            system has planets.
+        time_d: Scalar time of the planet markers, in days from the scene
+            epoch. Required when the system has planets.
         view: ``"sky"`` or ``"side"``.
         ax: Axes to draw into. None creates a new figure and axes.
         styles: Optional ``eyepiece.SourceStyles`` declaring ``"star"``
@@ -117,8 +120,8 @@ def plot_system(
             roles (star yellow, planet cyan).
         planet_labels: One label per planet, in ``System.positions`` order.
             None labels them ``b``, ``c``, ... .
-        track_time_jd: Optional times [JD], shape ``(T,)``, over which to draw
-            each planet's track.
+        track_time_d: Optional times in days from the scene epoch,
+            shape ``(T,)``, over which to draw each planet's track.
         disk_radii_AU: ``(r_in, r_out)`` for the disk rings. None reads the
             truncation radii of a parametric disk and draws no rings for a
             disk that has none (a pre-rendered ``ExovistaDisk``).
@@ -140,7 +143,7 @@ def plot_system(
         ValueError: If ``view`` is unknown, the labels do not match the
             planet count, or the midplane inclination is outside
             ``[0, 180]``.
-        TypeError: If the system has planets and ``time_jd`` is None.
+        TypeError: If the system has planets and ``time_d`` is None.
     """
     ep = eyepiece()
     import matplotlib.pyplot as plt
@@ -149,8 +152,8 @@ def plot_system(
         raise ValueError(f"view must be one of {_VIEWS}, got {view!r}")
     system = _unpack(system_or_scene)
     n_planets = system.n_planets
-    if n_planets and time_jd is None:
-        raise TypeError("time_jd is required to place the planets")
+    if n_planets and time_d is None:
+        raise TypeError("time_d is required to place the planets")
     names = list(planet_labels) if planet_labels is not None else None
     if names is None:
         names = _default_labels(n_planets)
@@ -223,11 +226,11 @@ def plot_system(
 
     # Planets and their tracks.
     if n_planets:
-        t_now = jnp.atleast_1d(jnp.asarray(time_jd, dtype=float))
+        t_now = jnp.atleast_1d(jnp.asarray(time_d, dtype=float))
         now = _positions_xyz_AU(system, t_now)[:, :, 0]
         track = None
-        if track_time_jd is not None:
-            track = _positions_xyz_AU(system, jnp.asarray(track_time_jd, dtype=float))
+        if track_time_d is not None:
+            track = _positions_xyz_AU(system, jnp.asarray(track_time_d, dtype=float))
         for k, name in enumerate(names):
             color, marker = _planet_style(styles, name)
             if track is not None:

@@ -30,18 +30,21 @@ class SumPhysicalModel(AbstractPhysicalModel):
         phase_angle_rad: Array,
         dist_AU: Array,
         Rp_Rearth: Array,
-        time_jd: Array,
+        time_d: Array,
         star,
         dist_pc: Array,
     ) -> Array:
-        """Summed observer photon flux [ph/s/m^2/nm], shape ``(K, T)``."""
+        """Summed observer photon flux [ph/s/m^2/nm], shape ``(K, T)``.
+
+        ``time_d`` is days from the scene epoch.
+        """
         return sum(
             component.spec_flux_density(
                 wavelength_nm,
                 phase_angle_rad=phase_angle_rad,
                 dist_AU=dist_AU,
                 Rp_Rearth=Rp_Rearth,
-                time_jd=time_jd,
+                time_d=time_d,
                 star=star,
                 dist_pc=dist_pc,
             )
@@ -56,7 +59,7 @@ class SumPhysicalModel(AbstractPhysicalModel):
         Rp_Rearth: Array,
     ) -> Array:
         """Require the host star and epochs for the component fluxes."""
-        raise ValueError("Use contrast_at_time(..., time_jd=..., star=...) for a sum")
+        raise ValueError("Use contrast_at_time(..., time_d=..., star=...) for a sum")
 
     def contrast_at_time(
         self,
@@ -65,11 +68,14 @@ class SumPhysicalModel(AbstractPhysicalModel):
         wavelength_nm: Array,
         Rp_Rearth: Array,
         *,
-        time_jd: Array,
+        time_d: Array,
         star=None,
         dist_pc: Array | None = None,
     ) -> Array:
-        """Summed photon flux over stellar flux, shape ``(K, T)``."""
+        """Summed photon flux over stellar flux, shape ``(K, T)``.
+
+        ``time_d`` is days from the scene epoch.
+        """
         if star is None:
             raise ValueError("SumPhysicalModel needs the host star")
         flux = self.spec_flux_density(
@@ -77,8 +83,8 @@ class SumPhysicalModel(AbstractPhysicalModel):
             phase_angle_rad=phase_angle_rad,
             dist_AU=dist_AU,
             Rp_Rearth=Rp_Rearth,
-            time_jd=time_jd,
+            time_d=time_d,
             star=star,
             dist_pc=dist_pc,
         )
-        return flux / star.spec_flux_density(wavelength_nm, time_jd, dist_pc=dist_pc)
+        return flux / star.spec_flux_density(wavelength_nm, time_d, dist_pc=dist_pc)
