@@ -31,7 +31,9 @@ def test_load_disk_interpolates_without_dtype_warnings(enable_x64, wavelength_dt
     ):
         warnings.simplefilter("error")
         disk = _load_disk(hdul, fits_ext=2)
-        brightness = disk.surface_brightness(jnp.asarray(550.0), 0.0, 0.0, 0.0)
+        brightness = disk.surface_brightness(
+            jnp.asarray(550.0), 0.0, 0.0, 0.0, dist_pc=10.0
+        )
         dtype = jnp.float64 if enable_x64 else jnp.float32
         assert disk.wavelengths_nm.dtype == dtype
         assert disk.contrast_cube.dtype == dtype

@@ -581,14 +581,15 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         Rp_Rearth: Array,
         time_jd: Array,
         star,
+        dist_pc: Array,
     ) -> Array:
         """Observer photon flux [ph/s/m^2/nm], shape ``(K, T)``.
 
         Wavelength is scalar. The emission is steady and independent of
         phase; ``phase_angle_rad`` supplies the ``(K, T)`` output shape.
-        Radius comes from the planet and observer distance from the star.
+        Radius comes from the planet and observer distance from the system.
         """
-        flux_jy = self.flux_density_jy(wavelength_nm, Rp_Rearth, star.dist_pc)[0]
+        flux_jy = self.flux_density_jy(wavelength_nm, Rp_Rearth, dist_pc)[0]
         flux = jy_to_photons_per_nm_per_m2(flux_jy, wavelength_nm)
         return flux[:, None] * jnp.ones_like(phase_angle_rad)
 
@@ -613,6 +614,7 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         *,
         time_jd: Array,
         star=None,
+        dist_pc: Array | None = None,
     ) -> Array:
         """Thermal photon flux over stellar flux, shape ``(K, T)``."""
         if star is None:
@@ -624,8 +626,9 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
             Rp_Rearth=Rp_Rearth,
             time_jd=time_jd,
             star=star,
+            dist_pc=dist_pc,
         )
-        return flux / star.spec_flux_density(wavelength_nm, time_jd)
+        return flux / star.spec_flux_density(wavelength_nm, time_jd, dist_pc=dist_pc)
 
     def __repr__(self) -> str:
         """One-line summary of species, grid and planet count."""

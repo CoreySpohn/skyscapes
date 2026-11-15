@@ -1,251 +1,33 @@
-"""scene.Planet -- composes an AbstractOrbit with an AbstractPhysicalModel.
-
-Planet-intrinsic parameters (radius, mass) live on ``Planet`` itself.
-Submodels receive them as method arguments when needed:
-
-  - ``orbit`` owns orbital elements (a, e, i, ...). Those parameters
-    are the orbit's parameterization, not the planet's identity.
-  - ``physical_model`` owns spectral physics (albedo, contrast grid,
-    ExoJax composition). Planet radius is passed to
-    ``physical_model.contrast_at_time(..., Rp_Rearth=self.Rp_Rearth)`` rather
-    than duplicated as a field.
-
-Stellar context (``Ms_kg``, ``dist_pc``) is supplied keyword-only at
-call time through a ``Star`` argument -- ``Planet`` never stores a
-reference to its host star, which keeps the PyTree shallow and lets a
-single ``scene.System`` own the one-and-only star.
-"""
-
-from __future__ import annotations
+"""Photometric planets: radii and spectral physics."""
 
 import equinox as eqx
 import jax.numpy as jnp
-from hwoutils.constants import G, Mearth2kg, pc2AU, rad2arcsec, two_pi
 from jaxtyping import Array
-from orbix.equations.orbit import mean_anomaly_tp, mean_motion, period_n
-from orbix.orbit import AbstractOrbit
 
 from .._repr import fmt_scalar_or_array, indent
 from ..physical_model import AbstractPhysicalModel
-from .star import AbstractStar
 
 
 class Planet(eqx.Module):
-    """Composed planet: intrinsic params + orbit dynamics + physical-model physics.
-
-    All stellar-context-dependent methods take a ``star`` keyword argument
-    rather than holding a reference internally.  This keeps ``System`` as
-    the single source of truth for the host star.
+    """Planet radii and their physical model, with no dynamical state.
 
     Attributes:
         Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
-        Mp_Mearth: Planet mass [Earth masses], shape ``(K,)``.
-        orbit: Orbital dynamics (trajectory parameterization).
         physical_model: Spectral physics (reflectivity / emission).
     """
 
-    Rp_Rearth: Array
-    Mp_Mearth: Array
-    orbit: AbstractOrbit
+    Rp_Rearth: Array = eqx.field(converter=jnp.asarray)
     physical_model: AbstractPhysicalModel
 
     @property
     def n_planets(self) -> int:
-        """Number of planets ``K`` carried by this composed module."""
+        """Number of planets ``K`` carried by this photometric module."""
         return int(self.Rp_Rearth.shape[0])
 
-    def planet_mass_kg(self) -> Array:
-        """Finite positive planet mass [kg], shape ``(K,)``; otherwise zero."""
-        mp_kg = self.Mp_Mearth * Mearth2kg
-        known = jnp.isfinite(mp_kg) & (mp_kg > 0.0)
-        return jnp.where(known, mp_kg, 0.0)
-
-    def central_mass_kg(self, *, star: AbstractStar) -> Array:
-        """Mass that sets each planet's orbital period [kg], shape ``(K,)``.
-
-        The two-body relative orbit has gravitational parameter
-        ``G (M_star + M_planet)``. Where ``Mp_Mearth`` is finite and positive
-        the planet mass is added to the stellar mass; where it is NaN, zero or
-        negative (mass unknown) the planet is treated as a test particle and
-        only ``M_star`` is used. Loaders that derive elements from a state
-        vector use the same sum, so loading and propagation share one
-        gravitational parameter.
-        """
-        return star.Ms_kg + self.planet_mass_kg()
-
-    def mean_anomaly(self, time_jd: Array, *, star: AbstractStar) -> Array:
-        """Mean anomaly mod 360 [deg], shape ``(K, T)``.
-
-        ``time_jd`` must be shape ``(T,)`` -- no rank polymorphism. Callers
-        that hold a scalar should wrap it in ``jnp.asarray([t])`` at the
-        call site.
-        """
-        n = mean_motion(self.orbit.a_AU, G * self.central_mass_kg(star=star))
-        T_d = period_n(n)
-        tp_d = self.orbit.t0_d - T_d * self.orbit.M0_rad / two_pi
-        M = mean_anomaly_tp(time_jd[None, :], n[:, None], tp_d[:, None]) % two_pi
-        return jnp.rad2deg(M)
-
-    def propagate(self, trig_solver, time_jd: Array, *, star: AbstractStar):
-        """Propagate the orbit; returns ``(r_AU, phase_angle_rad, dist_AU)``.
-
-        ``r_AU`` has shape ``(K, 3, T)`` in orbix's right-handed
-        (east, north, away) frame, passed through unchanged. Positive z
-        points away from the observer; dz/dt is positive when receding.
-        ``position_arcsec`` reads rows 0 and 1 as east and north.
-
-        ``phase_angle_rad`` is the standard star-planet-observer phase angle:
-        0 at full phase (superior conjunction, planet behind the star),
-        ``pi / 2`` at quadrature and ``pi`` at new phase (inferior
-        conjunction). orbix returns this angle directly; it is unchanged.
-        In this sky chart, ``cos(phase_angle_rad) = +r_AU[:, 2, :] / dist_AU``.
-        """
-        return self.orbit.propagate(
-            trig_solver, time_jd, Ms_kg=self.central_mass_kg(star=star)
-        )
-
-    def position_arcsec(
-        self,
-        trig_solver,
-        time_jd: Array,
-        *,
-        star: AbstractStar,
-    ) -> Array:
-        """On-sky (east, north) offsets in arcsec, shape ``(2, K, T)``.
-
-        ``(dRA, dDec) = (Delta alpha*, Delta Dec)``, where the east offset
-        ``Delta alpha* = Delta RA cos Dec`` includes the declination factor.
-        """
-        r_AU, _, _ = self.propagate(trig_solver, time_jd, star=star)
-        dist_AU = star.dist_pc * pc2AU
-        scale = rad2arcsec / dist_AU
-        ra = r_AU[:, 0, :] * scale
-        dec = r_AU[:, 1, :] * scale
-        return jnp.stack([ra, dec], axis=0)
-
-    def position_angle_deg(
-        self, trig_solver, time_jd: Array, *, star: AbstractStar
-    ) -> Array:
-        """Position angle east of north in ``[0, 360)``, shape ``(K, T)``.
-
-        The angle is undefined at zero projected separation.
-        """
-        return self.orbit.position_angle_deg(
-            trig_solver, time_jd, Ms_kg=star.Ms_kg, Mp_kg=self.planet_mass_kg()
-        )
-
-    def reflex_position_arcsec(
-        self, trig_solver, time_jd: Array, *, star: AbstractStar
-    ) -> Array:
-        """Stellar (east, north) barycentric offset [arcsec], ``(2, K, T)``.
-
-        Each planet contributes an independent two-body reflex orbit.
-        Unknown planet mass contributes zero.
-        """
-        offsets = self.orbit.reflex_position_arcsec(
-            trig_solver,
-            time_jd,
-            Ms_kg=star.Ms_kg,
-            Mp_kg=self.planet_mass_kg(),
-            dist_pc=star.dist_pc,
-        )
-        return jnp.stack(offsets, axis=0)
-
-    def radial_velocity_m_s(
-        self, trig_solver, time_jd: Array, *, star: AbstractStar
-    ) -> Array:
-        """Stellar radial velocity [m/s], positive receding, shape ``(K, T)``.
-
-        No systemic velocity is added. Unknown planet mass contributes zero.
-        """
-        return self.orbit.radial_velocity_m_s(
-            trig_solver, time_jd, Ms_kg=star.Ms_kg, Mp_kg=self.planet_mass_kg()
-        )
-
-    def alpha_dMag(
-        self,
-        trig_solver,
-        time_jd: Array,
-        *,
-        star: AbstractStar,
-        wavelength_nm: float = 600.0,
-    ) -> tuple[Array, Array]:
-        """Projected separation [arcsec] and delta-mag, each ``(K, T)``.
-
-        For ``LambertianPhysicalModel`` (grey), the chosen ``wavelength_nm``
-        is irrelevant and the output matches ``orbix.Planets.alpha_dMag``
-        by construction. For ``GridPhysicalModel`` / future wavelength-
-        dependent models, ``dMag`` is evaluated at ``wavelength_nm``;
-        pick a value within the model's spectral grid.
-        """
-        r_AU, phase_angle_rad, dist_AU = self.propagate(trig_solver, time_jd, star=star)
-        s_AU = jnp.sqrt(r_AU[:, 0, :] ** 2 + r_AU[:, 1, :] ** 2)
-        dist_pc_AU = star.dist_pc * pc2AU
-        alpha = s_AU * (rad2arcsec / dist_pc_AU)
-
-        contrast = self.physical_model.contrast_at_time(
-            phase_angle_rad=phase_angle_rad,
-            dist_AU=dist_AU,
-            wavelength_nm=jnp.asarray(wavelength_nm),
-            Rp_Rearth=self.Rp_Rearth,
-            time_jd=time_jd,
-            star=star,
-        )
-        eps = jnp.finfo(contrast.dtype).tiny
-        dMag = -2.5 * jnp.log10(contrast + eps)
-        return alpha, dMag
-
-    def contrast(
-        self,
-        trig_solver,
-        wavelength_nm: Array,
-        time_jd: Array,
-        *,
-        star: AbstractStar,
-    ) -> Array:
-        """Planet-to-star contrast at a scalar wavelength [nm], shape ``(K, T)``.
-
-        Use ``System.contrast_cube`` for an array of wavelengths.
-        """
-        if jnp.size(wavelength_nm) != 1:
-            raise ValueError("need one wavelength; use System.contrast_cube")
-        _, phase_angle_rad, dist_AU = self.propagate(trig_solver, time_jd, star=star)
-        return self.physical_model.contrast_at_time(
-            phase_angle_rad=phase_angle_rad,
-            dist_AU=dist_AU,
-            wavelength_nm=wavelength_nm,
-            Rp_Rearth=self.Rp_Rearth,
-            time_jd=time_jd,
-            star=star,
-        )
-
-    def spec_flux_density(
-        self,
-        trig_solver,
-        wavelength_nm: Array,
-        time_jd: Array,
-        *,
-        star: AbstractStar,
-    ) -> Array:
-        """Planet flux density [ph/s/m^2/nm], shape ``(K, T)``."""
-        if jnp.size(wavelength_nm) != 1:
-            raise ValueError("need one wavelength; use System.contrast_cube")
-        _, phase_angle_rad, dist_AU = self.propagate(trig_solver, time_jd, star=star)
-        return self.physical_model.spec_flux_density(
-            wavelength_nm,
-            phase_angle_rad=phase_angle_rad,
-            dist_AU=dist_AU,
-            Rp_Rearth=self.Rp_Rearth,
-            time_jd=time_jd,
-            star=star,
-        )
-
     def __repr__(self) -> str:
-        """Nested summary: planet count + intrinsic params + orbit + physical_model."""
+        """Nested summary of radii and the physical model."""
         rp = fmt_scalar_or_array(self.Rp_Rearth)
-        mp = fmt_scalar_or_array(self.Mp_Mearth)
         return (
-            f"Planet(K={self.n_planets}, Rp={rp} R_earth, Mp={mp} M_earth)\n"
-            f"{indent('orbit: ' + repr(self.orbit))}\n"
+            f"Planet(K={self.n_planets}, Rp={rp} R_earth)\n"
             f"{indent('physical_model: ' + repr(self.physical_model))}"
         )

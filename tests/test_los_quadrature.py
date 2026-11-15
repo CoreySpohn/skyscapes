@@ -38,7 +38,6 @@ def _ring(quadrature: str, n_slices_los: int, **overrides) -> GraterDisk:
         nx=16,
         ny=16,
         pixel_scale_arcsec=0.015,
-        dist_pc=10.0,
         n_slices_los=n_slices_los,
         cutoff_width_AU=jnp.array(0.1),
         quadrature=quadrature,
@@ -50,7 +49,7 @@ def _ring(quadrature: str, n_slices_los: int, **overrides) -> GraterDisk:
 @eqx.filter_jit
 def _image(disk, incl_deg):
     return disk.surface_brightness(
-        jnp.array(500.0), jnp.array(0.0), incl_deg, jnp.array(_PA_DEG)
+        jnp.array(500.0), jnp.array(0.0), incl_deg, jnp.array(_PA_DEG), dist_pc=10.0
     )
 
 
@@ -203,7 +202,11 @@ def test_gradients_match_central_differences(quadrature, n_slices_los, incl, gam
             lambda d: [getattr(d, name) for name in _FIT_FIELDS], disk, values
         )
         image = updated.surface_brightness(
-            jnp.array(500.0), jnp.array(0.0), incl * scale[-1], jnp.array(_PA_DEG)
+            jnp.array(500.0),
+            jnp.array(0.0),
+            incl * scale[-1],
+            jnp.array(_PA_DEG),
+            dist_pc=10.0,
         )
         return jnp.sum(weights * image)
 
@@ -286,7 +289,6 @@ def _exovista(quadrature: str, n_slices_los: int) -> ExovistaParametricDisk:
         nx=16,
         ny=16,
         pixel_scale_arcsec=0.3,
-        dist_pc=10.0,
         n_slices_los=n_slices_los,
         quadrature=quadrature,
     )

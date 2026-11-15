@@ -161,7 +161,6 @@ def from_phoenix(
     teff_K: float,
     logg: float,
     *,
-    Ms_kg: float,
     dist_pc: float,
     radius_m: float,
     mh: float = 0.0,
@@ -181,7 +180,6 @@ def from_phoenix(
     Args:
         teff_K: Effective temperature in kelvin.
         logg: Surface gravity, log10 of cgs gravity in cm/s^2.
-        Ms_kg: Stellar mass in kilograms.
         dist_pc: Distance in parsecs.
         radius_m: Stellar radius in meters.
         mh: Metallicity [M/H] in dex. Only 0.0 is registered.
@@ -202,7 +200,6 @@ def from_phoenix(
         teff_K=teff_K,
         logg=logg,
         mh=mh,
-        Ms_kg=Ms_kg,
         dist_pc=dist_pc,
         radius_m=radius_m,
         wavelength_range_nm=wavelength_range_nm,
@@ -219,7 +216,6 @@ def _from_surface_flux(
     teff_K,
     logg,
     mh,
-    Ms_kg,
     dist_pc,
     radius_m,
     wavelength_range_nm,
@@ -238,8 +234,6 @@ def _from_surface_flux(
     # F_nu = F_lambda lambda^2 / c, with F_lambda converted from per nm to per m.
     flux_jy = surface_flux / nm2m * (wavelength_nm * nm2m) ** 2 / c * dilution / Jy
     return Star(
-        Ms_kg=Ms_kg,
-        dist_pc=dist_pc,
         wavelengths_nm=jnp.asarray(wavelength_nm),
         times_jd=jnp.zeros(1),
         flux_density_jy=jnp.asarray(flux_jy)[:, None],

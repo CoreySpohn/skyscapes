@@ -1,4 +1,4 @@
-"""scene.Planet -- composes AbstractOrbit + AbstractPhysicalModel."""
+"""Photometric planets and scene-level geometry/photometry contracts."""
 
 from __future__ import annotations
 
@@ -7,49 +7,59 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from hwoutils.constants import G, Mearth2kg, Rearth2AU, pc2AU, rad2arcsec
+from hwoutils.constants import G, Mearth2kg, Msun2kg, Rearth2AU, pc2AU, rad2arcsec
 from orbix.equations.orbit import mean_motion, period_n
 from orbix.equations.phase import lambert_phase_exact
 from orbix.kepler.markley import solve_trig
-from orbix.kepler.shortcuts.grid import get_grid_solver
 from orbix.orbit import KeplerianOrbit
 
 from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.scene import FlatStar, Planet, System
 
-SOLVER = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
+SOLVER = solve_trig
 
 
-def _single_planet():
-    orbit = KeplerianOrbit(
-        a_AU=jnp.array([1.0]),
-        e=jnp.array([0.0]),
-        W_rad=jnp.array([0.0]),
-        i_rad=jnp.array([jnp.pi / 3]),
-        w_rad=jnp.array([0.0]),
-        M0_rad=jnp.array([jnp.pi / 4]),
-        t0_d=jnp.array([0.0]),
+def _single_scene(*, mass=1.0, i_rad=jnp.pi / 3, M0_rad=jnp.pi / 4, W_rad=0.0):
+    return System.from_classical(
+        FlatStar(1e9),
+        (Planet(jnp.ones(1), LambertianPhysicalModel(jnp.array([0.3]))),),
+        star_mass_Msun=1.989e30 / Msun2kg,
+        planet_mass_Msun=jnp.array([mass]) * Mearth2kg / Msun2kg,
+        dist_pc=10.0,
+        a_AU=jnp.ones(1),
+        e=0.0,
+        W_rad=W_rad,
+        i_rad=i_rad,
+        w_rad=0.0,
+        M0_rad=M0_rad,
     )
-    physical_model = LambertianPhysicalModel(Ag=jnp.array([0.3]))
-    return Planet(
-        Rp_Rearth=jnp.array([1.0]),
-        Mp_Mearth=jnp.array([1.0]),
-        orbit=orbit,
-        physical_model=physical_model,
+
+
+def _reference_orbit(scene):
+    return KeplerianOrbit(
+        **scene.dynamics.orbits.to_classical(), t0_d=scene.dynamics.orbits.epoch_d
+    )
+
+
+def _geometry(scene, times):
+    eph = scene.ephemeris(times)
+    return (
+        (eph.position_AU[1:] - eph.position_AU[:1]).transpose(0, 2, 1),
+        eph.phase_angle_rad(jnp.array([1]), 0),
+        eph.distance_AU(jnp.array([1]), 0),
     )
 
 
 def test_planet_n_planets_property():
     """Planet.n_planets reflects the K dimension of intrinsic params."""
-    p = _single_planet()
-    assert p.n_planets == 1
+    p = _single_scene()
+    assert p.planets[0].n_planets == 1
 
 
 def test_planet_position_shape():
-    """Planet.position_arcsec returns shape (2, K, T)."""
-    star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
-    p = _single_planet()
-    ra_dec = p.position_arcsec(SOLVER, jnp.array([0.0]), star=star)
+    """System.positions returns shape (2, K, T)."""
+    p = _single_scene()
+    ra_dec = p.positions(jnp.array([0.0]))
     # (2, K, T) per contract
     assert ra_dec.shape == (2, 1, 1)
 
@@ -61,11 +71,10 @@ def test_planet_alpha_dMag_matches_orbix():
     AJ 162, 186: raw z is away. Brown (2005), ApJ 624, 1010, Eq. 4:
     the Lambert law uses the standard star-planet-observer angle.
     """
-    star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
-    p = _single_planet()
+    p = _single_scene()
     time_jd = jnp.array([0.0, 100.0, 200.0])
 
-    alpha_new, dMag_new = p.alpha_dMag(SOLVER, time_jd, star=star)
+    alpha_new, dMag_new = p.alpha_dMag(time_jd)
 
     orbit = KeplerianOrbit(
         a_AU=jnp.array([1.0]),
@@ -77,7 +86,7 @@ def test_planet_alpha_dMag_matches_orbix():
         t0_d=jnp.array([0.0]),
     )
     # The planet adds its own mass to the central mass (two-body mu).
-    Ms_kg = jnp.array([1.989e30]) + p.Mp_Mearth * Mearth2kg
+    Ms_kg = jnp.array([1.989e30]) + p.planet_mass_Msun * Msun2kg
     dist_pc = jnp.array([10.0])
     Ag = jnp.array([0.3])
     Rp_AU = jnp.array([1.0]) * Rearth2AU
@@ -96,70 +105,56 @@ def test_planet_alpha_dMag_matches_orbix():
 
 def test_planet_contrast_wavelength_agnostic_for_lambertian():
     """Lambertian -> contrast independent of wavelength."""
-    star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
-    p = _single_planet()
+    p = _single_scene()
     time_jd = jnp.array([0.0])
-    c_blue = p.contrast(SOLVER, jnp.array(400.0), time_jd, star=star)
-    c_red = p.contrast(SOLVER, jnp.array(800.0), time_jd, star=star)
+    c_blue = p.contrasts(jnp.array(400.0), time_jd)
+    c_red = p.contrasts(jnp.array(800.0), time_jd)
     assert jnp.allclose(c_blue, c_red, rtol=1e-6)
 
 
 def test_planet_spec_flux_density_equals_contrast_times_star():
     """spec_flux_density equals contrast times star.spec_flux_density."""
-    star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
-    p = _single_planet()
+    p = _single_scene()
     time_jd = jnp.array([0.0])
     wl = jnp.array(600.0)
-    c = p.contrast(SOLVER, wl, time_jd, star=star)
-    f = p.spec_flux_density(SOLVER, wl, time_jd, star=star)
+    c = p.contrasts(wl, time_jd)
+    f = p.planet_flux_densities(wl, time_jd)
     assert jnp.allclose(f, c * 1e9, rtol=1e-6)
 
 
-def test_planet_mean_anomaly_range():
+def test_scene_reference_mean_anomaly_range():
     """mean_anomaly returns (K, T) in [0, 360)."""
-    star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
-    p = _single_planet()
-    M = p.mean_anomaly(jnp.array([0.0, 100.0, 365.0]), star=star)
+    p = _single_scene()
+    orbit = _reference_orbit(p)
+    times = jnp.array([0.0, 100.0, 365.0])
+    M = jnp.rad2deg(
+        (orbit.M0_rad[:, None] + p.dynamics.orbits.n_rad_per_d[:, None] * times)
+        % (2 * jnp.pi)
+    )
     # Shape (K=1, T=3), and the values should be in [0, 360)
     assert M.shape == (1, 3)
     assert jnp.all(M >= 0.0)
     assert jnp.all(M < 360.0)
 
 
-def _circular_planet(i_rad, M0_rad=0.0, W_rad=0.0):
-    orbit = KeplerianOrbit(
-        a_AU=jnp.array([1.0]),
-        e=jnp.array([0.0]),
-        W_rad=jnp.array([W_rad]),
-        i_rad=jnp.array([i_rad]),
-        w_rad=jnp.array([0.0]),
-        M0_rad=jnp.array([M0_rad]),
-        t0_d=jnp.array([0.0]),
-    )
-    # Mass zero means unknown: a test particle, so mu = G M_star exactly and
-    # the hand-derived anomalies below hold without a mass correction.
-    return Planet(
-        Rp_Rearth=jnp.array([1.0]),
-        Mp_Mearth=jnp.array([0.0]),
-        orbit=orbit,
-        physical_model=LambertianPhysicalModel(Ag=jnp.array([0.3])),
-    )
-
-
-_STAR = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
+def _circular_scene(i_rad, M0_rad=0.0, W_rad=0.0):
+    # Zero mass fixes the hand-derived periods to the stellar mass alone.
+    return _single_scene(mass=0.0, i_rad=i_rad, M0_rad=M0_rad, W_rad=W_rad)
 
 
 def _sample_orbit(planet, n=361):
     """Positions, phase angle and dMag over one period (K=1)."""
     time_jd = jnp.linspace(0.0, 365.25, n)
-    r_AU, beta, _ = planet.propagate(SOLVER, time_jd, star=_STAR)
-    _, dMag = planet.alpha_dMag(SOLVER, time_jd, star=_STAR)
+    r_AU, beta, _ = _geometry(planet, time_jd)
+    _, dMag = planet.alpha_dMag(time_jd)
     return r_AU[0], beta[0], dMag[0]
 
 
 def _quarter_period_times(planet):
     """Epochs with M = 90 and 270 deg for a circular orbit starting at M = 0."""
-    period = period_n(mean_motion(planet.orbit.a_AU, G * _STAR.Ms_kg))[0]
+    period = period_n(
+        mean_motion(planet.dynamics.orbits.a_AU, G * planet.star_mass_Msun * Msun2kg)
+    )[0]
     return period * jnp.array([0.25, 0.75])
 
 
@@ -170,8 +165,8 @@ def test_phase_angle_and_sky_position_at_known_anomalies():
     AJ 162, 186 give (north, east, away); the right-handed sky chart is (east, north,
     away). Brown (2005), ApJ 624, 1010, Eq. 4 uses zero at full phase.
     """
-    p = _circular_planet(jnp.deg2rad(60.0))
-    r, beta, dist = p.propagate(SOLVER, _quarter_period_times(p), star=_STAR)
+    p = _circular_scene(jnp.deg2rad(60.0))
+    r, beta, dist = _geometry(p, _quarter_period_times(p))
     np.testing.assert_allclose(jnp.rad2deg(beta[0]), [30.0, 150.0], atol=1e-6)
     np.testing.assert_allclose(
         r[0],
@@ -189,20 +184,20 @@ def test_lambert_brightness_at_mean_anomaly_90(observable):
     Sobolev (1975), Light Scattering in Planetary Atmospheres; Brown (2005),
     ApJ 624, 1010, Eq. 4: Phi(30 deg) = 0.88084278 for a Lambert sphere.
     """
-    p = _circular_planet(jnp.deg2rad(60.0))
+    p = _circular_scene(jnp.deg2rad(60.0))
     times = _quarter_period_times(p)[:1]
     beta = np.pi / 6
     phase_factor = (np.sin(beta) + (np.pi - beta) * np.cos(beta)) / np.pi
     assert phase_factor == pytest.approx(0.88084278, abs=1e-8)
     expected_contrast = 0.3 * Rearth2AU**2 * phase_factor
     if observable == "contrast":
-        actual = p.contrast(SOLVER, jnp.array(600.0), times, star=_STAR)
+        actual = p.contrasts(jnp.array(600.0), times)
         expected = expected_contrast
     elif observable == "dMag":
-        _, actual = p.alpha_dMag(SOLVER, times, star=_STAR)
+        _, actual = p.alpha_dMag(times)
         expected = -2.5 * np.log10(expected_contrast)
     else:
-        actual = p.spec_flux_density(SOLVER, jnp.array(600.0), times, star=_STAR)
+        actual = p.planet_flux_densities(jnp.array(600.0), times)
         expected = expected_contrast * 1e9
     np.testing.assert_allclose(actual, expected, rtol=1e-7, atol=0)
 
@@ -217,15 +212,15 @@ def test_position_arcsec_is_east_then_north(node_deg, mean_anomaly_deg, east_nor
     Green (1985), Spherical Astronomy, ch. 17; Brandt et al. (2021),
     AJ 162, 186: Omega is measured north through east.
     """
-    p = _circular_planet(jnp.deg2rad(60.0), W_rad=jnp.deg2rad(node_deg))
+    p = _circular_scene(jnp.deg2rad(60.0), W_rad=jnp.deg2rad(node_deg))
     times = _quarter_period_times(p)[:1] * (mean_anomaly_deg / 90.0)
-    expected = np.asarray(east_north_AU) / float(_STAR.dist_pc)
+    expected = np.asarray(east_north_AU) / float(p.dist_pc)
     np.testing.assert_allclose(
-        p.position_arcsec(SOLVER, times, star=_STAR)[:, 0, 0],
+        p.positions(times)[:, 0, 0],
         expected,
         atol=1e-8,
     )
-    system = System(star=_STAR, planets=(p,), trig_solver=SOLVER)
+    system = System(p.star, p.planets, p.dynamics)
     np.testing.assert_allclose(system.positions(times)[:, 0, 0], expected, atol=1e-8)
 
 
@@ -236,10 +231,10 @@ def test_edge_on_superior_conjunction_is_brightest():
     AJ 162, 186: positive raw away-z at M = 90 deg for Omega = omega = 0.
     Brown (2005), ApJ 624, 1010, Eq. 4: full phase is brightest.
     """
-    p = _circular_planet(jnp.deg2rad(89.0))
+    p = _circular_scene(jnp.deg2rad(89.0))
     times = _quarter_period_times(p)
-    r, beta, _ = p.propagate(SOLVER, times, star=_STAR)
-    _, dMag = p.alpha_dMag(SOLVER, times, star=_STAR)
+    r, beta, _ = _geometry(p, times)
+    _, dMag = p.alpha_dMag(times)
     np.testing.assert_allclose(jnp.rad2deg(beta[0]), [1.0, 179.0], atol=1e-6)
     # Positive z is behind the star in the away chart.
     assert r[0, 2, 0] > 0 > r[0, 2, 1]
@@ -249,7 +244,7 @@ def test_edge_on_superior_conjunction_is_brightest():
 
 def test_quadrature_phase_angle_is_half_pi():
     """With the planet on the sky plane (z = 0) the phase angle is pi / 2."""
-    p = _circular_planet(jnp.deg2rad(89.0))
+    p = _circular_scene(jnp.deg2rad(89.0))
     r, beta, dMag = _sample_orbit(p)
     k = int(jnp.argmin(jnp.abs(r[2])))
     assert abs(float(beta[k]) - jnp.pi / 2) < 0.03
@@ -258,26 +253,24 @@ def test_quadrature_phase_angle_is_half_pi():
 
 def test_inclined_phase_angle_range():
     """For i = 60 deg the phase angle spans [90 - i, 90 + i] = [30, 150] deg."""
-    p = _circular_planet(jnp.deg2rad(60.0))
+    p = _circular_scene(jnp.deg2rad(60.0))
     _, beta, _ = _sample_orbit(p, n=1461)
     assert abs(float(jnp.rad2deg(beta.min())) - 30.0) < 0.2
     assert abs(float(jnp.rad2deg(beta.max())) - 150.0) < 0.2
 
 
-def test_planet_propagate_passes_orbix_through_exactly():
-    """Positions, phase and distance share orbix's public frame unchanged."""
-    p = _single_planet()
+def test_scene_ephemeris_passes_orbix_through_exactly():
+    """States and distances preserve orbix's public frame unchanged."""
+    p = _single_scene()
     times = jnp.array([0.0, 42.0, 200.0])
-    expected = p.orbit.propagate(
-        SOLVER, times, Ms_kg=_STAR.Ms_kg + p.Mp_Mearth * Mearth2kg
-    )
-    actual = p.propagate(SOLVER, times, star=_STAR)
-    for got, want in zip(actual, expected, strict=True):
-        np.testing.assert_array_equal(got, want)
+    expected = p.dynamics.solve(times)
+    actual = p.ephemeris(times)
+    for name in ("position_AU", "velocity_AU_per_d", "dist_pc"):
+        np.testing.assert_array_equal(getattr(actual, name), getattr(expected, name))
 
 
 @pytest.mark.parametrize("mass", [1.0, float("nan"), -1.0, float("inf"), 0.0])
-def test_planet_mass_and_legacy_observables(mass):
+def test_scene_mass_and_observables(mass):
     """Fails if mass sanitization changes existing positions or contrasts.
 
     Truth is the existing two-body expressions with Markley propagation.
@@ -285,24 +278,32 @@ def test_planet_mass_and_legacy_observables(mass):
     relative float64 basis/epoch roundoff (3e-13 arcsec absolute for position).
     The system no longer includes grid interpolation error.
     """
-    p = eqx.tree_at(lambda p: p.Mp_Mearth, _single_planet(), jnp.array([mass]))
+    p = _single_scene(mass=mass)
     times = jnp.array([0.0, 42.0, 200.0])
-    mp = p.Mp_Mearth * Mearth2kg
-    old_mass = _STAR.Ms_kg + jnp.where(jnp.isfinite(mp) & (mp > 0), mp, 0.0)
-    np.testing.assert_array_equal(p.central_mass_kg(star=_STAR), old_mass)
-    np.testing.assert_array_equal(p.planet_mass_kg(), [Mearth2kg if mass == 1 else 0])
-    r, phase, dist = p.orbit.propagate(solve_trig, times, Ms_kg=old_mass)
-    scale = rad2arcsec / (_STAR.dist_pc * pc2AU)
+    mp = p.planet_mass_Msun * Msun2kg
+    old_mass = (p.star_mass_Msun * Msun2kg) + jnp.where(
+        jnp.isfinite(mp) & (mp > 0), mp, 0.0
+    )
+    np.testing.assert_array_equal(
+        p.star_mass_Msun + p.planet_mass_Msun,
+        [1.989e30 / Msun2kg + (Mearth2kg / Msun2kg if mass == 1 else 0.0)],
+    )
+    np.testing.assert_array_equal(
+        p.planet_mass_Msun, [Mearth2kg / Msun2kg if mass == 1 else 0]
+    )
+    r, phase, dist = _reference_orbit(p).propagate(solve_trig, times, Ms_kg=old_mass)
+    scale = rad2arcsec / (p.dist_pc * pc2AU)
     old_position = jnp.stack([r[:, 0, :] * scale, r[:, 1, :] * scale])
-    old_contrast = p.physical_model.contrast_at_time(
+    old_contrast = p.planets[0].physical_model.contrast_at_time(
         phase_angle_rad=phase,
         dist_AU=dist,
         wavelength_nm=jnp.asarray(600.0),
-        Rp_Rearth=p.Rp_Rearth,
+        Rp_Rearth=p.planets[0].Rp_Rearth,
         time_jd=times,
-        star=_STAR,
+        star=p.star,
+        dist_pc=p.dist_pc,
     )
-    system = System(_STAR, (p,), SOLVER)
+    system = System(p.star, p.planets, p.dynamics)
     np.testing.assert_allclose(
         system.positions(times), old_position, rtol=3e-13, atol=3e-13
     )
@@ -318,34 +319,33 @@ def test_position_angle_cardinal_anchors(node_deg, expected):
     At the ascending node PA equals the node angle; 2e-14 deg absolute
     tolerance allows float64 trigonometric roundoff, not a sign convention.
     """
-    p = _circular_planet(jnp.pi / 3, W_rad=jnp.deg2rad(node_deg))
+    p = _circular_scene(jnp.pi / 3, W_rad=jnp.deg2rad(node_deg))
     times = jnp.zeros(1)
+    np.testing.assert_allclose(p.position_angles(times), expected, rtol=0, atol=2e-14)
     np.testing.assert_allclose(
-        p.position_angle_deg(SOLVER, times, star=_STAR), expected, rtol=0, atol=2e-14
-    )
-    np.testing.assert_allclose(
-        System(_STAR, (p,), SOLVER).position_angles(times), expected, rtol=0, atol=2e-14
+        System(p.star, p.planets, p.dynamics).position_angles(times),
+        expected,
+        rtol=0,
+        atol=2e-14,
     )
 
 
-@pytest.mark.parametrize(
-    "observable", ["reflex_position_arcsec", "radial_velocity_m_s"]
-)
+@pytest.mark.parametrize("observable", ["star_reflex", "star_radial_velocity"])
 def test_unknown_mass_zero_observables_and_orbit_gradients(observable):
     """Fails if unknown mass leaks NaNs into a stellar signal or its gradient.
 
     A zero-mass body exerts zero force: both values and all seven orbital
     derivatives must be exactly zero (no numerical tolerance needed).
     """
-    p = eqx.tree_at(lambda p: p.Mp_Mearth, _single_planet(), jnp.array([jnp.nan]))
+    p = _single_scene(mass=jnp.nan)
     times = jnp.array([0.0, 42.0])
 
     def signal(orbit):
-        varied = eqx.tree_at(lambda p: p.orbit, p, orbit)
-        return getattr(varied, observable)(SOLVER, times, star=_STAR)
+        varied = eqx.tree_at(lambda p: p.dynamics.orbits, p, orbit)
+        return getattr(varied, observable)(times)
 
-    np.testing.assert_array_equal(signal(p.orbit), 0.0)
-    gradient = jax.grad(lambda orbit: jnp.sum(signal(orbit)))(p.orbit)
+    np.testing.assert_array_equal(signal(p.dynamics.orbits), 0.0)
+    gradient = jax.grad(lambda orbit: jnp.sum(signal(orbit)))(p.dynamics.orbits)
     for leaf in jax.tree.leaves(gradient):
         assert jnp.all(jnp.isfinite(leaf))
         np.testing.assert_array_equal(leaf, 0.0)

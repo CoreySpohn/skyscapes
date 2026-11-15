@@ -37,13 +37,13 @@ from hwoutils.constants import (
 )
 from hwoutils.conversions import au_per_yr_to_m_per_s, mag_to_flux_jy
 from orbix.equations.orbit import state_vector_to_keplerian
-from orbix.kepler.shortcuts.grid import get_grid_solver
-from orbix.orbit import KeplerianOrbit
+from orbix.system import FrameOrbit, phase_angle_rad
 
 from ..disk import ExovistaDisk
 from ..habitable_zone import HZ_INNER_EEID, HZ_OUTER_EEID
 from ..physical_model import GridPhysicalModel, TimeSeriesPhysicalModel
 from ..scene import Planet, Star, StarSpots, System
+from ..scene.system import _known_planet_mass
 
 # Area of the quiet-disk limb-darkening mask that the ExoVista v2.5 and v2.6
 # writers multiply into every stellar spectrum, in units of the geometric disk:
@@ -239,15 +239,11 @@ def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
     flux_density_jy = jnp.asarray(np.asarray(spectra).T.astype(np.float32))
 
     diameter_arcsec = _angular_diameter_arcsec(obj_header)
-    Ms_kg = obj_header.get("MASS") * Msun2kg
-    dist_pc = obj_header.get("DIST")
     ra_deg = obj_header.get("RA", 0.0)
     dec_deg = obj_header.get("DEC", 0.0)
     luminosity_Lsun = obj_header.get("LSTAR", 1.0)
 
     return Star(
-        Ms_kg=Ms_kg,
-        dist_pc=dist_pc,
         ra_deg=ra_deg,
         dec_deg=dec_deg,
         diameter_arcsec=diameter_arcsec,
@@ -260,7 +256,7 @@ def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
         metadata={
             key.upper(): value
             for key, value in obj_header.items()
-            if key and key not in ("COMMENT", "HISTORY")
+            if key and key not in ("COMMENT", "HISTORY", "MASS", "DIST")
         },
     )
 
@@ -279,13 +275,12 @@ def _exovista_to_orbix(vector: jnp.ndarray) -> jnp.ndarray:
 def _load_single_planet(
     hdul: fits.HDUList,
     fits_ext: int,
-    star: Star,
+    star_mass_Msun: float,
     wavelengths_nm: jnp.ndarray,
-    trig_solver,
     *,
     planet_spectra: Literal["time", "phase"],
-) -> tuple[Planet, float]:
-    """Load one planet and return ``(Planet, t0_d)``.
+) -> tuple[Planet, dict, float]:
+    """Load one planet and return its appearance, elements and solar mass.
 
     ExoVista stores the planet ``(r, v)`` state vectors already in the
     on-sky ("bary-sky") frame -- the same frame the disk cube is rendered
@@ -298,9 +293,8 @@ def _load_single_planet(
     epochs, which preserves the stellar-activity history. With
     ``planet_spectra="phase"`` they are regridded onto the standard phase
     angle returned by orbix (0 = full phase), computed at load time with
-    the same ``trig_solver`` the runtime ``System`` uses; this stays
-    self-consistent with rendering because the grid is keyed by the same
-    phase angle ``Planet.propagate`` returns at render time.
+    Markley. This reconstructs each recorded star-relative two-body orbit;
+    the returned system places those elements in its sorted Jacobi chain.
     """
     obj_data = hdul[fits_ext].data
     obj_header = hdul[fits_ext].header
@@ -321,11 +315,9 @@ def _load_single_planet(
 
     r_sky_m = r_sky_AU * AU2m
     v_sky_m_s = jnp.array(au_per_yr_to_m_per_s(v_sky_au_yr))
-    planet_mass_kg = float(obj_header.get("M")) * Mearth2kg
-    if not (np.isfinite(planet_mass_kg) and planet_mass_kg > 0.0):
-        # Unknown mass: test-particle limit, matching Planet.central_mass_kg.
-        planet_mass_kg = 0.0
-    mu_SI = G_si * (star.Ms_kg + planet_mass_kg)
+    planet_mass_Msun = float(obj_header.get("M")) * Mearth2kg / Msun2kg
+    known_mass = _known_planet_mass(jnp.asarray(planet_mass_Msun))
+    mu_SI = G_si * Msun2kg * (star_mass_Msun + known_mass)
     _a_m, _e, i_rad, W_rad, w_rad, M_rad = state_vector_to_keplerian(
         r_sky_m, v_sky_m_s, mu_SI
     )
@@ -333,14 +325,14 @@ def _load_single_planet(
     a_AU = float(obj_header.get("A"))
     e_val = float(obj_header.get("E"))
 
-    orbit = KeplerianOrbit(
-        a_AU=jnp.array([a_AU]),
-        e=jnp.array([e_val]),
-        W_rad=jnp.array([float(W_rad)]),
-        i_rad=jnp.array([float(i_rad)]),
-        w_rad=jnp.array([float(w_rad)]),
-        M0_rad=jnp.array([float(M_rad)]),
-        t0_d=jnp.array([t0]),
+    elements = dict(
+        a_AU=a_AU,
+        e=e_val,
+        W_rad=float(W_rad),
+        i_rad=float(i_rad),
+        w_rad=float(w_rad),
+        M0_rad=float(M_rad),
+        epoch_d=t0,
     )
 
     if planet_spectra == "time":
@@ -349,20 +341,20 @@ def _load_single_planet(
             times_jd=times_jd,
             contrast_grid=contrast_data[None, ...],
         )
-        return Planet(
-            Rp_Rearth=jnp.array([float(obj_header["R"])]),
-            Mp_Mearth=jnp.array([float(obj_header["M"])]),
-            orbit=orbit,
-            physical_model=physical_model,
-        ), t0
+        return (
+            Planet(
+                Rp_Rearth=jnp.array([float(obj_header["R"])]),
+                physical_model=physical_model,
+            ),
+            elements,
+            planet_mass_Msun,
+        )
 
-    # beta(t_i) per FITS input time, using the same solver the runtime uses.
-    _r_AU, beta_rad, _dist_AU = orbit.propagate(
-        trig_solver, times_jd, Ms_kg=star.Ms_kg + planet_mass_kg
+    orbit = FrameOrbit.from_classical(
+        **elements, mu_AU3_per_d2=mu_SI * d2s**2 / AU2m**3
     )
-    # orbix already returns the standard phase angle, as does Planet.propagate.
-    phase_angle_rad = beta_rad
-    beta_deg = jnp.rad2deg(phase_angle_rad[0])  # (T,), already in [0, 180]
+    position, _ = orbit.at(times_jd)
+    beta_deg = jnp.rad2deg(phase_angle_rad(position))
 
     # Sort by beta. Duplicates are fine for interpolation (axisymmetric
     # atmosphere => same beta => same contrast).
@@ -405,11 +397,10 @@ def _load_single_planet(
     return (
         Planet(
             Rp_Rearth=jnp.array([float(obj_header.get("R"))]),
-            Mp_Mearth=jnp.array([float(obj_header.get("M"))]),
-            orbit=orbit,
             physical_model=physical_model,
         ),
-        t0,
+        elements,
+        planet_mass_Msun,
     )
 
 
@@ -571,25 +562,30 @@ def from_exovista(
         )
 
         star = _load_star(hdul, fits_ext=star_ext)
-        solver = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
-        planets = tuple(
+        star_mass_Msun = float(star_header["MASS"])
+        dist_pc = float(star_header["DIST"])
+        loaded = tuple(
             _load_single_planet(
                 hdul,
                 planet_extensions[i],
-                star,
+                star_mass_Msun,
                 wavelengths_nm,
-                solver,
                 planet_spectra=planet_spectra,
-            )[0]
+            )
             for i in planet_indices
         )
         disk = _load_disk(hdul, disk_ext) if load_disk else None
 
-    return System(
+    keys = ("a_AU", "e", "i_rad", "W_rad", "w_rad", "M0_rad", "epoch_d")
+    elements = {key: jnp.asarray([item[1][key] for item in loaded]) for key in keys}
+    return System.from_classical(
         star=star,
-        planets=planets,
+        planets=tuple(item[0] for item in loaded),
+        star_mass_Msun=star_mass_Msun,
+        planet_mass_Msun=jnp.asarray([item[2] for item in loaded]),
+        dist_pc=dist_pc,
+        **elements,
         disk=disk,
-        trig_solver=solver,
         midplane_inc_deg=midplane_inc_deg,
         midplane_pa_deg=midplane_pa_deg,
     )

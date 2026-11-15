@@ -7,7 +7,7 @@ from astropy.io import fits
 from hwoutils.constants import J2000_JD, G, Mearth2kg, Msun2kg, d2s, yr2s
 from orbix.equations.orbit import AB_matrices, mean_motion
 from orbix.equations.propagation import single_r_v
-from orbix.kepler import markley_solve_trig, solve_trig
+from orbix.kepler import solve_trig
 
 from skyscapes.io import from_exovista
 from skyscapes.io.exovista import _exovista_to_orbix
@@ -82,13 +82,11 @@ def test_exovista_sky_positions_round_trip(known_orbit_file):
         star_rows = hdul[5].data.astype(np.float64)
     times = J2000_JD + rows[:, 0] * (yr2s / d2s)
     relative = rows[:, 9:12] - star_rows[:, 9:12]
-    expected = np.stack([-relative[:, 0], relative[:, 1]]) / system.star.dist_pc
-    positions = system.planets[0].position_arcsec(
-        markley_solve_trig, times, star=system.star
-    )
+    expected = np.stack([-relative[:, 0], relative[:, 1]]) / system.dist_pc
+    positions = system.positions(times)
     # Use the exact Kepler solver to isolate float32 FITS storage error from
     # grid interpolation error. Allow five float32 epsilons at the orbit scale.
-    orbit_scale = float(system.planets[0].orbit.a_AU[0]) / system.star.dist_pc
+    orbit_scale = float(system.dynamics.orbits.a_AU[0]) / system.dist_pc
     tolerance = 5 * np.finfo(np.float32).eps * orbit_scale
     np.testing.assert_allclose(positions[:, 0], expected, rtol=0, atol=tolerance)
 
@@ -96,15 +94,15 @@ def test_exovista_sky_positions_round_trip(known_orbit_file):
 def test_exovista_recovers_known_elements(known_orbit_file):
     """Preserve header a/e and recover i, Omega, omega, M from both states."""
     path, expected = known_orbit_file
-    orbit = from_exovista(path, load_disk=False).planets[0].orbit
+    orbit = from_exovista(path, load_disk=False).dynamics.orbits.to_classical()
     actual = np.array(
         [
-            orbit.a_AU[0],
-            orbit.e[0],
-            orbit.i_rad[0],
-            orbit.W_rad[0],
-            orbit.w_rad[0],
-            orbit.M0_rad[0],
+            orbit["a_AU"][0],
+            orbit["e"][0],
+            orbit["i_rad"][0],
+            orbit["W_rad"][0],
+            orbit["w_rad"][0],
+            orbit["M0_rad"][0],
         ]
     )
     np.testing.assert_allclose(actual[:2], expected[:2], rtol=1e-7)
@@ -147,15 +145,17 @@ def test_exovista_recovers_known_elements_with_stellar_reflex(
         if version < 2.5:
             del hdul[4]  # Legacy files have no starspot extension.
 
-    orbit = from_exovista(path, load_disk=False, planet_spectra="time").planets[0].orbit
+    orbit = from_exovista(
+        path, load_disk=False, planet_spectra="time"
+    ).dynamics.orbits.to_classical()
     actual = np.array(
         [
-            orbit.a_AU[0],
-            orbit.e[0],
-            orbit.i_rad[0],
-            orbit.W_rad[0],
-            orbit.w_rad[0],
-            orbit.M0_rad[0],
+            orbit["a_AU"][0],
+            orbit["e"][0],
+            orbit["i_rad"][0],
+            orbit["W_rad"][0],
+            orbit["w_rad"][0],
+            orbit["M0_rad"][0],
         ]
     )
     np.testing.assert_allclose(actual[:2], expected[:2], rtol=1e-7)
@@ -172,9 +172,7 @@ def test_exovista_phase_matches_fits_observer_direction(known_orbit_file):
         rows = hdul[6].data.astype(np.float64)
     times = J2000_JD + rows[:, 0] * (yr2s / d2s)
     expected_cosine = -rows[:, 11] / np.linalg.norm(rows[:, 9:12], axis=1)
-    _, phase, _ = system.planets[0].propagate(
-        system.trig_solver, times, star=system.star
-    )
+    phase = system.ephemeris(times).phase_angle_rad(1)[None, :]
     np.testing.assert_allclose(np.cos(phase[0]), expected_cosine, atol=2e-6)
 
 

@@ -29,9 +29,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-from hwoutils.constants import Msun2kg
-from orbix.kepler.shortcuts.grid import get_grid_solver
-from orbix.orbit import KeplerianOrbit
+from hwoutils.constants import Mearth2kg, Msun2kg
 
 from skyscapes import System, viz
 from skyscapes.disk import GraterDisk
@@ -41,19 +39,9 @@ from skyscapes.scene import FlatStar, Planet
 jax.config.update("jax_enable_x64", True)
 hwostyle.use("light")
 
-star = FlatStar(Ms_kg=Msun2kg, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
+star = FlatStar(flux_phot_per_nm_m2=1e9)
 planets = Planet(
     Rp_Rearth=jnp.array([1.0, 3.0]),
-    Mp_Mearth=jnp.array([1.0, 10.0]),
-    orbit=KeplerianOrbit(
-        a_AU=jnp.array([1.0, 2.5]),
-        e=jnp.array([0.05, 0.2]),
-        W_rad=jnp.array([0.4, 0.6]),
-        i_rad=jnp.deg2rad(jnp.array([55.0, 62.0])),
-        w_rad=jnp.array([0.3, 1.2]),
-        M0_rad=jnp.array([0.0, 2.0]),
-        t0_d=jnp.array([0.0, 0.0]),
-    ),
     physical_model=LambertianPhysicalModel(Ag=jnp.array([0.3, 0.3])),
 )
 disk = GraterDisk(
@@ -71,13 +59,20 @@ disk = GraterDisk(
     nx=121,
     ny=121,
     pixel_scale_arcsec=0.0085,
-    dist_pc=10.0,
     n_slices_los=41,
 )
-system = System(
+system = System.from_classical(
     star=star,
     planets=(planets,),
-    trig_solver=get_grid_solver(level="scalar", E=False, trig=True, jit=True),
+    star_mass_Msun=1.0,
+    planet_mass_Msun=jnp.array([1.0, 10.0]) * Mearth2kg / Msun2kg,
+    dist_pc=10.0,
+    a_AU=jnp.array([1.0, 2.5]),
+    e=jnp.array([0.05, 0.2]),
+    W_rad=jnp.array([0.4, 0.6]),
+    i_rad=jnp.deg2rad(jnp.array([55.0, 62.0])),
+    w_rad=jnp.array([0.3, 1.2]),
+    M0_rad=jnp.array([0.0, 2.0]),
     disk=disk,
     midplane_inc_deg=60.0,
     midplane_pa_deg=30.0,
@@ -89,7 +84,7 @@ system = System(
 
 | Quantity | Convention |
 |---|---|
-| Sky frame | `(x, y, z)`, star-centered. `x` is the east offset (Delta alpha* = Delta RA cos Dec), `y` the north (Dec) offset, and `+z` points away from the observer. This (east, north, away) frame is right-handed, with dz/dt positive receding. `Planet.propagate` passes orbix's positions through unchanged; `Planet.position_arcsec` returns `(x, y)` in arcsec. The phase angle is the standard star-planet-observer angle, 0 at full phase (planet behind the star) and pi at new phase, as orbix returns it, so `cos(beta) = z / r` in this frame. |
+| Sky frame | `(x, y, z)`, star-centered. `x` is the east offset (Delta alpha* = Delta RA cos Dec), `y` the north (Dec) offset, and `+z` points away from the observer. This (east, north, away) frame is right-handed, with dz/dt positive receding. `System.ephemeris` holds barycentric states; `System.positions` returns star-relative `(x, y)` in arcsec. The phase angle is the standard star-planet-observer angle, 0 at full phase (planet behind the star) and pi at new phase, as orbix returns it, so `cos(beta) = z / r` in this frame. |
 | Sky images | All disk arrays use the FITS display convention described below; ExoVista cubes are used as written. |
 | Disk orientation | Set once, on the system, by `System.midplane_inc_deg` and `System.midplane_pa_deg`. Parametric disks and outlines use that orientation; loaded cubes retain their rendered geometry. The planets' orbits carry their own elements and need not be coplanar with it. |
 | Inclination | The angle between the midplane normal and the line of sight, in `[0, 180]`, 0 for a face-on disk. The projected axis ratio is `abs(cos(i))`, and `i` at `pa` is the same midplane as `180 - i` at `pa + 180`. The parametric disks render the same nonnegative map for both; above 90 degrees the near, forward-scattering half lies on the opposite side of the line of nodes from its position at `180 - i` and the same `pa`. |
@@ -273,7 +268,10 @@ from IPython.display import HTML
 
 inclinations = jnp.linspace(10.0, 80.0, 12)
 frames = [
-    disk.surface_brightness(jnp.array(550.0), jnp.array(0.0), incl, jnp.array(30.0))
+    disk.surface_brightness(
+        jnp.array(550.0), jnp.array(0.0), incl, jnp.array(30.0),
+        dist_pc=system.dist_pc,
+    )
     for incl in inclinations
 ]
 

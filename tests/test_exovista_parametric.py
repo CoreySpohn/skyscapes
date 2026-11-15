@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -37,7 +39,6 @@ def make_disk(**overrides) -> ExovistaParametricDisk:
         nx=51,
         ny=51,
         pixel_scale_arcsec=0.1,
-        dist_pc=10.0,
         n_slices_los=41,
     )
     defaults.update(overrides)
@@ -50,6 +51,7 @@ def _render(d, wavelength_nm=550.0, time_jd=0.0, incl_deg=60.0, pa_deg=0.0):
         jnp.array(time_jd),
         jnp.array(incl_deg),
         jnp.array(pa_deg),
+        dist_pc=10.0,
     )
 
 
@@ -94,7 +96,7 @@ def test_ring_peak_at_r0():
     ny, nx = sb.shape
     yy, xx = jnp.mgrid[:ny, :nx]
     r_pix = jnp.sqrt((xx - (nx - 1) / 2) ** 2 + (yy - (ny - 1) / 2) ** 2)
-    px_AU = d.pixel_scale_arcsec * d.dist_pc
+    px_AU = d.pixel_scale_arcsec * 10.0
     r_AU = r_pix * px_AU
     dr_AU = dror * r0
     near_ring = (r_AU > r0 - 3 * dr_AU) & (r_AU < r0 + 3 * dr_AU)
@@ -121,7 +123,7 @@ def test_outer_halo_falls_as_r_minus_one_point_five():
     ny, nx = sb.shape
     yy, xx = jnp.mgrid[:ny, :nx]
     r_pix = jnp.sqrt((xx - (nx - 1) / 2) ** 2 + (yy - (ny - 1) / 2) ** 2)
-    px_AU = d.pixel_scale_arcsec * d.dist_pc
+    px_AU = d.pixel_scale_arcsec * 10.0
     r_AU = r_pix * px_AU
     # Sample two radii well outside the ring; ratio should follow r^-1.5
     # times the 1/r^2 illumination, i.e. surface brightness ~ r^-3.5 in
@@ -225,6 +227,7 @@ def test_jit_round_trip():
             jnp.array(0.0),
             jnp.array(60.0),
             jnp.array(0.0),
+            dist_pc=10.0,
         )
 
     sb_eager = _render(d)
@@ -393,8 +396,8 @@ def test_wavelength_vmap_returns_cube():
         Ag_grid=jnp.array([0.4, 0.5, 0.6]),
     )
     wls = jnp.array([550.0, 650.0, 850.0])
-    cube = jax.vmap(d.surface_brightness, in_axes=(0, None, None, None))(
-        wls, jnp.array(0.0), jnp.array(60.0), jnp.array(0.0)
-    )
+    cube = jax.vmap(
+        partial(d.surface_brightness, dist_pc=10.0), in_axes=(0, None, None, None)
+    )(wls, jnp.array(0.0), jnp.array(60.0), jnp.array(0.0))
     assert cube.shape == (3, d.ny, d.nx)
     assert bool(jnp.all(jnp.isfinite(cube)))

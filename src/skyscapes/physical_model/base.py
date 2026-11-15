@@ -12,7 +12,7 @@ physical epochs with orbital phase.
 
 The planet radius is supplied as a method argument rather than a class
 field -- ``Rp_Rearth`` is a property of the planet, not the physical
-model. ``Planet.contrast`` forwards ``self.Rp_Rearth`` to the physical
+model. ``System`` forwards ``planet.Rp_Rearth`` to the physical
 model at call time.
 """
 
@@ -39,6 +39,7 @@ class AbstractPhysicalModel(eqx.Module):
         Rp_Rearth: Array,
         time_jd: Array,
         star,
+        dist_pc: Array,
     ) -> Array:
         """Planet photon flux density at the observer [ph/s/m^2/nm].
 
@@ -51,7 +52,8 @@ class AbstractPhysicalModel(eqx.Module):
             dist_AU: Star-planet distance [AU], shape ``(K, T)``.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
             time_jd: Observation Julian Dates, shape ``(T,)``.
-            star: Host ``AbstractStar``, providing observer distance and flux.
+            dist_pc: Observer distance supplied by the system [pc].
+            star: Host ``AbstractStar``, providing observer flux.
 
         Returns:
             Photon flux density, shape ``(K, T)``.
@@ -63,8 +65,11 @@ class AbstractPhysicalModel(eqx.Module):
             Rp_Rearth=Rp_Rearth,
             time_jd=time_jd,
             star=star,
+            dist_pc=dist_pc,
         )
-        return contrast * star.spec_flux_density(wavelength_nm, time_jd)
+        return contrast * star.spec_flux_density(
+            wavelength_nm, time_jd, dist_pc=dist_pc
+        )
 
     @abstractmethod
     def contrast(
@@ -98,6 +103,7 @@ class AbstractPhysicalModel(eqx.Module):
         *,
         time_jd: Array,
         star=None,
+        dist_pc: Array | None = None,
     ) -> Array:
         """Return contrast with the observation epochs and the host star available.
 
@@ -113,7 +119,8 @@ class AbstractPhysicalModel(eqx.Module):
             wavelength_nm: Scalar wavelength [nm], as accepted by ``contrast``.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
             time_jd: Observation Julian Dates, shape ``(T,)``.
-            star: The host ``AbstractStar``; ``Planet`` always supplies it.
+            dist_pc: Observer distance supplied by the system [pc].
+            star: The host ``AbstractStar``; ``System`` always supplies it.
 
         Returns:
             Planet-to-star flux ratio, shape ``(K, T)``.

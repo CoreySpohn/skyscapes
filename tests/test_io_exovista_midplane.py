@@ -37,12 +37,14 @@ def midplane_measurements(fits_fixture):
             system.midplane_pa_deg,
         )
     )
-    reference = np.asarray(loaded.surface_brightness(*args), dtype=float)
+    reference = np.asarray(
+        loaded.surface_brightness(*args, dist_pc=system.dist_pc), dtype=float
+    )
     ny, nx = reference.shape
     # The suite's two-power-law Grater ring, sized to fit this field so
     # clipping does not set its moments. Only orientation is compared;
     # this is not a fit to ExoVista's density or scattering function.
-    radius_AU = 0.25 * min(nx, ny) * loaded.pixel_scale_arcsec * system.star.dist_pc
+    radius_AU = 0.25 * min(nx, ny) * loaded.pixel_scale_arcsec * system.dist_pc
     parametric = GraterDisk(
         sma_AU=jnp.asarray(radius_AU),
         alpha_in=jnp.array(5.0),
@@ -58,10 +60,11 @@ def midplane_measurements(fits_fixture):
         nx=nx,
         ny=ny,
         pixel_scale_arcsec=loaded.pixel_scale_arcsec,
-        dist_pc=system.star.dist_pc,
         n_slices_los=31,
     )
-    rendered = np.asarray(parametric.surface_brightness(*args), dtype=float)
+    rendered = np.asarray(
+        parametric.surface_brightness(*args, dist_pc=system.dist_pc), dtype=float
+    )
     for image in (reference, rendered):
         assert np.all(np.isfinite(image)) and np.all(image >= 0)
         assert image.sum() > 0

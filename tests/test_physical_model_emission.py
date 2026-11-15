@@ -408,13 +408,14 @@ def test_flux_density_matches_si_planck_at_the_observer(engines):
     np.testing.assert_allclose(flux, expected, rtol=1e-4)
     assert isinstance(model, AbstractPhysicalModel)
     times = jnp.array([0.0, 1.0])
-    star = FlatStar(const.Msun2kg, 10.0, 3.0)
+    star = FlatStar(3.0)
     args = dict(
         phase_angle_rad=jnp.zeros((1, 2)),
         dist_AU=jnp.ones((1, 2)),
         Rp_Rearth=jnp.ones(1),
         time_jd=times,
         star=star,
+        dist_pc=10.0,
     )
     photons = jax.vmap(lambda w: model.spec_flux_density(w, **args))(
         jnp.asarray(wavelength_m * 1e9)

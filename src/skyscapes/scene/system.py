@@ -1,19 +1,14 @@
-"""scene.System -- the top-level PyTree container.
-
-Holds a star, a heterogeneous tuple of planets, an optional disk, and the
-legacy Kepler-solver callable (static so JIT does not re-trace). The tuple makes
-the system variadic: a 1-planet system and an 8-planet system have
-compatible shapes as long as per-planet arrays broadcast correctly.
-"""
+"""Photometric scenes with one orbix system owning all dynamical state."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from numbers import Integral
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from hwoutils.constants import Msun2kg
+import numpy as np
+from hwoutils.epoch import Epoch
 from jaxtyping import Array
 from orbix.kepler import Markley
 from orbix.system import Body, Ephemeris, SkyFrame
@@ -24,6 +19,8 @@ from ..disk import AbstractDisk
 from ..spectral import Bandpass, _model_max_knots, bin_mean
 from .planet import Planet
 from .star import AbstractStar
+
+_DEFAULT_EPOCH = Epoch()
 
 
 class _SceneEphemeris(Ephemeris):
@@ -36,13 +33,21 @@ class _SceneEphemeris(Ephemeris):
     scene_planet_indices: Array
 
 
+def _known_planet_mass(mass_Msun):
+    """Use zero mass for a nonfinite or nonpositive catalogue value."""
+    mass = jnp.asarray(mass_Msun)
+    return jnp.where(jnp.isfinite(mass) & (mass > 0), mass, 0.0)
+
+
 class System(eqx.Module):
     """Astrophysical scene: star + tuple of planets + optional disk.
 
     Attributes:
         star: Host star (``AbstractStar``).
         planets: Variable-length tuple of ``Planet``.
-        trig_solver: Required legacy static solver field, unused by System methods.
+        dynamics: Orbix Jacobi chain, declared inner to outer.
+        body_index: Static permutation mapping flattened scene planet indices to
+            zero-based chain planet indices. Defaults to the identity.
         disk: Optional extended-source disk (``AbstractDisk | None``).
         midplane_inc_deg: Disk midplane inclination [deg] in [0, 180],
             with 0 face-on (the default). Together with ``midplane_pa_deg``,
@@ -58,56 +63,151 @@ class System(eqx.Module):
 
     star: AbstractStar
     planets: tuple[Planet, ...]
-    trig_solver: Callable = eqx.field(static=True)
+    dynamics: DynamicsSystem
     disk: AbstractDisk | None = None
     midplane_inc_deg: float = 0.0
     midplane_pa_deg: float = 0.0
+    body_index: tuple[int, ...] = eqx.field(static=True, default=())
 
     @property
     def n_planets(self) -> int:
         """Total number of planets across all composed ``Planet`` modules."""
         return sum(p.n_planets for p in self.planets)
 
-    def _chain_order(self) -> Array:
-        """Stable inner-to-outer permutation of the flattened scene planets."""
-        sizes = (
-            jnp.concatenate([p.orbit.a_AU for p in self.planets])
-            if self.planets
-            else jnp.empty(0)
-        )
-        return jnp.argsort(sizes, stable=True)
+    def __init__(
+        self,
+        star,
+        planets,
+        dynamics,
+        disk=None,
+        midplane_inc_deg=0.0,
+        midplane_pa_deg=0.0,
+        *,
+        body_index=None,
+    ):
+        """Compose photometry and a fixed Jacobi hierarchy.
 
-    def dynamics(self) -> DynamicsSystem:
-        """Build a Jacobi chain from the current scene leaves, without host conversion.
-
-        Each orbit's ``t0_d`` is the epoch at which its mean anomaly is
-        ``M0_rad``: the existing two-body convention is
-        ``M(t) = M0_rad + n * (time_jd - t0_d)``. Map ``t0_d`` directly
-        to ``epoch_d``, retain ``M0_rad``, and pass Julian dates unchanged
-        as ``time_d``; SkyFrame has a zero date origin. Jacobi rates use
-        the enclosed mass, including the current planet. Masses are in
-        solar masses; nonfinite or nonpositive planet masses become zero.
-        Bodies are stably sorted by semi-major axis, inner to outer.
+        ``body_index[j]`` is the zero-based chain planet for flattened scene
+        planet j. It is structural metadata, never inferred during a solve.
         """
-        order = self._chain_order()
+        self.star = star
+        self.planets = tuple(planets)
+        self.dynamics = dynamics
+        self.disk = disk
+        self.midplane_inc_deg = midplane_inc_deg
+        self.midplane_pa_deg = midplane_pa_deg
+        self.body_index = (
+            tuple(range(self.n_planets)) if body_index is None else tuple(body_index)
+        )
+
+    def __check_init__(self):
+        """Validate body counts and the static scene-to-chain permutation."""
+        count = self.n_planets
+        if self.dynamics.planets.mass_Msun.shape != (count,):
+            raise ValueError("Photometric planet count must match dynamics bodies")
+        if (
+            len(self.body_index) != count
+            or any(
+                not isinstance(i, Integral) or isinstance(i, bool)
+                for i in self.body_index
+            )
+            or sorted(self.body_index) != list(range(count))
+        ):
+            raise ValueError("body_index must be an integer permutation of the planets")
+
+    @classmethod
+    def from_classical(
+        cls,
+        star,
+        planets,
+        *,
+        star_mass_Msun,
+        planet_mass_Msun,
+        dist_pc,
+        a_AU,
+        e,
+        i_rad,
+        W_rad,
+        w_rad,
+        M0_rad,
+        epoch_d=0.0,
+        epoch=_DEFAULT_EPOCH,
+        order=None,
+        disk=None,
+        midplane_inc_deg=0.0,
+        midplane_pa_deg=0.0,
+    ):
+        """Build a Jacobi chain from elements and masses in scene planet order.
+
+        ``order`` lists scene planet indices in inner-to-outer chain order.
+        With None, a stable host sort of concrete semi-major axes supplies it;
+        traced axes require an explicit order. Unknown (nonfinite or
+        nonpositive) planet masses become zero here. Scalars broadcast to the
+        flattened planet count. ``epoch_d`` is the anomaly epoch in days;
+        ``epoch`` is SkyFrame reference metadata. Observation ``time_jd``
+        values are passed unchanged to orbix's ``time_d`` in this API.
+        """
+        planets = tuple(planets)
+        count = sum(p.n_planets for p in planets)
+        if order is None:
+            if any(isinstance(leaf, jax.core.Tracer) for leaf in jax.tree.leaves(a_AU)):
+                raise ValueError(
+                    "Traced a_AU requires an explicit inner-to-outer order"
+                )
+            sizes = np.broadcast_to(np.asarray(a_AU), (count,))
+            order = tuple(int(i) for i in np.argsort(sizes, kind="stable"))
+        else:
+            order = tuple(order)
+        if (
+            len(order) != count
+            or any(not isinstance(i, Integral) or isinstance(i, bool) for i in order)
+            or sorted(order) != list(range(count))
+        ):
+            raise ValueError("order must be an integer permutation of the planets")
+        indices = jnp.asarray(order, dtype=int)
         elements = {
-            name: jnp.concatenate([getattr(p.orbit, name) for p in self.planets])[order]
-            if self.planets
-            else jnp.empty(0)
-            for name in ("a_AU", "e", "i_rad", "W_rad", "w_rad", "M0_rad", "t0_d")
+            name: jnp.broadcast_to(jnp.asarray(value), (count,))[indices]
+            for name, value in dict(
+                a_AU=a_AU,
+                e=e,
+                i_rad=i_rad,
+                W_rad=W_rad,
+                w_rad=w_rad,
+                M0_rad=M0_rad,
+                epoch_d=epoch_d,
+            ).items()
         }
-        masses = (
-            jnp.concatenate([p.planet_mass_kg() / Msun2kg for p in self.planets])[order]
-            if self.planets
-            else jnp.empty(0)
+        masses = jnp.broadcast_to(_known_planet_mass(planet_mass_Msun), (count,))[
+            indices
+        ]
+        dynamics = DynamicsSystem.from_classical(
+            Body(star_mass_Msun), Body(masses), SkyFrame(dist_pc, epoch), **elements
         )
-        return DynamicsSystem.from_classical(
-            Body(self.star.Ms_kg / Msun2kg),
-            Body(masses),
-            SkyFrame(self.star.dist_pc),
-            epoch_d=elements.pop("t0_d"),
-            **elements,
+        inverse = tuple(order.index(i) for i in range(count))
+        return cls(
+            star,
+            planets,
+            dynamics,
+            disk,
+            midplane_inc_deg,
+            midplane_pa_deg,
+            body_index=inverse,
         )
+
+    @property
+    def dist_pc(self):
+        """Observer distance [pc], owned by the dynamics sky frame."""
+        return self.dynamics.frame.dist_pc
+
+    @property
+    def star_mass_Msun(self):
+        """Stellar mass [solar masses], owned by the dynamics star."""
+        return self.dynamics.star.mass_Msun
+
+    @property
+    def planet_mass_Msun(self):
+        """Planet masses [solar masses] in flattened scene order."""
+        return self.dynamics.planets.mass_Msun[jnp.asarray(self.body_index, dtype=int)]
 
     def ephemeris(self, time_jd: Array, *, solver=None) -> _SceneEphemeris:
         """Solve once with Markley by default and retain scene-order body indices.
@@ -116,17 +216,17 @@ class System(eqx.Module):
         in chain order. Its ``scene_planet_indices`` array addresses the
         planets in scene order. Pass this object as ``ephemeris=`` to any
         geometry consumer to reuse the solve; dates must match that solve.
-        ``solver`` accepts an orbix.kepler strategy, independent of the
-        retained legacy ``trig_solver`` field.
+        ``solver`` accepts an orbix.kepler strategy. Stored orbit rates follow
+        orbix semantics: editing masses changes barycentric weights, not rates.
         """
-        solved = self.dynamics().solve(
+        solved = self.dynamics.solve(
             time_jd, solver=Markley() if solver is None else solver
         )
         return _SceneEphemeris(
             solved.position_AU,
             solved.velocity_AU_per_d,
-            solved.dist_pc,
-            jnp.argsort(self._chain_order(), stable=True) + 1,
+            self.dynamics.frame.dist_pc,
+            jnp.asarray(self.body_index, dtype=int) + 1,
         )
 
     def positions(self, time_jd: Array, *, ephemeris=None) -> Array:
@@ -173,6 +273,7 @@ class System(eqx.Module):
                 Rp_Rearth=planet.Rp_Rearth,
                 time_jd=time_jd,
                 star=self.star,
+                dist_pc=self.dynamics.frame.dist_pc,
             )
             model = planet.physical_model
             values.append(
@@ -237,7 +338,11 @@ class System(eqx.Module):
         )
         knots = self.star.quadrature_knots_nm
         denominator = bin_mean(
-            lambda w: jax.vmap(lambda t: self.star.spec_flux_density(w, t))(time_jd),
+            lambda w: jax.vmap(
+                lambda t: self.star.spec_flux_density(
+                    w, t, dist_pc=self.dynamics.frame.dist_pc
+                )
+            )(time_jd),
             centers_nm,
             widths_nm,
             n_nodes=n_nodes,
@@ -286,7 +391,11 @@ class System(eqx.Module):
             **quadrature,
         )[0]
         denominator = bin_mean(
-            lambda w: jax.vmap(lambda t: self.star.spec_flux_density(w, t))(time_jd),
+            lambda w: jax.vmap(
+                lambda t: self.star.spec_flux_density(
+                    w, t, dist_pc=self.dynamics.frame.dist_pc
+                )
+            )(time_jd),
             centers,
             widths,
             **quadrature,
@@ -354,6 +463,8 @@ class System(eqx.Module):
                 f"PA={self.midplane_pa_deg:.2f} deg)"
             ),
             indent("star: " + repr(self.star)),
+            indent("dynamics: " + repr(self.dynamics)),
+            f"  body_index: {self.body_index}",
         ]
         for i, p in enumerate(self.planets):
             lines.append(indent(f"planet[{i}]:"))

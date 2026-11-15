@@ -24,11 +24,10 @@ from hwoutils.constants import (
     yr2s,
 )
 from hwoutils.constants import G as G_AU3_PER_KG_D2
-from orbix.kepler import markley_solve_trig
 from scipy.integrate import solve_ivp
 
 from skyscapes.io import from_exovista
-from skyscapes.scene import Planet
+from skyscapes.scene import Planet, System
 
 # The same value of G as the library, in SI units.
 G_SI = G_AU3_PER_KG_D2 * AU2m**3 / d2s**2
@@ -163,9 +162,7 @@ def test_massive_planet_positions_follow_the_two_body_integration(jupiter_system
     """Sky positions at 41 epochs over ten years match the integrated orbit."""
     system, expected = jupiter_system
     times = J2000_JD + EPOCH_YEARS * (yr2s / d2s)
-    positions = system.planets[0].position_arcsec(
-        markley_solve_trig, times, star=system.star
-    )
+    positions = system.positions(times)
     error = np.abs(np.asarray(positions[:, 0, :]) - expected)
     # float32 FITS storage allows ~1e-6 arcsec; the omitted planet mass in the
     # runtime parameter gave 1.3e-3 arcsec by year ten.
@@ -175,15 +172,22 @@ def test_massive_planet_positions_follow_the_two_body_integration(jupiter_system
 def test_unknown_planet_mass_falls_back_to_the_stellar_mass(jupiter_system):
     """NaN, zero or negative masses add nothing; known masses add G M_planet."""
     system, _ = jupiter_system
-    base = system.planets[0]
-    masses = jnp.array([JUPITER_MEARTH, jnp.nan, 0.0, -3.0])
-    planet = Planet(
-        Rp_Rearth=jnp.ones(4),
-        Mp_Mearth=masses,
-        orbit=base.orbit,
-        physical_model=base.physical_model,
+    masses = jnp.array([JUPITER_MEARTH, jnp.nan, 0.0, -3.0]) * Mearth2kg / Msun2kg
+    scene = System.from_classical(
+        star=system.star,
+        planets=(Planet(jnp.ones(4), system.planets[0].physical_model),),
+        star_mass_Msun=system.star_mass_Msun,
+        planet_mass_Msun=masses,
+        dist_pc=system.dist_pc,
+        a_AU=jnp.array([1.0, 2.0, 3.0, 4.0]),
+        e=jnp.zeros(4),
+        i_rad=jnp.zeros(4),
+        W_rad=jnp.zeros(4),
+        w_rad=jnp.zeros(4),
+        M0_rad=jnp.zeros(4),
     )
-    total = jax.jit(lambda p: p.central_mass_kg(star=system.star))(planet)
-    ms = float(system.star.Ms_kg)
-    np.testing.assert_allclose(total[0], ms + JUPITER_MEARTH * Mearth2kg, rtol=1e-14)
-    np.testing.assert_allclose(total[1:], ms, rtol=1e-14)
+    known = jax.jit(lambda s: s.dynamics.planets.mass_Msun)(scene)
+    np.testing.assert_allclose(
+        known[0], JUPITER_MEARTH * Mearth2kg / Msun2kg, rtol=1e-14
+    )
+    np.testing.assert_array_equal(known[1:], 0.0)

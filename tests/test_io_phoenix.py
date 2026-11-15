@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 from astropy import units as u
 from astropy.io import fits
-from hwoutils.constants import Msun2kg, Rsun2m, h, k_B, nm2m, pc2m, sigma_SB
+from hwoutils.constants import Rsun2m, h, k_B, nm2m, pc2m, sigma_SB
 from hwoutils.constants import c as c_si
 
 from skyscapes.datasets import fetch_castelli_kurucz, fetch_phoenix
@@ -121,7 +121,6 @@ def test_star_photon_flux_energy_matches_dilution():
     star = from_phoenix(
         teff_K,
         5.0,
-        Ms_kg=1.0e30,
         dist_pc=dist_pc,
         radius_m=radius_m,
         wavelength_range_nm=None,
@@ -208,7 +207,6 @@ def test_star_jit_matches_eager():
     star = from_phoenix(
         3550.0,
         5.0,
-        Ms_kg=1.0e30,
         dist_pc=5.0,
         radius_m=0.4 * Rsun2m,
         wavelength_range_nm=(3000.0, 6000.0),
@@ -281,7 +279,6 @@ def test_castelli_kurucz_synthetic_units_and_missing_gravity(
     star = from_castelli_kurucz(
         teff_K,
         logg,
-        Ms_kg=Msun2kg,
         dist_pc=10,
         radius_m=Rsun2m,
         wavelength_range_nm=None,
@@ -301,7 +298,7 @@ def test_castelli_kurucz_synthetic_units_and_missing_gravity(
     with pytest.raises(ValueError, match="metallicity"):
         castelli_kurucz_surface_flux(12000, 4.0, mh=-0.5, fetch=paths.__getitem__)
     with pytest.raises(ValueError, match="from_castelli_kurucz"):
-        from_phoenix(12500, 4.0, Ms_kg=Msun2kg, dist_pc=10, radius_m=Rsun2m)
+        from_phoenix(12500, 4.0, dist_pc=10, radius_m=Rsun2m)
 
 
 @pytest.mark.slow(
@@ -323,7 +320,6 @@ def test_castelli_kurucz_phoenix_overlap_bin_flux():
             f"data-absent: atmosphere grids not cached and no network ({error})"
         )
     kwargs = dict(
-        Ms_kg=Msun2kg,
         dist_pc=10.0,
         radius_m=Rsun2m,
         wavelength_range_nm=(900.0, 5100.0),

@@ -17,9 +17,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
-from hwoutils.constants import G, Msun2kg
-from orbix.kepler import markley_solve_trig
-from orbix.kepler.shortcuts.grid import get_grid_solver
+from hwoutils.constants import G, Mearth2kg, Msun2kg
 from orbix.orbit import KeplerianOrbit
 
 import skyscapes.viz as viz
@@ -30,7 +28,6 @@ from skyscapes.scene import FlatStar, Planet
 
 matplotlib.use("Agg")
 
-SOLVER = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
 DIST_PC = 10.0
 
 
@@ -58,37 +55,45 @@ def make_disk(g=0.4, nx=81, rmin=1.5, rmax=5.0):
         nx=nx,
         ny=nx,
         pixel_scale_arcsec=1.3 * rmax / DIST_PC / (nx / 2),
-        dist_pc=DIST_PC,
         n_slices_los=21,
     )
 
 
 def make_planets():
     """Two inclined, eccentric planets (not coplanar with any disk)."""
-    orbit = KeplerianOrbit(
-        a_AU=jnp.array([1.0, 2.5]),
-        e=jnp.array([0.05, 0.2]),
-        W_rad=jnp.array([0.4, 0.6]),
-        i_rad=jnp.deg2rad(jnp.array([55.0, 62.0])),
-        w_rad=jnp.array([0.3, 1.2]),
-        M0_rad=jnp.array([0.0, 2.0]),
-        t0_d=jnp.array([0.0, 0.0]),
-    )
     return Planet(
         Rp_Rearth=jnp.array([1.0, 3.0]),
-        Mp_Mearth=jnp.array([1.0, 10.0]),
-        orbit=orbit,
         physical_model=LambertianPhysicalModel(Ag=jnp.array([0.3, 0.3])),
     )
 
 
 def make_system(incl=60.0, pa=30.0, disk=None, planets=True):
     """A star, two planets and a disk at the given midplane orientation."""
-    star = FlatStar(Ms_kg=Msun2kg, dist_pc=DIST_PC, flux_phot_per_nm_m2=1e9)
-    return System(
+    star = FlatStar(flux_phot_per_nm_m2=1e9)
+    elements = (
+        dict(
+            a_AU=jnp.array([1.0, 2.5]),
+            e=jnp.array([0.05, 0.2]),
+            W_rad=jnp.array([0.4, 0.6]),
+            i_rad=jnp.deg2rad(jnp.array([55.0, 62.0])),
+            w_rad=jnp.array([0.3, 1.2]),
+            M0_rad=jnp.array([0.0, 2.0]),
+        )
+        if planets
+        else {
+            key: jnp.empty(0)
+            for key in ("a_AU", "e", "W_rad", "i_rad", "w_rad", "M0_rad")
+        }
+    )
+    return System.from_classical(
         star=star,
         planets=(make_planets(),) if planets else (),
-        trig_solver=SOLVER,
+        star_mass_Msun=1.0,
+        planet_mass_Msun=jnp.array([1.0, 10.0]) * Mearth2kg / Msun2kg
+        if planets
+        else jnp.empty(0),
+        dist_pc=DIST_PC,
+        **elements,
         disk=make_disk() if disk is None else disk,
         midplane_inc_deg=incl,
         midplane_pa_deg=pa,
@@ -309,7 +314,11 @@ def test_ring_orientation_matches_the_rendered_disk(incl, pa):
     """The outline's major axis matches the kernel's rendered image moments."""
     system = make_system(incl, pa)
     image = system.disk.surface_brightness(
-        jnp.array(550.0), jnp.array(0.0), jnp.array(incl), jnp.array(pa)
+        jnp.array(550.0),
+        jnp.array(0.0),
+        jnp.array(incl),
+        jnp.array(pa),
+        dist_pc=DIST_PC,
     )
     _, image_angle = image_axes(image)
     result = viz.plot_system(system, 0.0)
@@ -350,7 +359,11 @@ def test_near_side_is_where_the_kernel_scatters_forward(pa):
     system = make_system(60.0, pa, disk=make_disk(g=0.6))
     image = np.asarray(
         system.disk.surface_brightness(
-            jnp.array(550.0), jnp.array(0.0), jnp.array(60.0), jnp.array(pa)
+            jnp.array(550.0),
+            jnp.array(0.0),
+            jnp.array(60.0),
+            jnp.array(pa),
+            dist_pc=DIST_PC,
         )
     )
     ny, nx = image.shape
@@ -386,14 +399,18 @@ def test_system_views_use_east_north_away(view):
     )
     planet = Planet(
         Rp_Rearth=jnp.array([1.0]),
-        Mp_Mearth=jnp.array([1.0]),
-        orbit=orbit,
         physical_model=LambertianPhysicalModel(Ag=jnp.array([0.3])),
     )
-    system = System(
-        star=FlatStar(Ms_kg=Msun2kg, dist_pc=DIST_PC, flux_phot_per_nm_m2=1e9),
+    system = System.from_classical(
+        star=FlatStar(flux_phot_per_nm_m2=1e9),
         planets=(planet,),
-        trig_solver=SOLVER,
+        star_mass_Msun=1.0,
+        planet_mass_Msun=jnp.array([1.0]) * Mearth2kg / Msun2kg,
+        dist_pc=DIST_PC,
+        **{
+            key: getattr(orbit, key)
+            for key in ("a_AU", "e", "i_rad", "W_rad", "w_rad", "M0_rad")
+        },
         midplane_pa_deg=90.0,
     )
     track_days = 30.0
@@ -544,7 +561,11 @@ def test_disk_image_update_moves_image_and_outline_only():
     system = make_system(60.0, 30.0)
     result = viz.plot_disk_image(system, wavelength_nm=550.0, grain_radius_AU=3.0)
     frame = system.disk.surface_brightness(
-        jnp.array(550.0), jnp.array(0.0), jnp.array(30.0), jnp.array(30.0)
+        jnp.array(550.0),
+        jnp.array(0.0),
+        jnp.array(30.0),
+        jnp.array(30.0),
+        dist_pc=DIST_PC,
     )
     original = result.artists["image"].get_array().copy()
     before = _all_states(result)
@@ -615,7 +636,11 @@ def _kernel_centroid(system, incl, pa):
     """Flux centroid (east, north offsets) of the kernel's rendered disk."""
     image = np.asarray(
         system.disk.surface_brightness(
-            jnp.array(550.0), jnp.array(0.0), jnp.array(incl), jnp.array(pa)
+            jnp.array(550.0),
+            jnp.array(0.0),
+            jnp.array(incl),
+            jnp.array(pa),
+            dist_pc=DIST_PC,
         )
     )
     ny, nx = image.shape
@@ -751,7 +776,7 @@ def test_disk_image_draws_the_same_midplane_above_90_degrees():
     system = make_system(120.0, 30.0, disk=make_disk(g=0.6))
     above = viz.plot_disk_image(system, wavelength_nm=550.0)
     below = viz.plot_disk_image(
-        system.disk, wavelength_nm=550.0, incl_deg=60.0, pa_deg=210.0
+        system.disk, wavelength_nm=550.0, incl_deg=60.0, pa_deg=210.0, dist_pc=DIST_PC
     )
     a = np.asarray(above.artists["image"].get_array())
     b = np.asarray(below.artists["image"].get_array())
@@ -1339,21 +1364,20 @@ def test_side_view_superior_conjunction_is_away_from_observer():
     """A full-phase planet at z > 0 is opposite the observer's negative-z arrow."""
     planet = Planet(
         Rp_Rearth=jnp.array([1.0]),
-        Mp_Mearth=jnp.array([1.0]),
-        orbit=KeplerianOrbit(
-            a_AU=jnp.array([1.0]),
-            e=jnp.array([0.0]),
-            W_rad=jnp.array([0.0]),
-            i_rad=jnp.array([np.pi / 2]),
-            w_rad=jnp.array([0.0]),
-            M0_rad=jnp.array([np.pi / 2]),
-            t0_d=jnp.array([0.0]),
-        ),
         physical_model=LambertianPhysicalModel(Ag=jnp.array([0.3])),
     )
-    # Use the exact solver at conjunction to exclude grid interpolation error.
-    system = System(
-        star=make_system().star, planets=(planet,), trig_solver=markley_solve_trig
+    system = System.from_classical(
+        star=make_system().star,
+        planets=(planet,),
+        star_mass_Msun=1.0,
+        planet_mass_Msun=jnp.array([1.0]) * Mearth2kg / Msun2kg,
+        dist_pc=DIST_PC,
+        a_AU=jnp.array([1.0]),
+        e=jnp.array([0.0]),
+        W_rad=jnp.array([0.0]),
+        i_rad=jnp.array([np.pi / 2]),
+        w_rad=jnp.array([0.0]),
+        M0_rad=jnp.array([np.pi / 2]),
     )
     result = viz.plot_system(system, 0.0, view="side")
     artists = by_gid(result)

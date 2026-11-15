@@ -202,7 +202,6 @@ class ExovistaParametricDisk(AbstractDisk):
 
         nx, ny: Output image shape.
         pixel_scale_arcsec: Pixel scale [arcsec/pixel].
-        dist_pc: System distance [pc].
         n_slices_los: Number of LOS nodes (per side of the midplane for
             ``"gauss_half"``).
         n_scale_heights: ``"trapezoid"`` only: LOS half-extent in units of
@@ -232,7 +231,6 @@ class ExovistaParametricDisk(AbstractDisk):
     nx: int = eqx.field(static=True)
     ny: int = eqx.field(static=True)
     pixel_scale_arcsec: float = eqx.field(static=True)
-    dist_pc: float = eqx.field(static=True)
     n_slices_los: int = eqx.field(static=True)
     n_scale_heights: float = eqx.field(static=True, default=6.0)
     quadrature: str = eqx.field(static=True, default="legendre")
@@ -284,6 +282,8 @@ class ExovistaParametricDisk(AbstractDisk):
         time_jd: Array,
         incl_deg: Array,
         pa_deg: Array,
+        *,
+        dist_pc: Array,
     ) -> Array:
         """Render the ExoVista-style disk on a sky-plane grid."""
         Ag = interpax.interp1d(
@@ -335,7 +335,7 @@ class ExovistaParametricDisk(AbstractDisk):
             nx=self.nx,
             ny=self.ny,
             pixel_scale_arcsec=self.pixel_scale_arcsec,
-            dist_pc=self.dist_pc,
+            dist_pc=dist_pc,
             n_slices_los=self.n_slices_los,
             quadrature=self.quadrature,
             scale_height_fn=scale_height_fn,
@@ -374,6 +374,6 @@ class ExovistaParametricDisk(AbstractDisk):
             f"{fmt_scalar_or_array(self.rmax_AU)}] AU; "
             f"Ag grid: {n_wl} pts in {wl_min:.0f}-{wl_max:.0f} nm; "
             f"image: {self.ny}x{self.nx} @ {self.pixel_scale_arcsec} arcsec/px, "
-            f"dist={self.dist_pc} pc, n_slices_los={self.n_slices_los}, "
+            f"n_slices_los={self.n_slices_los}, "
             f"quadrature={self.quadrature!r})"
         )

@@ -180,7 +180,6 @@ class GraterDisk(AbstractDisk):
 
         nx, ny: Output image shape.
         pixel_scale_arcsec: Pixel scale [arcsec/pixel].
-        dist_pc: System distance [pc].
         n_slices_los: Number of LOS nodes (per side of the midplane for
             ``"gauss_half"``).
         n_scale_heights: ``"trapezoid"`` only: LOS half-extent in units of
@@ -211,7 +210,6 @@ class GraterDisk(AbstractDisk):
     nx: int = eqx.field(static=True)
     ny: int = eqx.field(static=True)
     pixel_scale_arcsec: float = eqx.field(static=True)
-    dist_pc: float = eqx.field(static=True)
     n_slices_los: int = eqx.field(static=True)
     n_scale_heights: float = eqx.field(static=True, default=6.0)
 
@@ -268,6 +266,8 @@ class GraterDisk(AbstractDisk):
         time_jd: Array,
         incl_deg: Array,
         pa_deg: Array,
+        *,
+        dist_pc: Array,
     ) -> Array:
         """Render the Augereau 1999 scattered-light disk on a sky-plane grid.
 
@@ -342,7 +342,7 @@ class GraterDisk(AbstractDisk):
             nx=self.nx,
             ny=self.ny,
             pixel_scale_arcsec=self.pixel_scale_arcsec,
-            dist_pc=self.dist_pc,
+            dist_pc=dist_pc,
             n_slices_los=self.n_slices_los,
             quadrature=self.quadrature,
             scale_height_fn=scale_height_fn,
@@ -374,6 +374,6 @@ class GraterDisk(AbstractDisk):
             f"gamma={fmt_scalar_or_array(self.gamma)}; "
             f"HG/Ag grid: {n_wl} pts in {wl_min:.0f}-{wl_max:.0f} nm; "
             f"image: {self.ny}x{self.nx} @ {self.pixel_scale_arcsec} arcsec/px, "
-            f"dist={self.dist_pc} pc, n_slices_los={self.n_slices_los}, "
+            f"n_slices_los={self.n_slices_los}, "
             f"quadrature={self.quadrature!r})"
         )

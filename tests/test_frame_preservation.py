@@ -225,11 +225,12 @@ def test_disk_image_mirrors_stored_columns(index, inc, pa):
 def test_demo_elements_unchanged(fits_fixture):
     """Changing vector components preserves the demo's recovered orbital elements."""
     system = from_exovista(fits_fixture, load_disk=False)
+    classical = system.dynamics.orbits.to_classical()
     actual = [
         [
-            float(getattr(p.orbit, key)[0])
+            float(classical[key][index])
             for key in ("a_AU", "e", "i_rad", "W_rad", "w_rad", "M0_rad")
         ]
-        for p in system.planets
+        for index in system.body_index
     ]
     np.testing.assert_allclose(actual, DEMO_ELEMENTS, rtol=1e-12, atol=1e-14)

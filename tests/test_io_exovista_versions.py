@@ -197,7 +197,7 @@ def test_elapsed_years_use_fixed_duration_and_shared_epoch(scene_file):
     np.testing.assert_array_equal(scene.star.spots.times_jd, expected)
     for planet in scene.planets:
         np.testing.assert_array_equal(planet.physical_model.times_jd, expected)
-        assert float(planet.orbit.t0_d[0]) == expected[0]
+    np.testing.assert_array_equal(scene.dynamics.orbits.epoch_d, expected[0])
 
 
 def test_imported_positive_flux_cannot_overshoot_below_zero(scene_file):

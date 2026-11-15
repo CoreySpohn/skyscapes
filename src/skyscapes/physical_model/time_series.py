@@ -84,6 +84,7 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
         *,
         time_jd: Array,
         star=None,
+        dist_pc: Array | None = None,
     ) -> Array:
         """Interpolate contrast at the supplied physical epochs.
 
@@ -94,6 +95,7 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
             Rp_Rearth: Planet radius [Earth radii]; ignored.
             time_jd: Observation Julian Dates, shape ``(T_query,)``.
             star: The host star; ignored.
+            dist_pc: Observer distance [pc]; ignored.
 
         Returns:
             Contrast, shape ``(K, T_query)``, with NaN outside table support.

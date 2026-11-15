@@ -48,10 +48,12 @@ class ExovistaDisk(AbstractDisk):
         time_jd: Array,
         incl_deg: Array,
         pa_deg: Array,
+        *,
+        dist_pc: Array | None = None,
     ) -> Array:
         """Contrast map at the requested wavelength, shape ``(ny, nx)``.
 
-        ``time_jd``, ``incl_deg``, and ``pa_deg`` are part of the
+        ``time_jd``, ``incl_deg``, ``pa_deg``, and ``dist_pc`` are part of the
         AbstractDisk interface but ignored here: the cube is a single
         time snapshot with disk geometry already baked in by the loader.
         """

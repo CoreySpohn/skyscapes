@@ -261,7 +261,7 @@ def los_integrate_scattered(
     nx: int,
     ny: int,
     pixel_scale_arcsec: float,
-    dist_pc: float,
+    dist_pc: Array,
     n_slices_los: int,
     quadrature: str = "legendre",
     scale_height_fn: ScaleHeightFn | None = None,
@@ -272,7 +272,7 @@ def los_integrate_scattered(
 
     Private integration chart: (east, north, toward), with depth ``l_grid``
     positive toward the observer (the negative of public sky z). Sky ``x``
-    is east (from ``Planet.position_arcsec``), and sky ``y`` is north.
+    is east (from ``System.positions``), and sky ``y`` is north.
     Image columns increase west and rows increase north (FITS convention):
     column offset = -east / pixel scale. With ``imshow(origin="lower")``
     and no axis inversion, north is up, east is left, and astronomical PA
@@ -375,7 +375,7 @@ def los_integrate_scattered(
         nx: Output image width [pixels] (static).
         ny: Output image height [pixels] (static).
         pixel_scale_arcsec: Pixel scale [arcsec/pixel] (static).
-        dist_pc: System distance [pc] (static).
+        dist_pc: System distance [pc].
         n_slices_los: Number of LOS nodes (static); per side of the
             midplane for ``"gauss_half"``.
         quadrature: One of :data:`QUADRATURES` (static).

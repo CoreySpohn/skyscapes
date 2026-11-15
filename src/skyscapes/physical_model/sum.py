@@ -32,6 +32,7 @@ class SumPhysicalModel(AbstractPhysicalModel):
         Rp_Rearth: Array,
         time_jd: Array,
         star,
+        dist_pc: Array,
     ) -> Array:
         """Summed observer photon flux [ph/s/m^2/nm], shape ``(K, T)``."""
         return sum(
@@ -42,6 +43,7 @@ class SumPhysicalModel(AbstractPhysicalModel):
                 Rp_Rearth=Rp_Rearth,
                 time_jd=time_jd,
                 star=star,
+                dist_pc=dist_pc,
             )
             for component in self.components
         )
@@ -65,6 +67,7 @@ class SumPhysicalModel(AbstractPhysicalModel):
         *,
         time_jd: Array,
         star=None,
+        dist_pc: Array | None = None,
     ) -> Array:
         """Summed photon flux over stellar flux, shape ``(K, T)``."""
         if star is None:
@@ -76,5 +79,6 @@ class SumPhysicalModel(AbstractPhysicalModel):
             Rp_Rearth=Rp_Rearth,
             time_jd=time_jd,
             star=star,
+            dist_pc=dist_pc,
         )
-        return flux / star.spec_flux_density(wavelength_nm, time_jd)
+        return flux / star.spec_flux_density(wavelength_nm, time_jd, dist_pc=dist_pc)

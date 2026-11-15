@@ -64,11 +64,10 @@ def _resolve_disk(obj, incl_deg, pa_deg, dist_pc):
     if hasattr(system, "midplane_inc_deg") and hasattr(system, "disk"):
         incl = system.midplane_inc_deg if incl_deg is None else incl_deg
         pa = system.midplane_pa_deg if pa_deg is None else pa_deg
-        dist = system.star.dist_pc if dist_pc is None else dist_pc
+        dist = system.dist_pc if dist_pc is None else dist_pc
         return system.disk, incl, pa, dist
     if isinstance(obj, AbstractDisk):
-        dist = getattr(obj, "dist_pc", None) if dist_pc is None else dist_pc
-        return obj, incl_deg, pa_deg, dist
+        return obj, incl_deg, pa_deg, dist_pc
     return None, incl_deg, pa_deg, dist_pc
 
 
@@ -123,7 +122,7 @@ def plot_disk_image(
         pixel_scale_arcsec: Pixel scale [arcsec/pixel]. Read from the disk
             when it has one; required for an array.
         dist_pc: Distance [pc], used to place the AU outlines. Read from
-            the system or disk when available.
+            the system; required for a bare parametric disk.
         radii_AU: ``(r_in, r_out)`` for the outlines. None reads a
             parametric disk's truncation radii.
         outline: Whether to draw the projected truncation rings.
@@ -181,6 +180,7 @@ def plot_disk_image(
             jnp.asarray(time_jd, dtype=float),
             jnp.asarray(incl, dtype=float),
             jnp.asarray(pa, dtype=float),
+            dist_pc=dist,
         )
         if pixel_scale_arcsec is None:
             pixel_scale_arcsec = getattr(disk, "pixel_scale_arcsec", None)

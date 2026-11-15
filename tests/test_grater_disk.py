@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from functools import partial
 from itertools import pairwise
 
 import equinox as eqx
@@ -44,7 +45,6 @@ def make_disk(g_HG: float = 0.3, Ag: float = 0.5, **overrides) -> GraterDisk:
         nx=51,
         ny=51,
         pixel_scale_arcsec=0.2,  # px_AU = 2 AU at 10 pc -> image covers ~+/-50 AU
-        dist_pc=10.0,
         n_slices_los=31,
     )
     defaults.update(overrides)
@@ -58,6 +58,7 @@ def _render(d: GraterDisk, wavelength_nm=500.0, time_jd=0.0, incl_deg=60.0, pa_d
         jnp.array(time_jd),
         jnp.array(incl_deg),
         jnp.array(pa_deg),
+        dist_pc=10.0,
     )
 
 
@@ -147,7 +148,11 @@ def test_jit_round_trip():
     @jax.jit
     def f(disk):
         return disk.surface_brightness(
-            jnp.array(500.0), jnp.array(0.0), jnp.array(60.0), jnp.array(0.0)
+            jnp.array(500.0),
+            jnp.array(0.0),
+            jnp.array(60.0),
+            jnp.array(0.0),
+            dist_pc=10.0,
         )
 
     sb_jit = f(d)
@@ -224,7 +229,9 @@ def test_edge_on_render_gradient_and_convergence(incl, cutoff_width):
         pixel_scale_arcsec=0.04,
         cutoff_width_AU=jnp.asarray(cutoff_width),
     )
-    render = eqx.filter_jit(lambda d, i: d.surface_brightness(550.0, 0.0, i, 13.0))
+    render = eqx.filter_jit(
+        lambda d, i: d.surface_brightness(550.0, 0.0, i, 13.0, dist_pc=10.0)
+    )
     images = [
         render(replace(disk, n_slices_los=n), jnp.asarray(incl))
         for n in (129, 257, 513)
@@ -262,7 +269,9 @@ def test_edge_on_continuity_and_smooth_cutoff_gradients(quadrature):
         pixel_scale_arcsec=0.04,
         cutoff_width_AU=jnp.asarray(0.2),
     )
-    render = eqx.filter_jit(lambda d, i: d.surface_brightness(550.0, 0.0, i, 0.0))
+    render = eqx.filter_jit(
+        lambda d, i: d.surface_brightness(550.0, 0.0, i, 0.0, dist_pc=10.0)
+    )
     angles = jnp.array([89.3, 89.43, 89.5, 90.0, 90.5])
     images = jax.vmap(lambda i: render(disk, i))(angles)
     assert jnp.all(jnp.isfinite(images))
@@ -322,7 +331,6 @@ def _belt(
         nx=121,
         ny=121,
         pixel_scale_arcsec=0.0085,
-        dist_pc=10.0,
         n_slices_los=n_slices_los,
         n_scale_heights=n_scale_heights,
         quadrature=quadrature,
@@ -465,9 +473,9 @@ def test_wavelength_vmap_returns_cube():
         Ag_grid=jnp.array([0.4, 0.5, 0.6]),
     )
     wls = jnp.array([550.0, 650.0, 850.0])
-    cube = jax.vmap(d.surface_brightness, in_axes=(0, None, None, None))(
-        wls, jnp.array(0.0), jnp.array(60.0), jnp.array(0.0)
-    )
+    cube = jax.vmap(
+        partial(d.surface_brightness, dist_pc=10.0), in_axes=(0, None, None, None)
+    )(wls, jnp.array(0.0), jnp.array(60.0), jnp.array(0.0))
     assert cube.shape == (3, d.ny, d.nx)
     assert bool(jnp.all(jnp.isfinite(cube)))
     assert not jnp.allclose(cube[0], cube[1])

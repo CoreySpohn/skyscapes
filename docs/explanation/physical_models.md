@@ -31,9 +31,9 @@ flowchart TB
     APM --> SUM
 ```
 
-`Planet.spec_flux_density` calls
+`System.planet_flux_densities` calls
 `physical_model.spec_flux_density(wavelength_nm, phase_angle_rad=...,
-dist_AU=..., Rp_Rearth=..., time_jd=..., star=...)`. Wavelength is scalar;
+dist_AU=..., Rp_Rearth=..., time_jd=..., star=..., dist_pc=...)`. Wavelength is scalar;
 the result has shape `(K, T)` in ph/s/m²/nm. The base implementation
 multiplies `contrast_at_time` by stellar photon flux. Thermal models
 compute observer flux directly, then derive contrast by dividing by the
@@ -44,9 +44,9 @@ stellar spectrum; a contrast ratio still needs a valid denominator.
 `System.bin_mean_planet_flux_densities` integrates this same
 flux interface, including sums, with `skyscapes.spectral.bin_mean`.
 
-`Planet.contrast` and `Planet.alpha_dMag` call
+`System.contrasts` and `System.alpha_dMag` call
 `physical_model.contrast_at_time(phase_angle_rad, dist_AU,
-wavelength_nm, Rp_Rearth, time_jd=..., star=...)`. This returns per-planet
+wavelength_nm, Rp_Rearth, time_jd=..., star=..., dist_pc=...)`. This returns per-planet
 flux-ratio contrast, shape `(K, T)` for `K` planets and `T` epochs.
 The default `AbstractPhysicalModel.contrast_at_time` ignores the time
 argument and forwards the other arguments to `contrast`, so existing
@@ -95,7 +95,7 @@ sum by stellar flux. An empty tuple raises `ValueError`. The phase-only
 the common flux interface without normalizing by the star first.
 
 The blackbody's existing `spec_flux_density(wavelength_nm, Rp_Rearth,
-dist_pc)` form still returns `(K,)`. Its common interface with geometry
+dist_pc=dist_pc)` form still returns `(K,)`. Its common interface with geometry
 and stellar context returns `(K, T)`. ExoJAX's existing `flux_density_jy`
 continues to return `(W, K)` in Jy.
 
@@ -316,29 +316,17 @@ loop (forward simulation, MCMC sampling, multi-target evaluation).
 
 ## Composition with `Planet`
 
-A `Planet` carries its intrinsic params (`Rp_Rearth`, `Mp_Mearth`)
-plus an orbit and a physical model:
+A `Planet` carries its radii (`Rp_Rearth`) and a physical model.
+The shared `System.dynamics` owns masses and orbital state:
 
 ```python
 import jax.numpy as jnp
-from orbix.orbit import KeplerianOrbit
 from skyscapes.scene import Planet
 from skyscapes.physical_model import LambertianPhysicalModel
 
-orbit = KeplerianOrbit(
-    a_AU=jnp.array([1.0]),
-    e=jnp.array([0.0]),
-    W_rad=jnp.array([0.0]),
-    i_rad=jnp.array([jnp.pi / 3]),
-    w_rad=jnp.array([0.0]),
-    M0_rad=jnp.array([0.0]),
-    t0_d=jnp.array([0.0]),
-)
 physical_model = LambertianPhysicalModel(Ag=jnp.array([0.3]))
 planet = Planet(
     Rp_Rearth=jnp.array([1.0]),
-    Mp_Mearth=jnp.array([1.0]),
-    orbit=orbit,
     physical_model=physical_model,
 )
 ```
@@ -346,22 +334,26 @@ planet = Planet(
 Heterogeneous physical models compose at the `System.planets` level
 -- one `Planet` per model type, each batching its own `K` planets:
 
-Requires user-supplied orbits, stellar data, and physical models.
+Requires a user-supplied `orbix.system.System` named `dynamics`,
+stellar data, and physical models.
 
 ```python notest
+from skyscapes import System
+from skyscapes.physical_model import PrecomputedPhysicalModel
+
 lambertian_planet = Planet(
     Rp_Rearth=...,
-    Mp_Mearth=...,
-    orbit=lambertian_orbit,
     physical_model=LambertianPhysicalModel(...),
 )
 cached_planet = Planet(
     Rp_Rearth=...,
-    Mp_Mearth=...,
-    orbit=cached_orbit,
     physical_model=PrecomputedPhysicalModel.from_physical_model(...),
 )
-system = System(star=star, planets=(lambertian_planet, cached_planet))
+system = System(
+    star=star,
+    planets=(lambertian_planet, cached_planet),
+    dynamics=dynamics,
+)
 ```
 
 ## Performance budget

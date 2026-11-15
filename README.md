@@ -11,11 +11,12 @@
 
 JAX-native astrophysical scene modeling for HWO direct imaging.
 
-`Planet.propagate` returns orbix's star-centered (east, north, away)
-positions unchanged. This frame is right-handed: z is positive away from
-the observer, and dz/dt is positive receding. The standard phase angle
-beta satisfies `cos(beta) = z / r` (zero at full phase).
-`position_arcsec` reads rows 0 and 1 as (Delta alpha*, Delta Dec), where
+`System.ephemeris` returns orbix's barycentric (east, north, away)
+states, with scene-order planet indices for relative observables. This
+frame is right-handed: z is positive away from the observer, and dz/dt is positive receding. The standard phase angle
+beta satisfies `cos(beta) = z / r` for the star-relative vector
+(zero at full phase).
+`System.positions` returns rows 0 and 1 as (Delta alpha*, Delta Dec), where
 Delta alpha* = Delta RA cos Dec. ExoVista positions and velocities are
 converted from (west, north, toward) with `(-x, y, -z)` before deriving
 elements; the header midplane mapping remains `(-PA) % 360`.
@@ -51,8 +52,8 @@ science products.
   thin adapter over [ExoJAX](https://github.com/HajimeKawahara/exojax);
   skyscapes does not implement its own RT.
 - **Not an orbit propagator.** Orbital mechanics live in
-  [orbix](https://github.com/CoreySpohn/orbix); `Planet` composes an
-  `AbstractOrbit` rather than reimplementing one.
+  [orbix](https://github.com/CoreySpohn/orbix); `System` holds an
+  `orbix.system.System` for dynamics.
 - **Not a simulator.** Downstream tools
   ([coronagraphoto](https://github.com/CoreySpohn/coronagraphoto),
   [jaxEDITH](https://github.com/CoreySpohn/jaxedith)) consume a `Scene`
@@ -83,9 +84,9 @@ optional `Zodi` background:
 - **Stars** — `Star` (wavelength- and time-dependent spectrum, ExoVista-
   backed) and `FlatStar` (constant-flux sandbox). Imported stars retain
   FITS metadata and optional `StarSpots` geometry and temperatures.
-- **Planets** — `Planet` owns intrinsic params (`Rp_Rearth`,
-  `Mp_Mearth`) and composes an `AbstractOrbit` (from orbix) with an
-  `AbstractPhysicalModel`.
+- **Planets** — `Planet` owns radii (`Rp_Rearth`) and an
+  `AbstractPhysicalModel`; `System.dynamics` owns masses, orbital state,
+  and observer distance.
 - **Physical models** — `LambertianPhysicalModel`,
   `GridPhysicalModel` (wavelength/phase contrast tables),
   `TimeSeriesPhysicalModel` (wavelength/Julian-Date contrast tables),
@@ -142,11 +143,11 @@ interpolation by default.
 
 `Star.spots` and `Star.metadata` preserve source records. Loading spot
 geometry does not yet provide resolved stellar-surface propagation or
-asymmetric stellar leakage through a coronagraph. Planet contrast methods call
-`contrast_at_time(..., time_jd=..., star=...)`; phase-dependent models inherit
-a default hook that delegates to `contrast`. `Planet.spec_flux_density`
+asymmetric stellar leakage through a coronagraph. System contrast methods call
+`contrast_at_time(..., time_jd=..., star=..., dist_pc=...)`; phase-dependent models inherit
+a default hook that delegates to `contrast`. `System.planet_flux_densities`
 calls the model's `spec_flux_density(wavelength_nm, phase_angle_rad=...,
-dist_AU=..., Rp_Rearth=..., time_jd=..., star=...)`, returning `(K, T)`
+dist_AU=..., Rp_Rearth=..., time_jd=..., star=..., dist_pc=...)`, returning `(K, T)`
 photon flux in ph/s/m²/nm. Thermal models evaluate flux directly;
 `SumPhysicalModel` adds component fluxes, including through bin integration.
 
@@ -154,8 +155,7 @@ Building one from scratch:
 
 ```python
 import jax.numpy as jnp
-from orbix.kepler.shortcuts.grid import get_grid_solver
-from orbix.orbit import KeplerianOrbit
+from hwoutils.constants import Mearth2kg, Msun2kg
 
 from skyscapes import Scene, System
 from skyscapes.scene import FlatStar, Planet
@@ -163,25 +163,12 @@ from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.background import AYOZodi
 
 star = FlatStar(
-    Ms_kg=1.989e30,
-    dist_pc=10.0,
     flux_phot_per_nm_m2=1e9,
 )
 
-orbit = KeplerianOrbit(
-    a_AU=jnp.array([1.0]),
-    e=jnp.array([0.0]),
-    W_rad=jnp.array([0.0]),
-    i_rad=jnp.array([jnp.pi / 3]),
-    w_rad=jnp.array([0.0]),
-    M0_rad=jnp.array([0.0]),
-    t0_d=jnp.array([0.0]),
-)
 physical_model = LambertianPhysicalModel(Ag=jnp.array([0.3]))
 planet = Planet(
     Rp_Rearth=jnp.array([1.0]),
-    Mp_Mearth=jnp.array([1.0]),
-    orbit=orbit,
     physical_model=physical_model,
 )
 
@@ -190,9 +177,21 @@ zodi = AYOZodi(
     surface_brightness_mag=22.0,
 )
 
-trig_solver = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
+system = System.from_classical(
+    star=star,
+    planets=(planet,),
+    star_mass_Msun=1.0,
+    planet_mass_Msun=jnp.array([Mearth2kg / Msun2kg]),
+    dist_pc=10.0,
+    a_AU=jnp.array([1.0]),
+    e=jnp.array([0.0]),
+    W_rad=jnp.array([0.0]),
+    i_rad=jnp.array([jnp.pi / 3]),
+    w_rad=jnp.array([0.0]),
+    M0_rad=jnp.array([0.0]),
+)
 scene = Scene(
-    system=System(star=star, planets=(planet,), trig_solver=trig_solver),
+    system=system,
     zodi=zodi,
 )
 ```

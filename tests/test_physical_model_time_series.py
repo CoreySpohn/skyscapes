@@ -6,13 +6,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from hwoutils.constants import Mearth2kg, Msun2kg
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from orbix.kepler.shortcuts.grid import get_grid_solver
-from orbix.orbit import KeplerianOrbit
 
 from skyscapes import physical_model
-from skyscapes.scene import FlatStar, Planet
+from skyscapes.scene import FlatStar, Planet, System
 
 from .test_physical_model_emission import _model as emission_model
 from .test_physical_model_emission import engines  # noqa: F401
@@ -177,8 +176,8 @@ def test_default_time_hook_preserves_existing_model_behavior(kind, request):
         jnp.array([1.0, 2.0])[:count],
     )
     times = jnp.array([2451545.0, 2451546.0])
-    star = FlatStar(1.989e30, 10.0, 3.0)
-    contrast = model.contrast_at_time(*args, time_jd=times, star=star)
+    star = FlatStar(3.0)
+    contrast = model.contrast_at_time(*args, time_jd=times, star=star, dist_pc=10.0)
     flux = model.spec_flux_density(
         args[2],
         phase_angle_rad=args[0],
@@ -186,6 +185,7 @@ def test_default_time_hook_preserves_existing_model_behavior(kind, request):
         Rp_Rearth=args[3],
         time_jd=times,
         star=star,
+        dist_pc=10.0,
     )
     expected = contrast * star.spec_flux_density(args[2], times)
     assert isinstance(model, physical_model.AbstractPhysicalModel)
@@ -225,33 +225,37 @@ def test_time_derivative_matches_piecewise_linear_slope():
 
 
 @vv.case("planet-phase", "code-verification")
-def test_planet_contrast_and_magnitude_forward_physical_time():
-    """Planet accessors recover tabulated ratios and magnitudes to roundoff."""
+def test_system_contrast_and_magnitude_forward_physical_time():
+    """System accessors recover tabulated ratios and magnitudes to roundoff."""
     model = physical_model.TimeSeriesPhysicalModel(
         wavelengths_nm=[550.0],
         times_jd=[2451545.0, 2451546.0],
         contrast_grid=[[[1e-10, 1e-8]]],
     )
-    orbit = KeplerianOrbit(
+    planet = Planet(jnp.ones(1), model)
+    star = FlatStar(flux_phot_per_nm_m2=1e9)
+    system = System.from_classical(
+        star,
+        (planet,),
+        star_mass_Msun=1.989e30 / Msun2kg,
+        planet_mass_Msun=jnp.array([Mearth2kg / Msun2kg]),
+        dist_pc=10.0,
         a_AU=jnp.array([1.0]),
         e=jnp.array([0.0]),
         W_rad=jnp.array([0.0]),
         i_rad=jnp.array([jnp.pi / 3]),
         w_rad=jnp.array([0.0]),
         M0_rad=jnp.array([0.0]),
-        t0_d=jnp.array([2451545.0]),
+        epoch_d=2451545.0,
     )
-    planet = Planet(jnp.ones(1), jnp.ones(1), orbit, model)
-    star = FlatStar(Ms_kg=1.989e30, dist_pc=10.0, flux_phot_per_nm_m2=1e9)
-    solver = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
     times = jnp.array([2451545.0, 2451546.0])
     np.testing.assert_allclose(
-        planet.contrast(solver, 550.0, times, star=star),
+        system.contrasts(550.0, times),
         [[1e-10, 1e-8]],
         rtol=1e-14,
         atol=0,
     )
-    _, magnitude = planet.alpha_dMag(solver, times, star=star, wavelength_nm=550.0)
+    _, magnitude = system.alpha_dMag(times, wavelength_nm=550.0)
     np.testing.assert_allclose(magnitude, [[25.0, 20.0]], rtol=1e-14, atol=0)
 
 

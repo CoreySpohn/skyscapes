@@ -17,7 +17,8 @@ class AbstractDisk(eqx.Module):
     columns increase west (FITS display convention); sky east maps to
     negative column offset.
 
-    ``incl_deg`` / ``pa_deg`` are supplied at render time rather than stored
+    ``dist_pc``, ``incl_deg`` and ``pa_deg`` are supplied at render time
+    rather than stored
     on the disk so the System's midplane orientation drives every disk
     component consistently. Disks whose geometry is pre-baked into their
     representation (e.g. ``ExovistaDisk``'s contrast cube) may ignore the
@@ -32,6 +33,8 @@ class AbstractDisk(eqx.Module):
         time_jd: Array,
         incl_deg: Array,
         pa_deg: Array,
+        *,
+        dist_pc: Array | None = None,
     ) -> Array:
         """Return contrast per pixel, shape ``(ny, nx)``."""
 

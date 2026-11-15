@@ -4,11 +4,12 @@ skyscapes represents an astrophysical scene as a tree of `eqx.Module`
 sources. This page covers what each source type is, how they compose,
 and which variant to reach for in a given situation.
 
-`Planet.propagate` returns orbix's star-centered (east, north, away)
-positions unchanged. This frame is right-handed: z is positive away from
-the observer, and dz/dt is positive receding. The standard phase angle
-beta satisfies `cos(beta) = z / r` (zero at full phase).
-`position_arcsec` reads rows 0 and 1 as (Delta alpha*, Delta Dec), where
+`System.ephemeris` returns orbix's barycentric (east, north, away)
+states, with scene-order planet indices for relative observables. This
+frame is right-handed: z is positive away from the observer, and dz/dt is positive receding. The standard phase angle
+beta satisfies `cos(beta) = z / r` for the star-relative vector
+(zero at full phase).
+`System.positions` returns rows 0 and 1 as (Delta alpha*, Delta Dec), where
 Delta alpha* = Delta RA cos Dec. ExoVista positions and velocities are
 converted from (west, north, toward) with `(-x, y, -z)` before deriving
 elements; the header midplane mapping remains `(-PA) % 360`.
@@ -18,9 +19,9 @@ elements; the header midplane mapping remains `(-PA) % 360`.
 ```mermaid
 flowchart TB
     Scene["<b>Scene</b><br/>= System + optional Zodi"]
-    System["<b>System</b><br/>= Star + Planets + optional Disk"]
+    System["<b>System</b><br/>= Star + Planets + dynamics + optional Disk"]
     Star["<b>Star</b><br/>(AbstractStar)"]
-    Planet["<b>Planet</b><br/>Rp + Mp + orbit + physical_model"]
+    Planet["<b>Planet</b><br/>Rp + physical_model"]
     Disk["<b>AbstractDisk</b><br/>circumstellar dust"]
     Zodi["<b>Zodi</b><br/>(union of background variants)"]
     PM["<b>AbstractPhysicalModel</b><br/>photon flux / contrast"]
@@ -45,7 +46,8 @@ class Scene(eqx.Module):
 
 class System(eqx.Module):
     star: AbstractStar
-    planets: tuple[Planet, ...] = ()
+    planets: tuple[Planet, ...]
+    dynamics: orbix.system.System
     disk: AbstractDisk | None = None
     midplane_inc_deg: float = 0.0
     midplane_pa_deg: float = 0.0
@@ -78,8 +80,6 @@ import jax.numpy as jnp
 
 # Realistic: wavelength + time dependence
 star = Star(
-    Ms_kg=1.989e30,
-    dist_pc=10.0,
     wavelengths_nm=jnp.linspace(400, 1000, 60),
     times_jd=jnp.array([2_460_000.0, 2_460_730.5]),
     flux_density_jy=...,  # shape (n_wl, n_time)
@@ -87,15 +87,11 @@ star = Star(
 
 # Sandbox: constant flux
 flat = FlatStar(
-    Ms_kg=1.989e30,
-    dist_pc=10.0,
     flux_phot_per_nm_m2=1e9,
 )
 
 # Physical approximation: a solar-temperature blackbody at 10 pc
 blackbody = BlackbodyStar(
-    Ms_kg=1.989e30,
-    dist_pc=10.0,
     teff_K=5772.0,
     radius_m=6.957e8,
 )
@@ -103,7 +99,13 @@ blackbody = BlackbodyStar(
 # All implement the same interface
 print(star.spec_flux_density(wavelength_nm=550.0, time_jd=2_460_365.0))
 print(flat.spec_flux_density(wavelength_nm=550.0, time_jd=2_460_365.0))
-print(blackbody.spec_flux_density(wavelength_nm=550.0, time_jd=2_460_365.0))
+print(
+    blackbody.spec_flux_density(
+        wavelength_nm=550.0,
+        time_jd=2_460_365.0,
+        dist_pc=10.0,
+    )
+)
 ```
 
 `Star` is the canonical choice for any real target -- it ingests
@@ -115,8 +117,10 @@ value.
 the observer flux in photons/s/m^2/nm. Following Rybicki and Lightman
 (1979), *Radiative Processes in Astrophysics*, the surface flux is
 `pi * B_photon`, diluted by `(radius_m / (dist_pc * pc2m))**2` at the
-observer. Wavelengths are in nanometers, and the result retains their
-shape. The spectrum is static, so `time_jd` is ignored. Both `jax.jit`
+observer. Supply `dist_pc` when evaluating its flux or
+`diameter_arcsec(*, dist_pc)`. Apparent-flux `Star` and `FlatStar` accept
+an optional distance argument but ignore it. Wavelengths are in nanometers,
+and the result retains their shape. The spectrum is static, so `time_jd` is ignored. Both `jax.jit`
 and `jax.vmap` over wavelength are supported.
 
 `flux_density_jy` is the observer's disk-integrated spectral flux
@@ -175,20 +179,13 @@ relying on an extension-count header alone.
 ### Orbital dynamics of loaded planets
 
 ExoVista writes barycentric states for the star and each planet. The
-importer subtracts the star's state, converts the difference to the
-(east, north, away) chart and derives the orbital elements from it with the
-two-body gravitational parameter $\mu = G (M_\star + M_p)$, where $M_p$ is
-the planet mass in the planet header (`M`, Earth masses). `Planet`
-propagates with the same $\mu$, so a loaded planet keeps its period.
-Propagating with $G M_\star$ instead would shorten the mean motion by the
-fraction $\tfrac12 M_p / M_\star$ and make the planet lag its true position:
-for a Jupiter-mass planet around a solar-mass star that is 0.048 percent
-of the mean motion, or 0.145 degrees of orbital phase after ten years
-(0.0132 AU at 5.2 AU, 1.3 milliarcseconds at 10 pc). Versions before 2.1.0
-carry this lag. When the planet mass is unknown (NaN, zero or negative
-`Mp_Mearth`), the planet is a test particle and only $M_\star$ enters. The
-sum is computed by `Planet.central_mass_kg`, which is jit- and
-vmap-compatible and has a fixed shape `(K,)`.
+importer converts them to the (east, north, away) chart and builds the
+shared `System.dynamics` Jacobi chain. Dynamics owns the stellar and
+planetary masses and the observer distance; these are available through
+`System.star_mass_Msun`, `System.planet_mass_Msun`, and `System.dist_pc`.
+`System.ephemeris(time_jd)` propagates the shared system with Markley by
+default. Its barycentric states support star-relative planet geometry,
+stellar reflex motion, and radial velocity without separate orbit solves.
 
 Subtracting the star's barycentric motion also changes what phase-mode
 planets look like. With `planet_spectra="phase"` the contrast is a function
@@ -259,63 +256,49 @@ remain bounded by the wavelength grid. See
 
 ## Planets
 
-`Planet` owns the planet's **intrinsic parameters** (`Rp_Rearth`,
-`Mp_Mearth`) and composes two submodels: an orbit (from `orbix`) and
-a physical model (from `skyscapes.physical_model`). The intrinsic
-parameters live on `Planet` itself because they describe the planet,
-not the submodel that happens to use them at evaluation time.
+`Planet` owns the planet radii (`Rp_Rearth`) and a physical model
+(from `skyscapes.physical_model`). Orbital state, masses, and observer
+distance live on the shared `System.dynamics` object.
 
 ```python
 import jax.numpy as jnp
-from orbix.orbit import KeplerianOrbit
 
 from skyscapes.scene import Planet
 from skyscapes.physical_model import LambertianPhysicalModel
 
-orbit = KeplerianOrbit(
-    a_AU=jnp.array([1.0]),
-    e=jnp.array([0.0]),
-    W_rad=jnp.array([0.0]),
-    i_rad=jnp.array([jnp.pi / 3]),
-    w_rad=jnp.array([0.0]),
-    M0_rad=jnp.array([jnp.pi / 4]),
-    t0_d=jnp.array([0.0]),
-)
 physical_model = LambertianPhysicalModel(Ag=jnp.array([0.3]))
 planet = Planet(
     Rp_Rearth=jnp.array([1.0]),
-    Mp_Mearth=jnp.array([1.0]),
-    orbit=orbit,
     physical_model=physical_model,
 )
 ```
 
 A single `Planet` instance carries `K` planets that share the same
-orbit type and physical-model type -- every per-planet field
-(``Rp_Rearth``, ``Mp_Mearth``, orbital elements, model parameters)
+physical-model type -- every per-planet field
+(``Rp_Rearth``, model parameters)
 is an array of length `K`. This is the "per-Planet-type batching"
 convention; heterogeneous planets (different physical-model classes)
 go into `System.planets` as a tuple of `Planet` instances.
 
-Requires the remaining user-supplied orbital elements.
+`System.from_classical` takes masses in solar masses and orbital-element
+arrays in flattened scene order. It sorts the Jacobi chain by `a_AU` on
+the host by default; supply an explicit `order` permutation when building
+from traced elements. The scene keeps the original planet order for
+observables. `epoch_d` and `time_jd` use the same numeric day origin.
+Observation times are passed to orbix unchanged; the supplied `Epoch` is
+reference metadata and is not subtracted in this API.
 
-```python notest
+```python
 # Two planets sharing a Lambertian physical model
 two_planet = Planet(
     Rp_Rearth=jnp.array([1.0, 11.2]),
-    Mp_Mearth=jnp.array([1.0, 317.0]),
-    orbit=KeplerianOrbit(
-        a_AU=jnp.array([1.0, 5.0]),
-        e=jnp.array([0.0, 0.05]),
-        # ... other elements as (K=2,) arrays
-    ),
     physical_model=LambertianPhysicalModel(Ag=jnp.array([0.3, 0.5])),
 )
 ```
 
-`Planet.spec_flux_density` delegates to its physical model's photon-flux
-method. `SumPhysicalModel` combines reflected and thermal components for
-one planet; see [Physical models](physical_models.md) for its common
+`System.planet_flux_densities` delegates to each physical model's
+photon-flux method, supplying geometry and observer distance.
+`SumPhysicalModel` combines reflected and thermal components for one planet; see [Physical models](physical_models.md) for its common
 `(K, T)` flux and contrast interfaces.
 
 ## Disks
@@ -431,7 +414,8 @@ separately -- see [physical models](physical_models).
 The same `Scene` is consumed by every downstream tool. Build it once,
 use it everywhere:
 
-Requires a user-supplied FITS file, source models, and configured optical path.
+Requires a user-supplied FITS file, source models, an `orbix.system.System`
+named `dynamics`, and a configured optical path.
 
 ```python notest
 from skyscapes import Scene, System, from_exovista
@@ -445,7 +429,7 @@ scene = Scene(system=system)
 
 # Or programmatically
 scene = Scene(
-    system=System(star=star, planets=(planet,), disk=disk),
+    system=System(star=star, planets=(planet,), dynamics=dynamics, disk=disk),
     zodi=zodi,
 )
 

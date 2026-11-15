@@ -28,34 +28,20 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
         self,
         wavelength_nm: Array,
         Rp_Rearth: Array,
-        dist_pc: Array | None = None,
         *,
+        dist_pc: Array,
         phase_angle_rad: Array | None = None,
         dist_AU: Array | None = None,
         time_jd: Array | None = None,
         star=None,
     ) -> Array:
-        """Planet photon flux density at the observer [ph/s/m^2/nm].
+        """Observer photon flux [ph/s/m^2/nm].
 
-        Args:
-            wavelength_nm: Wavelength [nm], scalar.
-            Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
-            dist_pc: Distance to the system [pc] for the legacy three-argument
-                call, which returns shape ``(K,)``.
-            phase_angle_rad: Phase angles [rad], shape ``(K, T)``; sets the
-                output shape for the common physical-model interface.
-            dist_AU: Star-planet distance [AU]; ignored.
-            time_jd: Observation Julian Dates; ignored (steady emission).
-            star: Host ``AbstractStar`` providing the observer distance.
-
-        Returns:
-            Flux density, shape ``(K, T)`` with stellar context, or ``(K,)``
-            for the legacy ``(wavelength_nm, Rp_Rearth, dist_pc)`` call.
+        The radius is supplied by the planet and ``dist_pc`` by the system.
+        Steady emission ignores phase, orbital distance, epoch and host flux.
+        Returns shape ``(K,)`` directly, or ``(K, T)`` when
+        ``phase_angle_rad`` supplies the time axis.
         """
-        if phase_angle_rad is not None:
-            if star is None:
-                raise ValueError("BlackbodyPhysicalModel needs the host star")
-            dist_pc = star.dist_pc
         flux = _planck_photon_flux(
             wavelength_nm,
             self.teff_K,
@@ -89,6 +75,7 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
         *,
         time_jd: Array,
         star=None,
+        dist_pc: Array | None = None,
     ) -> Array:
         """Planet flux over the star's flux at one wavelength.
 
@@ -99,6 +86,7 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
             wavelength_nm: Wavelength [nm], scalar.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
             time_jd: Observation Julian Dates, shape ``(T,)``.
+            dist_pc: Observer distance supplied by the system [pc].
             star: The host ``AbstractStar``.
 
         Returns:
@@ -125,8 +113,9 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
             Rp_Rearth=Rp_Rearth,
             time_jd=time_jd,
             star=star,
+            dist_pc=dist_pc,
         )
-        return flux / star.spec_flux_density(wavelength_nm, time_jd)
+        return flux / star.spec_flux_density(wavelength_nm, time_jd, dist_pc=dist_pc)
 
     def __repr__(self) -> str:
         """One-line summary of the effective temperature."""

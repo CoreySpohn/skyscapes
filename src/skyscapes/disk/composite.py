@@ -49,14 +49,16 @@ class CompositeDisk(AbstractDisk):
         time_jd: Array,
         incl_deg: Array,
         pa_deg: Array,
+        *,
+        dist_pc: Array,
     ) -> Array:
         """Return the per-pixel sum of all component contrast maps."""
         contrib = self.components[0].surface_brightness(
-            wavelength_nm, time_jd, incl_deg, pa_deg
+            wavelength_nm, time_jd, incl_deg, pa_deg, dist_pc=dist_pc
         )
         for c in self.components[1:]:
             contrib = contrib + c.surface_brightness(
-                wavelength_nm, time_jd, incl_deg, pa_deg
+                wavelength_nm, time_jd, incl_deg, pa_deg, dist_pc=dist_pc
             )
         return contrib
 

@@ -50,20 +50,24 @@ The easiest path is loading an ExoVista FITS file into a `Scene`:
 Requires a user-supplied ExoVista FITS file.
 
 ```python notest
-from skyscapes import from_exovista
+import jax
 
-scene = from_exovista("path/to/exovista_system.fits")
+jax.config.update("jax_enable_x64", True)
+
+from skyscapes import Scene, from_exovista
+
+system = from_exovista("path/to/exovista_system.fits")
+scene = Scene(system=system)
 ```
 
 Building one from scratch is a little more involved -- a `Scene`
 composes a `System` (star + planets + optional disk) with an optional
-`Zodi`, and `Planet` itself owns its intrinsic params (radius, mass)
-and composes an orbit (from `orbix`) with a physical model:
+`Zodi`. `Planet` owns its radii and physical model, while
+`System.dynamics` owns masses, orbital state, and observer distance:
 
 ```python
 import jax.numpy as jnp
-from orbix.kepler.shortcuts.grid import get_grid_solver
-from orbix.orbit import KeplerianOrbit
+from hwoutils.constants import Mearth2kg, Msun2kg
 
 from skyscapes import Scene, System
 from skyscapes.scene import FlatStar, Planet
@@ -71,25 +75,12 @@ from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.background import AYOZodi
 
 star = FlatStar(
-    Ms_kg=1.989e30,
-    dist_pc=10.0,
     flux_phot_per_nm_m2=1e9,
 )
 
-orbit = KeplerianOrbit(
-    a_AU=jnp.array([1.0]),
-    e=jnp.array([0.0]),
-    W_rad=jnp.array([0.0]),
-    i_rad=jnp.array([jnp.pi / 3]),
-    w_rad=jnp.array([0.0]),
-    M0_rad=jnp.array([0.0]),
-    t0_d=jnp.array([0.0]),
-)
 physical_model = LambertianPhysicalModel(Ag=jnp.array([0.3]))
 planet = Planet(
     Rp_Rearth=jnp.array([1.0]),
-    Mp_Mearth=jnp.array([1.0]),
-    orbit=orbit,
     physical_model=physical_model,
 )
 
@@ -98,9 +89,21 @@ zodi = AYOZodi(
     surface_brightness_mag=22.0,
 )
 
-trig_solver = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
+system = System.from_classical(
+    star=star,
+    planets=(planet,),
+    star_mass_Msun=1.0,
+    planet_mass_Msun=jnp.array([Mearth2kg / Msun2kg]),
+    dist_pc=10.0,
+    a_AU=jnp.array([1.0]),
+    e=jnp.array([0.0]),
+    W_rad=jnp.array([0.0]),
+    i_rad=jnp.array([jnp.pi / 3]),
+    w_rad=jnp.array([0.0]),
+    M0_rad=jnp.array([0.0]),
+)
 scene = Scene(
-    system=System(star=star, planets=(planet,), trig_solver=trig_solver),
+    system=system,
     zodi=zodi,
 )
 ```

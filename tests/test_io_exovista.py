@@ -6,8 +6,6 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from astropy.io import fits
-from hwoutils.constants import G
-from orbix.equations.orbit import mean_motion, period_n
 
 from skyscapes.disk import ExovistaDisk
 from skyscapes.io import from_exovista, get_earth_like_planet_indices
@@ -21,10 +19,12 @@ def test_from_exovista_returns_scene_system(fits_fixture):
 
 
 def test_from_exovista_star_is_spectrum_star(fits_fixture):
-    """Loaded star is a Star with Ms_kg populated from FITS."""
+    """Fails if stellar mass or distance is duplicated in appearance metadata."""
     sys_obj = from_exovista(fits_fixture)
     assert isinstance(sys_obj.star, Star)
-    assert sys_obj.star.Ms_kg > 0.0
+    assert sys_obj.star_mass_Msun > 0.0
+    assert "MASS" not in sys_obj.star.metadata
+    assert "DIST" not in sys_obj.star.metadata
 
 
 def test_from_exovista_planets_are_tuple(fits_fixture):
@@ -45,8 +45,8 @@ def test_from_exovista_planets_coplanar_with_disk(fits_fixture):
     """
     sys_obj = from_exovista(fits_fixture)
     disk_inc = sys_obj.midplane_inc_deg
-    for p in sys_obj.planets:
-        i_deg = float(jnp.rad2deg(p.orbit.i_rad[0]))
+    for inc in sys_obj.dynamics.orbits.to_classical()["i_rad"]:
+        i_deg = float(jnp.rad2deg(inc))
         # The disk plane is i == disk_inc (or its 180 - i mirror).
         delta = min(abs(i_deg - disk_inc), abs(i_deg - (180.0 - disk_inc)))
         assert delta < 8.0, (
@@ -90,7 +90,7 @@ def test_get_earth_like_planet_indices_returns_list(fits_fixture):
 def test_from_exovista_positions_runnable(fits_fixture):
     """Sanity: a System loaded from FITS can be propagated."""
     sys_obj = from_exovista(fits_fixture, planet_indices=[0])
-    t0 = sys_obj.planets[0].orbit.t0_d
+    t0 = sys_obj.dynamics.orbits.epoch_d
     pos = sys_obj.positions(jnp.atleast_1d(t0))
     assert pos.shape[0] == 2
     assert pos.shape[2] == 1
@@ -142,12 +142,12 @@ def test_exovista_flux_preserved_with_standard_phase(
     np.testing.assert_allclose(
         system.planet_flux_densities(600.0, times), expected_flux, rtol=1e-6, atol=0
     )
-    for planet in system.planets:
-        raw, _, dist = planet.orbit.propagate(
-            system.trig_solver, times, Ms_kg=planet.central_mass_kg(star=system.star)
-        )
-        _, phase, _ = planet.propagate(system.trig_solver, times, star=system.star)
-        np.testing.assert_allclose(jnp.cos(phase), raw[:, 2, :] / dist, atol=1e-6)
+    ephemeris = system.ephemeris(times)
+    for target in jnp.asarray(system.body_index, dtype=int) + 1:
+        raw = ephemeris.position_AU[target] - ephemeris.position_AU[0]
+        phase = ephemeris.phase_angle_rad(target)
+        dist = ephemeris.distance_AU(target)
+        np.testing.assert_allclose(jnp.cos(phase), raw[..., 2] / dist, atol=1e-6)
 
 
 def test_exovista_disk_and_planet_share_east_north_chart(fits_fixture):
@@ -168,6 +168,7 @@ def test_exovista_disk_and_planet_share_east_north_chart(fits_fixture):
             jnp.asarray(2451545.0),
             jnp.asarray(system.midplane_inc_deg),
             jnp.asarray(system.midplane_pa_deg),
+            dist_pc=system.dist_pc,
         ),
         dtype=float,
     )
@@ -183,12 +184,13 @@ def test_exovista_disk_and_planet_share_east_north_chart(fits_fixture):
         return np.degrees(0.5 * np.arctan2(2 * xy, yy - xx)) % 180
 
     disk_angle = major_axis_angle(-col, row, brightness)
-    planet = max(system.planets, key=lambda p: float(p.orbit.a_AU[0]))
-    period = period_n(mean_motion(planet.orbit.a_AU, G * system.star.Ms_kg))[0]
-    times = planet.orbit.t0_d[0] + period * jnp.linspace(0.0, 1.0, 1024, endpoint=False)
-    east, north = np.asarray(
-        planet.position_arcsec(system.trig_solver, times, star=system.star)
-    )[:, 0, :]
+    target = int(jnp.argmax(system.dynamics.orbits.a_AU)) + 1
+    period = system.dynamics.orbits.period_d[target - 1]
+    times = system.dynamics.orbits.epoch_d[target - 1] + period * jnp.linspace(
+        0.0, 1.0, 1024, endpoint=False
+    )
+    ephemeris = system.ephemeris(times)
+    east, north = map(np.asarray, ephemeris.offset_arcsec(target))
     orbit_angle = major_axis_angle(east, north, np.ones_like(east))
     difference = abs((disk_angle - orbit_angle + 90) % 180 - 90)
     assert difference < 3.0, (
@@ -201,8 +203,7 @@ def test_exovista_disk_and_planet_share_east_north_chart(fits_fixture):
     # lies on the side of the major axis where the orbit is toward the
     # observer, which a row flip would move across the axis. Measured: the
     # brightness centroid sits 10.6 px toward that side.
-    r_sky, _, _ = planet.propagate(system.trig_solver, times, star=system.star)
-    r_sky = np.asarray(r_sky)[0]
+    r_sky = np.asarray(ephemeris.position_AU[target] - ephemeris.position_AU[0]).T
     near = r_sky[:2, r_sky[2] < 0].mean(axis=1)
     near = near / np.hypot(*near)
     centre = (np.array(brightness.shape, dtype=float) - 1) / 2

@@ -32,14 +32,13 @@ normalization as `BlackbodyStar`. Only solar metallicity is registered, so
 ```python notest
 # downloads two 11.5 MB files from archive.stsci.edu on first use
 import jax.numpy as jnp
-from hwoutils.constants import Msun2kg, Rsun2m
+from hwoutils.constants import Rsun2m
 
 from skyscapes.io import from_phoenix
 
 star = from_phoenix(
     3550.0,
     5.0,
-    Ms_kg=0.4 * Msun2kg,
     dist_pc=5.0,
     radius_m=0.4 * Rsun2m,
     wavelength_range_nm=(3000.0, 6000.0),

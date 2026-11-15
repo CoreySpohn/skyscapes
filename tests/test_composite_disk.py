@@ -31,7 +31,6 @@ def _make_grater(sma_AU: float, ksi0_AU: float = 1.0) -> GraterDisk:
         nx=51,
         ny=51,
         pixel_scale_arcsec=0.2,
-        dist_pc=10.0,
         n_slices_los=31,
     )
 
@@ -47,10 +46,10 @@ def test_composite_sums_components():
     d1 = _make_grater(20.0)
     d2 = _make_grater(40.0)
     composite = CompositeDisk(components=(d1, d2))
-    sb_sum = composite.surface_brightness(_WL, _T, _INCL, _PA)
-    sb_indiv = d1.surface_brightness(_WL, _T, _INCL, _PA) + d2.surface_brightness(
-        _WL, _T, _INCL, _PA
-    )
+    sb_sum = composite.surface_brightness(_WL, _T, _INCL, _PA, dist_pc=10.0)
+    sb_indiv = d1.surface_brightness(
+        _WL, _T, _INCL, _PA, dist_pc=10.0
+    ) + d2.surface_brightness(_WL, _T, _INCL, _PA, dist_pc=10.0)
     assert sb_sum.shape == (51, 51)
     assert jnp.allclose(sb_sum, sb_indiv, rtol=1e-5, atol=1e-12)
 
@@ -64,8 +63,12 @@ def test_composite_retrograde_render_is_nonnegative_and_mirrored():
     floating-point.
     """
     composite = CompositeDisk(components=(_make_grater(20.0), _make_grater(40.0)))
-    low = np.asarray(composite.surface_brightness(_WL, _T, jnp.array(60.0), _PA))
-    high = np.asarray(composite.surface_brightness(_WL, _T, jnp.array(120.0), _PA))
+    low = np.asarray(
+        composite.surface_brightness(_WL, _T, jnp.array(60.0), _PA, dist_pc=10.0)
+    )
+    high = np.asarray(
+        composite.surface_brightness(_WL, _T, jnp.array(120.0), _PA, dist_pc=10.0)
+    )
     assert np.all(high >= 0.0), f"negative radiance, min {high.min():.3g}"
     np.testing.assert_allclose(high, low[::-1], rtol=1e-9, atol=1e-12 * low.max())
 
@@ -76,10 +79,10 @@ def test_composite_jit_round_trip():
 
     @jax.jit
     def f(c):
-        return c.surface_brightness(_WL, _T, _INCL, _PA)
+        return c.surface_brightness(_WL, _T, _INCL, _PA, dist_pc=10.0)
 
     sb_jit = f(composite)
-    sb_eager = composite.surface_brightness(_WL, _T, _INCL, _PA)
+    sb_eager = composite.surface_brightness(_WL, _T, _INCL, _PA, dist_pc=10.0)
     # jit and eager fuse the log-spaced LOS trapezoid reduction differently, so the
     # near-zero outer-disk pixels agree only to the field scale, not to 1e-12.
     atol = 1e-6 * float(jnp.max(sb_eager))
@@ -110,7 +113,6 @@ def test_composite_rejects_mismatched_extents():
         nx=51,
         ny=51,
         pixel_scale_arcsec=0.4,  # different from d1
-        dist_pc=10.0,
         n_slices_los=31,
     )
     with pytest.raises(ValueError, match="spatial_extent"):
@@ -127,6 +129,6 @@ def test_composite_heterogeneous_components():
         contrast_cube=cube,
     )
     composite = CompositeDisk(components=(grater, exo))
-    sb = composite.surface_brightness(_WL, _T, _INCL, _PA)
+    sb = composite.surface_brightness(_WL, _T, _INCL, _PA, dist_pc=10.0)
     assert sb.shape == (grater.ny, grater.nx)
     assert bool(jnp.all(jnp.isfinite(sb)))

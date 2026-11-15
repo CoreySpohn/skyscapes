@@ -1,7 +1,7 @@
 """The system view: star, planets and disk extent in one physical frame.
 
 skyscapes supplies what eyepiece cannot know: where each planet is at an
-epoch (``System.positions`` and ``Planet.propagate``), where the disk's
+epoch (``System.positions`` and ``System.ephemeris``), where the disk's
 midplane sits (``System.midplane_inc_deg`` / ``midplane_pa_deg`` through
 the library's sky rotation), which way the observer is (``-z``), and that
 RA offsets are drawn increasing to the left.
@@ -59,11 +59,12 @@ def _star_color(styles):
 
 def _positions_xyz_AU(system, time_jd):
     """Star-centered sky-frame positions [AU], shape ``(K_total, 3, T)``."""
-    per_planet = [
-        np.asarray(p.propagate(system.trig_solver, time_jd, star=system.star)[0])
-        for p in system.planets
-    ]
-    return np.concatenate(per_planet, axis=0)
+    ephemeris = system.ephemeris(time_jd)
+    position = (
+        ephemeris.position_AU[jnp.asarray(system.body_index, dtype=int) + 1]
+        - ephemeris.position_AU[0]
+    )
+    return np.moveaxis(np.asarray(position), -1, 1)
 
 
 def plot_system(
@@ -168,7 +169,7 @@ def plot_system(
     if not 0.0 <= incl <= 180.0:
         raise ValueError(f"midplane_inc_deg must lie in [0, 180], got {incl}")
     pa = float(system.midplane_pa_deg)
-    dist_pc = float(system.star.dist_pc)
+    dist_pc = float(system.dist_pc)
 
     scatters, lines, texts = [], [], []
     extent = [0.0]
