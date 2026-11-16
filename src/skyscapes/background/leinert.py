@@ -12,41 +12,11 @@ from __future__ import annotations
 import jax.numpy as jnp
 import zodi
 from hwoutils.conversions import mag_to_flux_jy
-from zodi import tables
-
-# =============================================================================
-# Constants
-# =============================================================================
-
-# AYO default: 22 mag/arcsec^2 at V-band (ETC calibration paper, 135 deg solar lon)
-AYO_DEFAULT_ZODI_MAG_V = zodi.AYO_DEFAULT_ZODI_MAG_V
-V_BAND_WAVELENGTH_NM = zodi.V_BAND_WAVELENGTH_NM
-
-# =============================================================================
-# Leinert et al. (1998) tables, as JAX arrays
-# =============================================================================
-
-# Table 17 in S10 units; rows are solar longitude, columns ecliptic latitude.
-# Near-Sun exclusion cells carry the sentinel -1 here (nan in ``zodi.tables``).
-LEINERT_BETA_DEG = jnp.asarray(tables.BETA_GRID_DEG)
-LEINERT_SOLAR_LON_DEG = jnp.asarray(tables.LON_GRID_DEG)
-LEINERT_TABLE17 = jnp.where(
-    jnp.isnan(jnp.asarray(tables.TABLE17_RAW)), -1.0, jnp.asarray(tables.TABLE17_RAW)
-)
-
-# Table 19: spectral radiance at 90 deg solar elongation (W m-2 sr-1 um-1).
-LEINERT_WAVELENGTH_UM = jnp.asarray(tables.TABLE19_WAVELENGTH_UM)
-LEINERT_B_LAMBDA = jnp.asarray(tables.TABLE19_RADIANCE_W_M2_SR_UM)
-
-
-# =============================================================================
-# Core functions
-# =============================================================================
 
 
 def zodi_color_correction(
     wavelength_nm: float,
-    reference_wavelength_nm: float = V_BAND_WAVELENGTH_NM,
+    reference_wavelength_nm: float = zodi.V_BAND_WAVELENGTH_NM,
     photon_units: bool = True,
 ) -> float:
     """Wavelength-dependent color correction from Leinert Table 19.
@@ -65,13 +35,9 @@ def zodi_color_correction(
     """
     wavelength_nm = jnp.asarray(wavelength_nm)
     reference_wavelength_nm = jnp.asarray(reference_wavelength_nm)
-    power_correction = zodi.color_correction(wavelength_nm, reference_wavelength_nm)
-    photon_factor = jnp.where(
-        photon_units,
-        wavelength_nm / reference_wavelength_nm,
-        1.0,
+    return zodi.color_correction(
+        wavelength_nm, reference_wavelength_nm, photon_units=photon_units
     )
-    return power_correction * photon_factor
 
 
 def leinert_zodi_factor(
@@ -178,7 +144,7 @@ def ayo_default_zodi_flux_jy(wavelength_nm: float) -> float:
 def create_zodi_spectrum_jax(
     wavelengths_nm: jnp.ndarray,
     reference_flux_jy: float | None = None,
-    reference_wavelength_nm: float = V_BAND_WAVELENGTH_NM,
+    reference_wavelength_nm: float = zodi.V_BAND_WAVELENGTH_NM,
 ) -> jnp.ndarray:
     """Create zodiacal light spectrum in Jy/arcsec^2 from reference flux.
 
@@ -191,7 +157,7 @@ def create_zodi_spectrum_jax(
         Array of surface brightness in Jy/arcsec^2.
     """
     if reference_flux_jy is None:
-        reference_flux_jy = mag_to_flux_jy(AYO_DEFAULT_ZODI_MAG_V)
+        reference_flux_jy = mag_to_flux_jy(zodi.AYO_DEFAULT_ZODI_MAG_V)
     return reference_flux_jy * zodi.ab_color_correction(
         jnp.asarray(wavelengths_nm), jnp.asarray(reference_wavelength_nm)
     )

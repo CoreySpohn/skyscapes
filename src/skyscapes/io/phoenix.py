@@ -190,7 +190,7 @@ def from_phoenix(
         fetch: Callable mapping a node Teff in kelvin to a local FITS path.
 
     Returns:
-        A ``Star`` whose ``spec_flux_density`` is the observer flux in
+        A ``Star`` whose ``photon_flux_density`` is the observer flux in
         ph/s/m^2/nm.
     """
     wavelength_nm, surface_flux = phoenix_surface_flux(teff_K, logg, mh, fetch=fetch)

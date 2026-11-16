@@ -23,7 +23,7 @@ class SumPhysicalModel(AbstractPhysicalModel):
         if not self.components:
             raise ValueError("SumPhysicalModel needs at least one component")
 
-    def spec_flux_density(
+    def _photon_flux_density(
         self,
         wavelength_nm: Array,
         *,
@@ -39,7 +39,7 @@ class SumPhysicalModel(AbstractPhysicalModel):
         ``time_d`` is days from the scene epoch.
         """
         return sum(
-            component.spec_flux_density(
+            component._photon_flux_density(
                 wavelength_nm,
                 phase_angle_rad=phase_angle_rad,
                 dist_AU=dist_AU,
@@ -78,7 +78,7 @@ class SumPhysicalModel(AbstractPhysicalModel):
         """
         if star is None:
             raise ValueError("SumPhysicalModel needs the host star")
-        flux = self.spec_flux_density(
+        flux = self._photon_flux_density(
             wavelength_nm,
             phase_angle_rad=phase_angle_rad,
             dist_AU=dist_AU,
@@ -87,4 +87,4 @@ class SumPhysicalModel(AbstractPhysicalModel):
             star=star,
             dist_pc=dist_pc,
         )
-        return flux / star.spec_flux_density(wavelength_nm, time_d, dist_pc=dist_pc)
+        return flux / star.photon_flux_density(wavelength_nm, time_d, dist_pc=dist_pc)

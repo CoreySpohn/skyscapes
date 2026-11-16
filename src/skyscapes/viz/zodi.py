@@ -448,7 +448,7 @@ def plot_local_zodi_geometry(
 ):
     """Draw the geometry behind a local zodiacal-light lookup.
 
-    The two inputs are those of ``LeinertZodi.spec_flux_density``: the
+    The two inputs are those of ``LeinertZodi.photon_radiance``: the
     look direction's ecliptic latitude ``beta`` and its helio-ecliptic
     longitude difference from the Sun ``Delta lambda`` (0 toward the Sun,
     180 away from it). The observer sits inside the cloud at

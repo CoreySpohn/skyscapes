@@ -18,7 +18,7 @@ from orbix.system import System as DynamicsSystem
 
 from .._repr import indent
 from ..disk import AbstractDisk
-from ..spectral import Bandpass, _model_max_knots, bin_mean
+from ..spectral import Bandpass, bin_mean
 from . import _system_batch
 from ._system_batch import _PAD_ORBIT
 from .planet import Planet
@@ -474,7 +474,7 @@ class System(eqx.Module):
                 planet.physical_model,
             )
             values.append(
-                model.spec_flux_density(wavelength_nm, **geometry)
+                model.photon_flux_density(wavelength_nm, **geometry)
                 if flux
                 else model.contrast_at_time(wavelength_nm=wavelength_nm, **geometry)
             )
@@ -529,23 +529,26 @@ class System(eqx.Module):
         tables each stellar interval is integrated with ``n_nodes`` Gauss-
         Legendre nodes, clipping the end intervals to the bin. This resolves
         stellar lines and integrates the product of stellar flux and planet
-        contrast, with an exact stellar denominator. Resolve any additional
-        planetary features by increasing ``n_nodes``. Other stars use one
-        Gauss-Legendre rule per bin. This is a flux-weighted contrast, not
-        a mean of monochromatic contrasts. See Davis and Rabinowitz (1984),
-        Methods of Numerical Integration, for the quadrature rule. Concrete
-        bin geometry determines the static interval cap; traced geometry uses
-        a conservative full-table cap. Close over concrete bins when compiling
-        to retain bounded work.
+        contrast, with an exact stellar denominator for linear photon tables.
+        Resolve additional planetary features by increasing ``n_nodes``. Analytic
+        stars use one Gauss-Legendre rule per bin. This is a flux-weighted contrast,
+        not a mean of monochromatic contrasts. See Davis and Rabinowitz (1984),
+        Methods of Numerical Integration, for the quadrature rule. The static
+        interval cap covers all stellar knots.
         """
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
-        numerator = self.bin_mean_planet_flux_densities(
-            centers_nm, widths_nm, time_d, n_nodes=n_nodes, ephemeris=eph
-        )
         knots = self.star.quadrature_knots_nm
+        numerator = bin_mean(
+            lambda w: self.planet_flux_densities(w, time_d, ephemeris=eph),
+            centers_nm,
+            widths_nm,
+            n_nodes=n_nodes,
+            knots_nm=knots,
+            max_knots=None if knots is None else len(knots) + 1,
+        )
         denominator = bin_mean(
             lambda w: jax.vmap(
-                lambda t: self.star.spec_flux_density(
+                lambda t: self.star.photon_flux_density(
                     w, t, dist_pc=self.dynamics.frame.dist_pc
                 )
             )(time_d),
@@ -553,7 +556,7 @@ class System(eqx.Module):
             widths_nm,
             n_nodes=n_nodes,
             knots_nm=knots,
-            max_knots=_model_max_knots(centers_nm, widths_nm, knots),
+            max_knots=None if knots is None else len(knots) + 1,
         )
         centers, widths = jnp.asarray(centers_nm), jnp.asarray(widths_nm)
         point_bin = centers - widths / 2 == centers + widths / 2
@@ -576,7 +579,7 @@ class System(eqx.Module):
         Multiply photon flux densities by the photon-counting transmission.
         Split quadrature at both the bandpass table and stellar spectral
         knots. ``n_nodes`` is the Gauss-Legendre order per interval: linear
-        transmission is exact at order one, its product with a linear
+        transmission is exact at order one, its product with a linear photon
         spectrum at order two. Increase the order to resolve smooth spectral
         curvature or additional planetary features. The integrated stellar
         photon flux must be nonzero.
@@ -590,7 +593,7 @@ class System(eqx.Module):
         quadrature = dict(
             n_nodes=n_nodes,
             knots_nm=knots,
-            max_knots=_model_max_knots(centers, widths, knots),
+            max_knots=len(knots) + 1,
             weight_fn=bandpass,
         )
         numerator = bin_mean(
@@ -601,7 +604,7 @@ class System(eqx.Module):
         )[0]
         denominator = bin_mean(
             lambda w: jax.vmap(
-                lambda t: self.star.spec_flux_density(
+                lambda t: self.star.photon_flux_density(
                     w, t, dist_pc=self.dynamics.frame.dist_pc
                 )
             )(time_d),
@@ -610,39 +613,6 @@ class System(eqx.Module):
             **quadrature,
         )[0]
         return numerator / denominator[None, :]
-
-    @_batch_method
-    def bin_mean_planet_flux_densities(
-        self,
-        centers_nm: Array,
-        widths_nm: Array,
-        time_d: Array,
-        *,
-        n_nodes: int = 4,
-        ephemeris=None,
-    ) -> Array:
-        """Band-mean planet flux [ph/s/m^2/nm], shape ``(W, K_total, T)``.
-
-        ``time_d`` is days from the scene epoch.
-
-        Centers and nonnegative full widths are ``(W,)`` in nm; dates are
-        ``(T,)``. Integrate each model's photon flux, splitting at the star's
-        public quadrature knots. Zero width returns the monochromatic flux.
-        Use Gauss-Legendre quadrature (Davis and Rabinowitz 1984, Methods of
-        Numerical Integration). Concrete geometry determines the static cap;
-        traced geometry uses a conservative full-table cap. Close over concrete
-        bins when compiling to retain bounded work.
-        """
-        eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
-        knots = self.star.quadrature_knots_nm
-        return bin_mean(
-            lambda w: self.planet_flux_densities(w, time_d, ephemeris=eph),
-            centers_nm,
-            widths_nm,
-            n_nodes=n_nodes,
-            knots_nm=knots,
-            max_knots=_model_max_knots(centers_nm, widths_nm, knots),
-        )
 
     @_batch_method
     def planet_flux_densities(

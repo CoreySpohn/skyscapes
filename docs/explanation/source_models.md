@@ -97,10 +97,10 @@ blackbody = BlackbodyStar(
 )
 
 # All implement the same interface
-print(star.spec_flux_density(wavelength_nm=550.0, time_d=365.0))
-print(flat.spec_flux_density(wavelength_nm=550.0, time_d=365.0))
+print(star.photon_flux_density(wavelength_nm=550.0, time_d=365.0, dist_pc=10.0))
+print(flat.photon_flux_density(wavelength_nm=550.0, time_d=365.0, dist_pc=10.0))
 print(
-    blackbody.spec_flux_density(
+    blackbody.photon_flux_density(
         wavelength_nm=550.0,
         time_d=365.0,
         dist_pc=10.0,
@@ -117,15 +117,20 @@ value.
 the observer flux in photons/s/m^2/nm. Following Rybicki and Lightman
 (1979), *Radiative Processes in Astrophysics*, the surface flux is
 `pi * B_photon`, diluted by `(radius_m / (dist_pc * pc2m))**2` at the
-observer. Supply `dist_pc` when evaluating its flux or
-`diameter_arcsec(*, dist_pc)`. Apparent-flux `Star` and `FlatStar` accept
-an optional distance argument but ignore it. Wavelengths are in nanometers,
+observer. Supply `dist_pc` when evaluating photon flux for any star, or
+`diameter_arcsec(*, dist_pc)` for a blackbody. Apparent-flux `Star` and
+`FlatStar` ignore the supplied distance. Wavelengths are in nanometers,
 and the result retains their shape. The spectrum is static, so `time_d` is ignored. Both `jax.jit`
 and `jax.vmap` over wavelength are supported.
 
 `flux_density_jy` is the observer's disk-integrated spectral flux
-density, shape `(n_wl, n_time)`. `spec_flux_density` returns
-photons/s/m^2/nm. Direct construction uses cubic interpolation by
+density, shape `(n_wl, n_time)`. `Star` converts this table once to photon
+density at construction. `photon_flux_density` interpolates that photon table
+and returns photons/s/m^2/nm. It replaces `spec_flux_density` by a rename
+only, with the same unit; the old method is removed.
+`quadrature_knots_nm` exposes table breakpoints for every interpolation method.
+A Gauss-Legendre rule split at the knots integrates a linear photon table
+exactly, even at order one. Direct construction uses cubic interpolation by
 default; stars imported with `from_exovista` use linear interpolation
 (`interpolation_method="linear"`) to avoid overshooting nonnegative
 samples. Multi-epoch tables return NaN outside their time range.
@@ -366,13 +371,14 @@ planetary system itself. Currently zodiacal light is the only kind
 modeled; the `skyscapes.background` submodule will grow to host
 extragalactic background, scattered starlight, etc. as needed.
 
-Three Zodi variants (each implements `spec_flux_density`):
+Three variants implement `AbstractLocalZodi.photon_radiance(wavelength_nm, *,
+ecliptic_latitude_deg, solar_longitude_deg)`, returning ph/s/m^2/nm/sr:
 
 | Class | What it is |
 |---|---|
-| `AYOZodi` | AYO-convention defaults: fixed V-band magnitude × Leinert wavelength-dependent colour correction. Position-independent (the AYO convention bakes in solar longitude 135 deg). |
+| `AYOZodi` | AYO-convention defaults: fixed V-band magnitude × Leinert wavelength-dependent colour correction. Position-independent; both pointing keywords are ignored. |
 | `LeinertZodi` | Full Leinert+1998 position-dependent model: surface brightness varies with ecliptic latitude and solar longitude. Use when telescope-orbit geometry matters. |
-| `PrecomputedZodi` | Wraps an externally computed photon-flux array (e.g. from EXOSIMS) for fast lookup. Position arguments accepted but ignored. |
+| `PrecomputedZodi` | Wraps an externally computed photon-radiance array in per-steradian units (e.g. from EXOSIMS) for fast lookup. Position arguments accepted but ignored. |
 
 Requires user-supplied zodiacal flux arrays and a configured system.
 
@@ -382,18 +388,16 @@ import jax.numpy as jnp
 
 # Sandbox / AYO-compatible
 zodi = AYOZodi(
-    wavelengths_nm=jnp.linspace(400, 1000, 60),
-    surface_brightness_mag=22.0,
+    surface_brightness_mag_arcsec2=22.0,
 )
 
 # Realistic position-dependent
-zodi = LeinertZodi(reference_mag_arcsec2=22.0)
+zodi = LeinertZodi()
 
 # Externally computed
 zodi = PrecomputedZodi(
     wavelengths_nm=...,
-    flux_phot_per_arcsec2=...,
-    reference_mag_arcsec2=22.0,
+    radiance_phot_per_s_m2_nm_sr=...,
 )
 
 scene = Scene(system=system, zodi=zodi)
@@ -410,7 +414,7 @@ def my_function(zodi: Zodi):
     ...
 ```
 
-For the geometry inputs that `LeinertZodi.spec_flux_density` requires
+For the geometry inputs that `LeinertZodi.photon_radiance` requires
 (ecliptic latitude, solar longitude), see
 [local zodi + telescope geometry](local_zodi_geometry).
 

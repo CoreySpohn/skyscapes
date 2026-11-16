@@ -113,14 +113,48 @@ def test_planet_contrast_wavelength_agnostic_for_lambertian():
     assert jnp.allclose(c_blue, c_red, rtol=1e-6)
 
 
-def test_planet_spec_flux_density_equals_contrast_times_star():
-    """spec_flux_density equals contrast times star.spec_flux_density."""
-    p = _single_scene()
-    time_d = jnp.array([0.0])
-    wl = jnp.array(600.0)
-    c = p.contrasts(wl, time_d)
-    f = p.planet_flux_densities(wl, time_d)
-    assert jnp.allclose(f, c * 1e9, rtol=1e-6)
+def test_planet_photon_flux_density_formula_phase_and_jax():
+    """Fails on inverted phase, photon units, or dropped quadrature-node axes.
+
+    Brown (2005) Eq. 4 gives Ag*(Rp/r)^2*(sin b+(pi-b)*cos b)/pi.
+    At M=90 deg, i=60 deg the planet is on the far (superior) side with
+    phase 30 deg; M=0 is quadrature. 3e-13 relative bounds float64 orbit
+    rotation and photon algebra, with atol=0 for tiny planetary fluxes.
+    """
+    p = _circular_scene(jnp.pi / 3)
+    times = jnp.array([0.0, _quarter_period_times(p)[0]])
+    wave = jnp.array([[500.0, 550.0], [600.0, 700.0]])
+    eph = p.ephemeris(times)
+    model = p.planets[0].physical_model
+    geometry = dict(
+        phase_angle_rad=eph.phase_angle_rad(jnp.array([1]), 0),
+        dist_AU=eph.distance_AU(jnp.array([1]), 0),
+        Rp_Rearth=p.planets[0].Rp_Rearth,
+        star=p.star,
+        dist_pc=p.dist_pc,
+    )
+
+    def evaluate(w):
+        return model.photon_flux_density(w, times, **geometry)
+
+    beta = np.array([np.pi / 2, np.pi / 6])
+    phase = (np.sin(beta) + (np.pi - beta) * np.cos(beta)) / np.pi
+    # Earth equatorial radius and AU in metres, independently typed.
+    contrast = 0.3 * (6.3781e6 / 1.495978707e11) ** 2 * phase
+    expected = np.broadcast_to(contrast[None, :, None, None] * 1e9, (1, 2, 2, 2))
+    actual = evaluate(wave)
+    np.testing.assert_allclose(actual, expected, rtol=3e-13, atol=0)
+    assert np.all(np.asarray(actual[:, 1]) > np.asarray(actual[:, 0]))
+    np.testing.assert_allclose(
+        eqx.filter_jit(evaluate)(wave), actual, rtol=3e-13, atol=0
+    )
+    loop = jnp.stack([evaluate(w) for w in wave.ravel()])
+    np.testing.assert_allclose(
+        jax.vmap(evaluate)(wave.ravel()), loop, rtol=3e-13, atol=0
+    )
+    np.testing.assert_allclose(
+        p.planet_flux_densities(550.0, times), expected[:, :, 0, 0], rtol=3e-13, atol=0
+    )
 
 
 def test_scene_reference_mean_anomaly_range():

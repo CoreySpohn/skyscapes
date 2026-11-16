@@ -164,9 +164,14 @@ def test_bin_planet_flux_narrow_limit():
     times = jnp.array([0.0, 100.0])
     actual, expected = eqx.filter_jit(
         lambda: (
-            system.bin_mean_planet_flux_densities(centers, widths, times),
+            bin_mean(
+                lambda w: system.planet_flux_densities(w, times),
+                centers,
+                widths,
+                knots_nm=star.quadrature_knots_nm,
+            ),
             system.contrast_cube(centers, times)
-            * star.spec_flux_density(centers, 0.0, dist_pc=system.dist_pc)[
+            * star.photon_flux_density(centers, 0.0, dist_pc=system.dist_pc)[
                 :, None, None
             ],
         )
@@ -203,8 +208,9 @@ def test_contrast_rejects_wavelength_arrays(target, wavelength, traced):
 def test_bin_contrast_weights_flux_and_has_point_limit(tabulated):
     """Fails if contrast is averaged without photon weighting or loses its point limit.
 
-    For F(lambda)=lambda/500 and C(lambda)=lambda/500, the band ratio
-    is (center + width**2/(12*center))/500, independent of epoch.
+    For photon density F(lambda)=lambda/500 and C(lambda)=lambda/500,
+    the band ratio is (center + width**2/(12*center))/500, independent
+    of epoch. Tolerance 1e-12 allows float64 polynomial quadrature roundoff.
     """
     wave = jnp.array([400.0, 500.0, 600.0, 800.0])
     if tabulated:
@@ -290,29 +296,32 @@ def test_sum_flux_preserves_components_bins_and_gradients():
     )
     np.testing.assert_allclose(
         system.contrasts(wavelength, times),
-        actual / star.spec_flux_density(wavelength, times, dist_pc=system.dist_pc),
+        actual / star.photon_flux_density(wavelength, times, dist_pc=system.dist_pc),
         rtol=2e-15,
         atol=0,
     )
     centers, widths = jnp.array([5000.0, 5500.0]), jnp.array([800.0, 0.0])
     expected_bins = jnp.sum(
-        parts.bin_mean_planet_flux_densities(centers, widths, times),
+        bin_mean(
+            lambda w: parts.planet_flux_densities(w, times),
+            centers,
+            widths,
+            knots_nm=star.quadrature_knots_nm,
+        ),
         axis=1,
         keepdims=True,
     )
     np.testing.assert_allclose(
-        system.bin_mean_planet_flux_densities(centers, widths, times),
+        bin_mean(
+            lambda w: system.planet_flux_densities(w, times),
+            centers,
+            widths,
+            knots_nm=star.quadrature_knots_nm,
+        ),
         expected_bins,
         rtol=1e-12,
         atol=0,
     )
-    direct = bin_mean(
-        lambda w: system.planet_flux_densities(w, times),
-        centers,
-        widths,
-        knots_nm=star.quadrature_knots_nm,
-    )
-    np.testing.assert_allclose(direct, expected_bins, rtol=1e-12, atol=0)
 
     def log_flux(scales):
         varied = eqx.tree_at(
@@ -337,7 +346,7 @@ def test_sum_flux_preserves_components_bins_and_gradients():
         eqx.tree_at(lambda s: s.star, system, dark).planet_flux_densities(
             wavelength, times
         ),
-        emitted.physical_model.spec_flux_density(
+        emitted.physical_model._photon_flux_density(
             wavelength, emitted.Rp_Rearth, dist_pc=system.dist_pc
         )[:, None]
         * jnp.ones((1, 2)),
@@ -602,9 +611,7 @@ def _scene_observables(system, times, **kwargs):
         band_contrasts=system.band_contrasts(
             Bandpass.tophat(600.0, 80.0), times, n_nodes=2, **kwargs
         ),
-        bin_mean_planet_flux_densities=system.bin_mean_planet_flux_densities(
-            waves, widths, times, n_nodes=2, **kwargs
-        ),
+        photon_flux=system.planet_flux_densities(waves[0], times, **kwargs),
         planet_flux_densities=system.planet_flux_densities(waves[0], times, **kwargs),
         alpha_dMag=jnp.stack(system.alpha_dMag(times, **kwargs)),
     )
@@ -634,7 +641,7 @@ def _independent_observables(system, times, index=0):
     contrast = planet.physical_model.contrast_at_time(
         wavelength_nm=jnp.asarray(500.0), **geometry
     )
-    flux = planet.physical_model.spec_flux_density(jnp.asarray(500.0), **geometry)
+    flux = planet.physical_model.photon_flux_density(jnp.asarray(500.0), **geometry)
     positions = r[:, :2, :].transpose(1, 0, 2) * (rad2arcsec / (system.dist_pc * pc2AU))
     alpha = reference.separation_arcsec
     stellar_reference = two_body_reference(
@@ -649,7 +656,7 @@ def _independent_observables(system, times, index=0):
         contrast_cube=jnp.stack([contrast, contrast]),
         bin_mean_contrast_cube=jnp.stack([contrast, contrast]),
         band_contrasts=contrast,
-        bin_mean_planet_flux_densities=jnp.stack([flux, flux]),
+        photon_flux=flux,
         planet_flux_densities=flux,
         alpha_dMag=jnp.stack(
             [alpha, -2.5 * jnp.log10(contrast + jnp.finfo(contrast.dtype).tiny)]

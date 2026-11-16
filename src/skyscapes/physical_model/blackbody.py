@@ -15,7 +15,7 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
     The planet's photon flux density at the observer is
     ``pi B(T) (Rp / d)^2`` with ``B`` the Planck photon radiance (Rybicki &
     Lightman 1979, Radiative Processes in Astrophysics); the contrast is
-    that flux over the host star's own ``spec_flux_density``, so any star
+    that flux over the host star's own ``photon_flux_density``, so any star
     model serves as the denominator.
 
     Attributes:
@@ -24,7 +24,7 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
 
     teff_K: Array
 
-    def spec_flux_density(
+    def _photon_flux_density(
         self,
         wavelength_nm: Array,
         Rp_Rearth: Array,
@@ -108,7 +108,7 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
             area = (Rp_Rearth * Rearth2m / star.radius_m) ** 2
             ratio = (area * jnp.expm1(x_star) / jnp.expm1(x_planet))[:, None]
             return ratio * jnp.ones_like(phase_angle_rad)
-        flux = self.spec_flux_density(
+        flux = self._photon_flux_density(
             wavelength_nm,
             phase_angle_rad=phase_angle_rad,
             dist_AU=dist_AU,
@@ -117,7 +117,7 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
             star=star,
             dist_pc=dist_pc,
         )
-        return flux / star.spec_flux_density(wavelength_nm, time_d, dist_pc=dist_pc)
+        return flux / star.photon_flux_density(wavelength_nm, time_d, dist_pc=dist_pc)
 
     def __repr__(self) -> str:
         """One-line summary of the effective temperature."""

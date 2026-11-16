@@ -44,7 +44,9 @@ star = from_phoenix(
     wavelength_range_nm=(3000.0, 6000.0),
 )
 wavelength_nm = jnp.linspace(3900.0, 5000.0, 200)
-photon_flux = star.spec_flux_density(wavelength_nm, jnp.zeros(()))  # ph/s/m^2/nm
+photon_flux = star.photon_flux_density(
+    wavelength_nm, jnp.zeros(()), dist_pc=5.0
+)  # ph/s/m^2/nm
 ```
 
 `phoenix_surface_flux(teff_K, logg)` returns the model surface flux in

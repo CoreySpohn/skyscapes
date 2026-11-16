@@ -193,7 +193,11 @@ def test_exovista_phase_model_preserves_analytic_light_curve(known_orbit_file):
     np.testing.assert_allclose(
         system.contrasts(600.0, times)[0], 2 * contrast, rtol=2e-6, atol=0
     )
-    expected_flux = 2 * contrast * system.star.spec_flux_density(600.0, times)
+    expected_flux = (
+        2
+        * contrast
+        * system.star.photon_flux_density(600.0, times, dist_pc=system.dist_pc)
+    )
     np.testing.assert_allclose(
         system.planet_flux_densities(600.0, times)[0], expected_flux, rtol=2e-6, atol=0
     )

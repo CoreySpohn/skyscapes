@@ -1,32 +1,7 @@
-"""Background sources that fill the field of view.
+"""Local backgrounds with a common per-steradian photon radiance contract."""
 
-A background is anything in the telescope's field of view that is not part
-of the planetary system itself: zodiacal light, extragalactic background,
-line-of-sight stars, etc. Each background type is its own concrete class;
-there is deliberately no shared abstract base yet -- the eventual taxonomy
-will be designed once a second background type beyond zodi exists.
-
-Currently this module exposes three zodi flavours, all returning
-``ph/s/m^2/nm`` per ``arcsec^2``.
-"""
-
-from __future__ import annotations
-
-from .zodi import AYOZodi, LeinertZodi, PrecomputedZodi
+from .zodi import AbstractLocalZodi, AYOZodi, LeinertZodi, PrecomputedZodi
 
 Zodi = AYOZodi | LeinertZodi | PrecomputedZodi
-"""Nominal union of all concrete zodi source types.
 
-Used as the type annotation on ``Scene.zodi`` and on coronagraphoto's
-``gen_zodi_count_rate`` / ``sim_zodi``. Each variant must implement
-``spec_flux_density(wavelength_nm, time_d, ecliptic_lat_deg, solar_lon_deg)``.
-Here ``time_d`` is days from the scene epoch.
-New variants must be added to this union AND implement that method.
-"""
-
-__all__ = [
-    "AYOZodi",
-    "LeinertZodi",
-    "PrecomputedZodi",
-    "Zodi",
-]
+__all__ = ["AYOZodi", "AbstractLocalZodi", "LeinertZodi", "PrecomputedZodi", "Zodi"]

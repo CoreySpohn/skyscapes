@@ -572,7 +572,7 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         rp_over_d = (Rp_Rearth * Rearth2AU) / (distance_pc * const.pc2AU)
         return f_nu_cgs * _ERG_PER_S_CM2_PER_HZ_TO_JY * rp_over_d**2
 
-    def spec_flux_density(
+    def _photon_flux_density(
         self,
         wavelength_nm: Array,
         *,
@@ -624,7 +624,7 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         """
         if star is None:
             raise ValueError("ExoJaxEmissionModel needs the host star")
-        flux = self.spec_flux_density(
+        flux = self._photon_flux_density(
             wavelength_nm,
             phase_angle_rad=phase_angle_rad,
             dist_AU=dist_AU,
@@ -633,7 +633,7 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
             star=star,
             dist_pc=dist_pc,
         )
-        return flux / star.spec_flux_density(wavelength_nm, time_d, dist_pc=dist_pc)
+        return flux / star.photon_flux_density(wavelength_nm, time_d, dist_pc=dist_pc)
 
     def __repr__(self) -> str:
         """One-line summary of species, grid and planet count."""

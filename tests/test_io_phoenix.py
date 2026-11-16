@@ -20,6 +20,7 @@ from astropy import units as u
 from astropy.io import fits
 from hwoutils.constants import Rsun2m, h, k_B, nm2m, pc2m, sigma_SB
 from hwoutils.constants import c as c_si
+from hwoutils.spectral import bin_mean
 
 from skyscapes.datasets import fetch_castelli_kurucz, fetch_phoenix
 from skyscapes.io import (
@@ -41,7 +42,9 @@ def fixture_path(teff_K: int) -> str:
 
 def photon_energy_flux_w_m2(star, wavelength_nm):
     """Integral of photon flux density times hc/lambda over wavelength."""
-    photons = np.asarray(star.spec_flux_density(wavelength_nm, jnp.zeros(())))
+    photons = np.asarray(
+        star.photon_flux_density(wavelength_nm, jnp.zeros(()), dist_pc=10.0)
+    )
     energy_w_m2_nm = photons * h * c_si / (wavelength_nm * 1e-9)
     return np.trapezoid(energy_w_m2_nm, wavelength_nm)
 
@@ -214,8 +217,8 @@ def test_star_jit_matches_eager():
     )
     wavelength_nm = jnp.linspace(3900.0, 5000.0, 64)
     time_d = jnp.zeros(())
-    eager = star.spec_flux_density(wavelength_nm, time_d)
-    jitted = eqx.filter_jit(lambda s, w, t: s.spec_flux_density(w, t))(
+    eager = star.photon_flux_density(wavelength_nm, time_d, dist_pc=10.0)
+    jitted = eqx.filter_jit(lambda s, w, t: s.photon_flux_density(w, t, dist_pc=10.0))(
         star, wavelength_nm, time_d
     )
     np.testing.assert_array_max_ulp(np.asarray(jitted), np.asarray(eager), maxulp=4)
@@ -258,7 +261,11 @@ def test_archive_node_matches_vendored_copy():
 def test_castelli_kurucz_synthetic_units_and_missing_gravity(
     tmp_path, teff_K, logg, factor
 ):
-    """Fails if CK04 columns, missing gravities, log blends, or units are misread."""
+    """Fails if CK04 columns, gravity, log blends, or spectral units are misread.
+
+    Constant F_lambda gives a photon density linear in wavelength. Its bin
+    mean equals its central value exactly; rtol 1e-12 allows float64 roundoff.
+    """
     wave_angstrom = np.array([9000.0, 10000.0, 20000.0, 40000.0, 60000.0])
     paths = {}
     for temperature, scale in ((12000, 1.0), (12250, 4.0)):
@@ -288,7 +295,15 @@ def test_castelli_kurucz_synthetic_units_and_missing_gravity(
     surface = (factor * u.erg / u.cm**2 / u.s / u.AA).to_value(u.W / u.m**2 / u.nm)
     expected = surface * (Rsun2m / (10 * pc2m)) ** 2 * centers * nm2m / (h * c_si)
     np.testing.assert_allclose(
-        star.bin_mean_flux_density(centers, widths, 0.0), expected, rtol=1e-12
+        bin_mean(
+            lambda w: star.photon_flux_density(w, 0.0, dist_pc=10.0),
+            centers,
+            widths,
+            knots_nm=star.quadrature_knots_nm,
+            n_nodes=4,
+        ),
+        expected,
+        rtol=1e-12,
     )
     for bad_temperature, bad_gravity in ((12000, 0.0), (51000, 4.0)):
         with pytest.raises(ValueError):
@@ -328,7 +343,15 @@ def test_castelli_kurucz_phoenix_overlap_bin_flux():
     ph = from_phoenix(10000, 4.0, fetch=lambda _: ph_path, **kwargs)
     centers = jnp.arange(1250.0, 5000.0, 500.0)
     widths = jnp.full_like(centers, 500.0)
-    evaluate = eqx.filter_jit(lambda s: s.bin_mean_flux_density(centers, widths, 0.0))
+    evaluate = eqx.filter_jit(
+        lambda s: bin_mean(
+            lambda w: s.photon_flux_density(w, 0.0, dist_pc=10.0),
+            centers,
+            widths,
+            knots_nm=s.quadrature_knots_nm,
+            max_knots=len(s.wavelengths_nm) + 1,
+        )
+    )
     ck_flux = evaluate(ck)
     ph_flux = evaluate(ph)
     print("CK04/PHOENIX bin ratios:", np.asarray(ck_flux / ph_flux))

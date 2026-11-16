@@ -85,8 +85,7 @@ planet = Planet(
 )
 
 zodi = AYOZodi(
-    wavelengths_nm=jnp.linspace(400, 1000, 60),
-    surface_brightness_mag=22.0,
+    surface_brightness_mag_arcsec2=22.0,
 )
 
 system = System.from_classical(
@@ -125,7 +124,7 @@ pip install skyscapes
   `LambertianPhysicalModel`, `ExoJaxPhysicalModel`,
   `ExoJaxEmissionModel` ([how-to](how-to/thermal_emission)),
   `GridPhysicalModel`, `BlackbodyPhysicalModel`, `SumPhysicalModel`, ...;
-  all expose observer photon flux through `spec_flux_density`.
+  all expose observer photon flux through `photon_flux_density`.
 - [`skyscapes.background`](explanation/source_models) -- `Zodi`
   (union), `AYOZodi`, `LeinertZodi`, `PrecomputedZodi`
 

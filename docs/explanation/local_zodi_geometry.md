@@ -25,7 +25,7 @@ expects.
 The position-dependent factor in Leinert+1998 Table 17 depends on the
 ecliptic latitude of the look vector, written `β_⊙` in Leinert and
 exposed as the `ecliptic_lat_deg` argument to
-`LeinertZodi.spec_flux_density`, and on the helio-ecliptic
+`LeinertZodi.photon_radiance`, and on the helio-ecliptic
 longitude difference between the look vector and the Sun, written
 `Δλ_⊙` in Leinert and exposed as `solar_lon_deg`. The ecliptic latitude
 is essentially time-invariant for a fixed sky target because stellar
@@ -46,18 +46,17 @@ from orbix.observatory import ObservatoryL2Halo
 from skyscapes.background import LeinertZodi
 
 obs = ObservatoryL2Halo.from_default()
-zodi = LeinertZodi(reference_mag_arcsec2=22.0)
+zodi = LeinertZodi()
 
 ecl_lat = obs.ecliptic_latitude_deg(mjd, ra_rad, dec_rad)  # ~constant in time
 helio_lon = obs.helio_ecliptic_longitude_deg(
     mjd, ra_rad, dec_rad
 )  # sweeps 0 -> 180 per year
 
-flux = zodi.spec_flux_density(
+flux = zodi.photon_radiance(
     wavelength_nm,
-    time_d,
-    ecliptic_lat_deg=ecl_lat,
-    solar_lon_deg=helio_lon,
+    ecliptic_latitude_deg=ecl_lat,
+    solar_longitude_deg=helio_lon,
 )
 ```
 
@@ -192,15 +191,9 @@ sampling cadence.
 
 ## Unobservability and the Leinert table edge
 
-When the look vector points within a few degrees of the Sun, the
-Leinert+1998 Table 17 lookup is out of range because the tabulation does
-not extend to such tight elongations, and
-`LeinertZodi.spec_flux_density` returns `NaN`. Downstream code
-uses the `NaN` as a "target unobservable this epoch" gate, which is the
-intended behaviour. Real telescope field-of-regard constraints typically
-forbid pointing within 45° of the Sun, so the out-of-range region is
-operationally never visited, and the `NaN` simply marks the geometric
-impossibility of observing through the Sun.
+Near-Sun exclusion cells and out-of-range pointings are clamped by the
+`zodi` library to its filled table. Radiance is finite there; telescope
+keepout geometry must decide whether the target can be observed.
 
 ## See also
 

@@ -32,17 +32,19 @@ flowchart TB
 ```
 
 `System.planet_flux_densities` calls
-`physical_model.spec_flux_density(wavelength_nm, phase_angle_rad=...,
-dist_AU=..., Rp_Rearth=..., time_d=..., star=..., dist_pc=...)`. Wavelength is scalar;
-the result has shape `(K, T)` in ph/s/m²/nm. The base implementation
+`physical_model.photon_flux_density(wavelength_nm, phase_angle_rad=...,
+dist_AU=..., Rp_Rearth=..., time_d=..., star=..., dist_pc=...)`. This scene
+reader supplies a scalar wavelength and returns `(K, T)` in ph/s/m²/nm.
+The physical-model method accepts arbitrary wavelength shapes. The base implementation
 multiplies `contrast_at_time` by stellar photon flux. Thermal models
 compute observer flux directly, then derive contrast by dividing by the
 star's flux. Blackbody contrast against a `BlackbodyStar` retains the
 equivalent analytic ratio to avoid losing numerical range. Thermal flux
 needs the observer distance but does not require a nonzero or defined
 stellar spectrum; a contrast ratio still needs a valid denominator.
-`System.bin_mean_planet_flux_densities` integrates this same
-flux interface, including sums, with `skyscapes.spectral.bin_mean`.
+Consumers integrate photon densities with `hwoutils.spectral.Quadrature`;
+source methods accept wavelength arrays and have no band or bin-width input.
+The model photon result has shape `(K, T) + wavelength_nm.shape`.
 
 `System.contrasts` and `System.alpha_dMag` call
 `physical_model.contrast_at_time(phase_angle_rad, dist_AU,
@@ -94,9 +96,8 @@ sum by stellar flux. An empty tuple raises `ValueError`. The phase-only
 [thermal-emission how-to](../how-to/thermal_emission.md). Both implement
 the common flux interface without normalizing by the star first.
 
-The blackbody's existing `spec_flux_density(wavelength_nm, Rp_Rearth,
-dist_pc=dist_pc)` form still returns `(K,)`. Its common interface with geometry
-and stellar context returns `(K, T)`. ExoJAX's existing `flux_density_jy`
+The blackbody uses the common `photon_flux_density` interface with geometry
+and stellar context. ExoJAX's `flux_density_jy`
 continues to return `(W, K)` in Jy.
 
 ### `LambertianPhysicalModel`
@@ -149,7 +150,7 @@ Two epochs with the same orbital phase can retain different contrasts.
 Phase angle, distance, and radius are accepted for interface
 compatibility but are ignored: their effects are already encoded in
 the tabulated planet-to-star flux ratios.
-Its `spec_flux_density` therefore multiplies the interpolated contrast
+Its `photon_flux_density` therefore multiplies the interpolated contrast
 by the host star's flux at each epoch, retaining the table's semantics.
 
 ```python

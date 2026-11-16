@@ -1,314 +1,120 @@
-"""Tests for zodiacal light background sources in skyscapes.background."""
+"""Absolute radiance and pointing contracts for every local-zodi implementation."""
 
+import equinox as eqx
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+import zodi
+from hwoutils.constants import arcsec2rad
+from hwoutils.conversions import AB_ZERO_POINT_JY
 
 from skyscapes.background import (
+    AbstractLocalZodi,
     AYOZodi,
     LeinertZodi,
     PrecomputedZodi,
 )
 
+POINTING = dict(ecliptic_latitude_deg=30.0, solar_longitude_deg=120.0)
 
-class TestZodiSourceAYO:
-    """Tests for the AYO-compatible zodiacal light model."""
 
-    @pytest.fixture
-    def zodi_ayo(self):
-        """Create a AYOZodi instance."""
-        wavelengths = jnp.array([400.0, 500.0, 550.0, 600.0, 700.0, 800.0])
-        return AYOZodi(wavelengths)
+@pytest.mark.parametrize("kind", AbstractLocalZodi.__subclasses__())
+def test_radiance_contract(kind):
+    """Fails on a per-arcsec^2 or per-micron output or dropped wavelength axes.
 
-    def test_vband_surface_brightness(self, zodi_ayo):
-        """Surface brightness at V-band should be ~22 mag/arcsec^2."""
-        assert jnp.isclose(zodi_ayo.reference_mag_arcsec2, 22.0)
-
-    def test_reference_wavelength(self, zodi_ayo):
-        """Reference wavelength should be V-band (550 nm)."""
-        assert jnp.isclose(zodi_ayo.reference_wavelength_nm, 550.0)
-
-    def test_flux_positive(self, zodi_ayo):
-        """Flux density should be positive at all wavelengths within range."""
-        wavelengths = [400.0, 550.0, 700.0, 800.0]
-        time_d = 0.0
-
-        for wl in wavelengths:
-            flux = zodi_ayo.spec_flux_density(wl, time_d)
-            assert flux > 0, f"Flux should be positive at {wl} nm"
-
-    def test_wavelength_dependence(self, zodi_ayo):
-        """Flux should vary with wavelength (solar-like spectrum)."""
-        time_d = 0.0
-
-        flux_blue = zodi_ayo.spec_flux_density(400.0, time_d)
-        flux_red = zodi_ayo.spec_flux_density(700.0, time_d)
-
-        # Solar spectrum peaks in visible, so fluxes should differ
-        assert flux_blue != flux_red
-
-    def test_ignores_position_parameters(self, zodi_ayo):
-        """AYO model uses fixed angle assumption, should ignore position."""
-        time_d = 0.0
-        wavelength = 550.0
-
-        flux_default = zodi_ayo.spec_flux_density(wavelength, time_d)
-        flux_with_pos = zodi_ayo.spec_flux_density(
-            wavelength, time_d, ecliptic_lat_deg=45.0, solar_lon_deg=90.0
+    Absolute expectations use SI h, the exact AB zero point and the solid
+    angle of one arcsec squared, typed independently. 3e-14 relative allows
+    float64 algebra and log interpolation roundoff; atol=0 protects scale.
+    Constant parity uses 2e-15 relative for float64 rounding.
+    """
+    assert AB_ZERO_POINT_JY == pytest.approx(3630.7805477010028, rel=2e-15)
+    np.testing.assert_allclose(arcsec2rad**2, 2.3504430539097885e-11, rtol=2e-15)
+    wave = jnp.array([[500.0, 550.0], [600.0, 700.0]])
+    fixed_v = (
+        3630.7805477010028
+        * 10 ** (-0.4 * 22)
+        * 1e-26
+        / (6.62607015e-34 * 550e-9)
+        * 1e-9
+        / 2.3504430539097885e-11
+    )
+    if kind is AYOZodi:
+        model = kind()
+        expected = fixed_v * zodi.color_correction(wave, 550.0, photon_units=True)
+        np.testing.assert_allclose(
+            model.photon_radiance(jnp.array(550.0), **POINTING),
+            fixed_v,
+            rtol=3e-14,
+            atol=0,
+        )
+    elif kind is LeinertZodi:
+        model = kind()
+        power = zodi.specific_intensity(120.0, 30.0, np.asarray(wave), anchor="table19")
+        expected = (
+            power / (6.62607015e-34 * 299792458.0 / (np.asarray(wave) * 1e-9)) * 1e-3
+        )
+    else:
+        assert kind is PrecomputedZodi
+        model = kind(jnp.array([500.0, 550.0, 600.0, 700.0]), jnp.full(4, fixed_v))
+        expected = np.full(wave.shape, fixed_v)
+    actual = model.photon_radiance(wave, **POINTING)
+    assert actual.shape == wave.shape
+    np.testing.assert_allclose(actual, expected, rtol=3e-14, atol=0)
+    if kind is not LeinertZodi:
+        np.testing.assert_array_equal(
+            actual,
+            model.photon_radiance(
+                wave, ecliptic_latitude_deg=75.0, solar_longitude_deg=90.0
+            ),
         )
 
-        # AYO model ignores these parameters
-        assert jnp.isclose(flux_default, flux_with_pos)
+
+def test_pointing_order_and_radiance_units():
+    """Fails on latitude/longitude swaps, wrong sr scale, or wrong color.
+
+    The deliberately asymmetric (120,30) position differs from the swapped
+    lookup. AYO and Leinert share Table 19 color, but their default V scales
+    only approximately coincide. Setting AYO to the table's AB magnitude at
+    (90,0) makes them coincide exactly; 3e-14 bounds float64 log roundoff.
+    """
+    wave = jnp.array([500.0, 550.0, 700.0])
+    model = LeinertZodi()
+    expected = (
+        zodi.specific_intensity(120.0, 30.0, wave, photon_units=True, anchor="table19")
+        / 1000
+    )
+    swapped = (
+        zodi.specific_intensity(30.0, 120.0, wave, photon_units=True, anchor="table19")
+        / 1000
+    )
+    np.testing.assert_allclose(
+        model.photon_radiance(wave, **POINTING), expected, rtol=3e-14, atol=0
+    )
+    assert np.all(np.abs(np.asarray(expected / swapped) - 1) > 0.1)
+    pointing = dict(ecliptic_latitude_deg=0.0, solar_longitude_deg=90.0)
+    mag = zodi.surface_brightness_ab_mag(
+        jnp.array(90.0), jnp.array(0.0), jnp.array(550.0), anchor="table19"
+    )
+    fixed = AYOZodi(surface_brightness_mag_arcsec2=mag)
+    radiance = model.photon_radiance(wave, **pointing)
+    np.testing.assert_allclose(
+        fixed.photon_radiance(wave, **pointing), radiance, rtol=3e-14, atol=0
+    )
+    cached = PrecomputedZodi(wave, radiance)
+    np.testing.assert_allclose(
+        cached.photon_radiance(wave, **pointing), radiance, rtol=3e-14, atol=0
+    )
 
 
-class TestZodiSourceLeinert:
-    """Tests for the Leinert table-based zodiacal light model."""
+def test_radiance_jax():
+    """Fails if JIT or wavelength vmap changes zodi; 3e-14 is float64 roundoff."""
+    model = LeinertZodi()
+    wave = jnp.array([500.0, 550.0, 700.0])
 
-    @pytest.fixture
-    def zodi_leinert(self):
-        """Create a LeinertZodi instance."""
-        return LeinertZodi()
+    def evaluate(w):
+        return model.photon_radiance(w, **POINTING)
 
-    def test_reference_values(self, zodi_leinert):
-        """Check default reference values."""
-        assert jnp.isclose(zodi_leinert.reference_mag_arcsec2, 22.0)
-        assert jnp.isclose(zodi_leinert.reference_wavelength_nm, 550.0)
-
-    def test_flux_positive(self, zodi_leinert):
-        """Flux density should be positive at valid positions."""
-        time_d = 0.0
-        wavelength = 550.0
-
-        flux = zodi_leinert.spec_flux_density(
-            wavelength, time_d, ecliptic_lat_deg=30.0, solar_lon_deg=90.0
-        )
-        assert flux > 0
-
-    def test_ecliptic_pole_brighter(self, zodi_leinert):
-        """Ecliptic pole should be dimmer than ecliptic plane."""
-        time_d = 0.0
-        wavelength = 550.0
-        solar_lon = 90.0
-
-        flux_pole = zodi_leinert.spec_flux_density(
-            wavelength, time_d, ecliptic_lat_deg=90.0, solar_lon_deg=solar_lon
-        )
-        flux_plane = zodi_leinert.spec_flux_density(
-            wavelength, time_d, ecliptic_lat_deg=0.0, solar_lon_deg=solar_lon
-        )
-
-        # Zodi is brightest in ecliptic plane, dimmer at poles
-        assert flux_plane > flux_pole
-
-    def test_solar_longitude_dependence(self, zodi_leinert):
-        """Brightness should vary with solar longitude."""
-        time_d = 0.0
-        wavelength = 550.0
-        ecliptic_lat = 30.0
-
-        flux_90 = zodi_leinert.spec_flux_density(
-            wavelength, time_d, ecliptic_lat_deg=ecliptic_lat, solar_lon_deg=90.0
-        )
-        flux_180 = zodi_leinert.spec_flux_density(
-            wavelength, time_d, ecliptic_lat_deg=ecliptic_lat, solar_lon_deg=180.0
-        )
-
-        # Different positions should have different brightness
-        assert flux_90 != flux_180
-
-    def test_at_table_grid_point(self, zodi_leinert):
-        """Test interpolation at exact Leinert table grid points."""
-        # Table 17 has data at beta=0 deg, lambda-lambda_sun=90 deg
-        time_d = 0.0
-        wavelength = 550.0
-
-        flux = zodi_leinert.spec_flux_density(
-            wavelength, time_d, ecliptic_lat_deg=0.0, solar_lon_deg=90.0
-        )
-        # Should return a valid value without interpolation issues
-        assert jnp.isfinite(flux)
-        assert flux > 0
-
-    def test_brightness_monotonic_in_elongation(self, zodi_leinert):
-        """Ecliptic-plane brightness decreases as the target moves from Sun.
-
-        At fixed wavelength + zero ecliptic latitude, ``Delta_lambda_sun``
-        going 30 -> 90 -> 180 (target moves from near-Sun to anti-Sun)
-        should produce monotonically decreasing flux. This pins the
-        intended shape of Leinert Table 17 along the ecliptic ridge.
-        """
-        wl = 550.0
-        f30 = float(
-            zodi_leinert.spec_flux_density(
-                wl, 0.0, ecliptic_lat_deg=0.0, solar_lon_deg=30.0
-            )
-        )
-        f90 = float(
-            zodi_leinert.spec_flux_density(
-                wl, 0.0, ecliptic_lat_deg=0.0, solar_lon_deg=90.0
-            )
-        )
-        f180 = float(
-            zodi_leinert.spec_flux_density(
-                wl, 0.0, ecliptic_lat_deg=0.0, solar_lon_deg=180.0
-            )
-        )
-        assert f30 > f90 > f180, (
-            f"Expected monotonic decrease with elongation, got 30deg={f30:.3e}, "
-            f"90deg={f90:.3e}, 180deg={f180:.3e}"
-        )
-
-    def test_brightness_symmetric_in_ecliptic_latitude(self, zodi_leinert):
-        """The Leinert table is indexed by ``|beta|``; +-lat must match."""
-        wl = 550.0
-        flux_pos = float(
-            zodi_leinert.spec_flux_density(
-                wl, 0.0, ecliptic_lat_deg=+30.0, solar_lon_deg=90.0
-            )
-        )
-        flux_neg = float(
-            zodi_leinert.spec_flux_density(
-                wl, 0.0, ecliptic_lat_deg=-30.0, solar_lon_deg=90.0
-            )
-        )
-        assert jnp.isclose(flux_pos, flux_neg, rtol=1e-6)
-
-    def test_brightness_monotonic_in_latitude(self, zodi_leinert):
-        """At fixed elongation, brightness decreases toward the ecliptic pole."""
-        wl = 550.0
-        sl = 90.0
-        f0 = float(
-            zodi_leinert.spec_flux_density(
-                wl, 0.0, ecliptic_lat_deg=0.0, solar_lon_deg=sl
-            )
-        )
-        f30 = float(
-            zodi_leinert.spec_flux_density(
-                wl, 0.0, ecliptic_lat_deg=30.0, solar_lon_deg=sl
-            )
-        )
-        f60 = float(
-            zodi_leinert.spec_flux_density(
-                wl, 0.0, ecliptic_lat_deg=60.0, solar_lon_deg=sl
-            )
-        )
-        assert f0 > f30 > f60
-
-    def test_reference_position_normalisation(self):
-        """AYO and Leinert give the same flux at Leinert's tabulation reference.
-
-        AYO at 22.0 mag/arcsec^2 is position-independent and matches the
-        Leinert Table 17 value at its reference point (ecl_lat=0,
-        solar_lon=90) at V-band -- both correspond to ~22 mag. At other
-        positions Leinert deviates from AYO per the table.
-        """
-        wl = jnp.asarray(550.0)
-        ayo = AYOZodi(jnp.linspace(400.0, 1000.0, 50), surface_brightness_mag=22.0)
-        leinert = LeinertZodi(reference_mag_arcsec2=22.0)
-        f_ayo = float(ayo.spec_flux_density(wl, 0.0))
-        # At the Leinert table reference position (lat=0, sl=90).
-        f_lein_ref = float(
-            leinert.spec_flux_density(wl, 0.0, ecliptic_lat_deg=0.0, solar_lon_deg=90.0)
-        )
-        assert 0.97 < f_lein_ref / f_ayo < 1.03, (
-            "AYO 22 mag should match Leinert at (0, 90) within ~1%; "
-            f"got ratio={f_lein_ref / f_ayo:.4f}"
-        )
-
-        # At an off-reference position the two diverge -- pin the
-        # direction so a future refactor that breaks the table lookup
-        # gets flagged (135 deg is dimmer than 90 deg along the ecliptic).
-        f_lein_135 = float(
-            leinert.spec_flux_density(
-                wl, 0.0, ecliptic_lat_deg=0.0, solar_lon_deg=135.0
-            )
-        )
-        assert f_lein_135 < f_ayo
-
-    def test_near_sun_query_clamps_to_finite(self, zodi_leinert):
-        """Looking too close to the Sun clamps to the nearest tabulated value.
-
-        Leinert+1998 Table 17 starts at ``Delta_lambda_sun = 0`` only for
-        moderately high latitudes; for an ecliptic-plane look vector at
-        ~few-degree elongation the table's near-Sun cells are excluded
-        (sentinel -1). skyscapes.background.leinert fills those sentinel
-        cells with the nearest valid value at import, so the lookup
-        clamps to a finite brightness instead of silently propagating NaN
-        into downstream flux maps (coronagraphoto.simulation.zodi_rate
-        does not NaN-guard its zodi flux multiply -- geometric keepout in
-        orbix.observatory.keepout.is_observable is the actual unobservable-
-        epoch gate, independent of this lookup).
-        """
-        flux = zodi_leinert.spec_flux_density(
-            550.0, 0.0, ecliptic_lat_deg=0.0, solar_lon_deg=2.0
-        )
-        assert jnp.isfinite(flux)
-
-
-class TestZodiSourcePhotonFlux:
-    """Tests for the passthrough zodiacal light model."""
-
-    def test_passthrough_returns_input(self):
-        """Photon flux model should return the specified value."""
-        wavelengths = jnp.array([500.0, 550.0, 600.0])
-        photon_flux = jnp.array([1000.0, 1000.0, 1000.0])
-        zodi = PrecomputedZodi(wavelengths, photon_flux)
-
-        time_d = 0.0
-        wavelength = 550.0
-
-        flux = zodi.spec_flux_density(wavelength, time_d)
-        assert jnp.isclose(flux, 1000.0, rtol=0.01)
-
-    def test_ignores_position_parameters(self):
-        """Passthrough should ignore position parameters."""
-        wavelengths = jnp.array([400.0, 600.0, 800.0])
-        photon_flux = jnp.array([500.0, 500.0, 500.0])
-        zodi = PrecomputedZodi(wavelengths, photon_flux)
-
-        # Interpolate at same wavelength with different positions
-        flux1 = zodi.spec_flux_density(600.0, 0.0)
-        flux2 = zodi.spec_flux_density(
-            600.0, 10000.0, ecliptic_lat_deg=45.0, solar_lon_deg=120.0
-        )
-
-        # Should return same value regardless of position
-        assert jnp.isclose(flux1, flux2)
-
-
-class TestZodiSourceComparison:
-    """Cross-model comparison tests."""
-
-    def test_ayo_leinert_spectral_shape(self):
-        """Shared Table 19 colors give a wavelength-independent flux ratio.
-
-        Evaluate AYO at its grid knots to exclude interpolation error;
-        rtol=1e-12 allows float64 rounding in the equivalent conversions.
-        """
-        wavelengths = jnp.linspace(400.0, 1800.0, 29)
-        ayo = AYOZodi(wavelengths)
-        leinert = LeinertZodi()
-        position = {"ecliptic_lat_deg": 0.0, "solar_lon_deg": 135.0}
-        ratio = leinert.spec_flux_density(wavelengths, 0.0, **position) / (
-            ayo.spec_flux_density(wavelengths, 0.0, **position)
-        )
-        np.testing.assert_allclose(ratio, ratio[0], rtol=1e-12, atol=0.0)
-
-    def test_ayo_leinert_similar_at_default_position(self):
-        """AYO and Leinert should give similar results at ~135 deg solar lon."""
-        wavelengths = jnp.array([500.0, 550.0, 600.0])
-        zodi_ayo = AYOZodi(wavelengths)
-        zodi_leinert = LeinertZodi()
-
-        time_d = 0.0
-        wavelength = 550.0
-
-        flux_ayo = zodi_ayo.spec_flux_density(wavelength, time_d)
-        # Leinert at typical coronagraph position (135 deg from sun, mid ecliptic)
-        flux_leinert = zodi_leinert.spec_flux_density(
-            wavelength, time_d, ecliptic_lat_deg=30.0, solar_lon_deg=135.0
-        )
-
-        # Should be within a factor of ~2 (same order of magnitude)
-        ratio = flux_ayo / flux_leinert
-        assert 0.3 < ratio < 3.0, f"AYO/Leinert ratio={ratio:.2f}, expected ~1"
+    loop = jnp.stack([evaluate(w) for w in wave])
+    np.testing.assert_allclose(eqx.filter_jit(evaluate)(wave), loop, rtol=3e-14, atol=0)
+    np.testing.assert_allclose(jax.vmap(evaluate)(wave), loop, rtol=3e-14, atol=0)

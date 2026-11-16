@@ -60,7 +60,7 @@ def test_contrast_matches_planck_ratio(temperature, wavelength, x64):
             *args, wl, rp, time_d=times, star=star, dist_pc=dist_pc
         )
         flat = FlatStar(
-            flux_phot_per_nm_m2=star.spec_flux_density(wl, times, dist_pc=dist_pc),
+            flux_phot_per_nm_m2=star.photon_flux_density(wl, times, dist_pc=dist_pc),
         )
         generic = model.contrast_at_time(
             *args, wl, rp, time_d=times, star=flat, dist_pc=dist_pc
@@ -74,7 +74,7 @@ def test_contrast_matches_planck_ratio(temperature, wavelength, x64):
             rtol = 2e-5
         assert jnp.allclose(got, expected, rtol=rtol, atol=0.0)
         assert jnp.allclose(got, generic, rtol=rtol, atol=0.0)
-        flux = model.spec_flux_density(
+        flux = model._photon_flux_density(
             wl,
             phase_angle_rad=args[0],
             dist_AU=args[1],
@@ -89,7 +89,7 @@ def test_contrast_matches_planck_ratio(temperature, wavelength, x64):
             radiance * np.pi * (15.7 * 6.3781e6 / (dist_pc * 3.085677581491367e16)) ** 2
         )
         np.testing.assert_allclose(flux, expected_flux, rtol=rtol, atol=0)
-        legacy = model.spec_flux_density(wl, rp, dist_pc=dist_pc)
+        legacy = model._photon_flux_density(wl, rp, dist_pc=dist_pc)
         if not x64 and temperature == 100.0:
             # Preserve the legacy method's existing overflow behavior.
             np.testing.assert_array_equal(legacy, 0.0)
@@ -122,7 +122,7 @@ def test_contrast_follows_the_star_model():
     got = model.contrast_at_time(
         *ARGS, jnp.asarray(4400.0), rp, time_d=T_D, star=flat, dist_pc=107.5
     )
-    flux = model.spec_flux_density(jnp.asarray(4400.0), rp, dist_pc=107.5)
+    flux = model._photon_flux_density(jnp.asarray(4400.0), rp, dist_pc=107.5)
     assert jnp.allclose(got, flux[:, None] / 3.0, rtol=1e-6, atol=0.0)
 
 
@@ -237,10 +237,10 @@ def test_temperature_gradient_is_finite_in_single_precision(
         def observable(teff):
             model = BlackbodyPhysicalModel(teff_K=teff)
             if quantity == "planet_flux":
-                return model.spec_flux_density(wl, rp, dist_pc=107.5)[0]
+                return model._photon_flux_density(wl, rp, dist_pc=107.5)[0]
             if quantity == "star_flux":
                 star = BlackbodyStar(teff[0], STAR.radius_m)
-                return star.spec_flux_density(wl, time_d, dist_pc=107.5)
+                return star.photon_flux_density(wl, time_d, dist_pc=107.5)
             out = model.contrast_at_time(
                 *args, wl, rp, time_d=time_d, star=STAR, dist_pc=107.5
             )

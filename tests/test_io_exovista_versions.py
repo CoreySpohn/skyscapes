@@ -145,7 +145,7 @@ def test_single_snapshot_and_empty_spots_are_supported(
         assert scene.star.spots is None
     times = scene.star._times_d + jnp.array([0.0, 1.0])
     np.testing.assert_allclose(
-        scene.star.spec_flux_density(600.0, times),
+        scene.star.photon_flux_density(600.0, times, dist_pc=scene.dist_pc),
         1e-26 / (h * 600.0),
         rtol=1e-6,
         atol=0,
@@ -207,7 +207,7 @@ def test_imported_positive_flux_cannot_overshoot_below_zero(scene_file):
         hdul[5].data[:, 16:] = np.array([1.0, 0.01, 0.01, 1.0])[:, None]
     scene = from_exovista(path, load_disk=False)
     midpoint = jnp.mean(scene.star._times_d[1:3])
-    flux = scene.star.spec_flux_density(600.0, midpoint)
+    flux = scene.star.photon_flux_density(600.0, midpoint, dist_pc=scene.dist_pc)
     expected = 0.01 * 1e-26 / (h * 600.0)
     np.testing.assert_allclose(flux, expected, rtol=1e-6, atol=0)
     assert np.all(np.asarray(scene.planet_flux_densities(600.0, midpoint)) > 0)
@@ -306,7 +306,9 @@ def test_unmarked_recent_spectra_are_observer_flux_of_the_phoenix_star(scene_fil
         wavelength_nm = wavelength_um * 1e3
         # Jy -> photons s^-1 m^-2 nm^-1 = F_nu / (h * wavelength_nm).
         expected = expected_jy * Jy / (h * wavelength_nm)
-        got = scene.star.spec_flux_density(wavelength_nm, scene.star._times_d)
+        got = scene.star.photon_flux_density(
+            wavelength_nm, scene.star._times_d, dist_pc=scene.dist_pc
+        )
         np.testing.assert_allclose(got, expected, rtol=1e-5, atol=0)
 
 
@@ -330,7 +332,9 @@ def test_unmarked_spectrum_consistent_with_its_vmag_converts_silently(scene_file
 
     wavelength_nm = wave_um[v_channel] * 1e3
     expected = f_nu_jy[v_channel] * Jy / (h * wavelength_nm)
-    got = scene.star.spec_flux_density(wavelength_nm, scene.star._times_d)
+    got = scene.star.photon_flux_density(
+        wavelength_nm, scene.star._times_d, dist_pc=scene.dist_pc
+    )
     np.testing.assert_allclose(got, expected, rtol=1e-5, atol=0)
 
 
@@ -381,7 +385,9 @@ def test_unmarked_legacy_spectra_are_read_as_jy(scene_file):
         del hdul[4].header["SPECUNIT"]
     scene = from_exovista(path, load_disk=False)
     np.testing.assert_allclose(
-        scene.star.spec_flux_density(600.0, scene.star._times_d[0]),
+        scene.star.photon_flux_density(
+            600.0, scene.star._times_d[0], dist_pc=scene.dist_pc
+        ),
         1e-26 / (h * 600.0),
         rtol=1e-6,
         atol=0,

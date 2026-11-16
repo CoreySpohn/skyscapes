@@ -2,7 +2,7 @@
 
 Subclasses own whatever spectral-physics parameters describe "this kind of
 planet" (Lambertian, grid-interpolated, radiative-transfer, thermal
-emission). ``spec_flux_density`` returns photon flux at the observer.
+emission). ``photon_flux_density`` returns photon flux at the observer.
 Its default multiplies contrast by the host star's photon flux; thermal
 models provide flux directly. The phase-dependent hook maps
 (phase_angle, star-planet distance, wavelength, planet radius) onto a
@@ -19,6 +19,8 @@ model at call time.
 from abc import abstractmethod
 
 import equinox as eqx
+import jax
+import jax.numpy as jnp
 from jaxtyping import Array
 
 
@@ -30,7 +32,43 @@ class AbstractPhysicalModel(eqx.Module):
     radius is supplied at call time via ``contrast(..., Rp_Rearth=...)``.
     """
 
-    def spec_flux_density(
+    def photon_flux_density(
+        self,
+        wavelength_nm: Array,
+        time_d: Array,
+        *,
+        phase_angle_rad: Array,
+        dist_AU: Array,
+        Rp_Rearth: Array,
+        star,
+        dist_pc: Array,
+    ) -> Array:
+        """Planet photons [ph s^-1 m^-2 nm^-1], shape (K, T) + wavelength shape.
+
+        Contrast and its spectral parameters belong to this model. System
+        supplies orbix star-relative phase and distance, both (K, T), and
+        Planet supplies radii (K,). Time is (T,) days from the scene epoch.
+        Each wavelength returns stellar photon density times model contrast.
+        Thermal kernels evaluate that product directly to retain dynamic range.
+        No integration or band width enters this method.
+        """
+        wave = jnp.asarray(wavelength_nm)
+
+        def at_wavelength(w):
+            return self._photon_flux_density(
+                w,
+                time_d=time_d,
+                phase_angle_rad=phase_angle_rad,
+                dist_AU=dist_AU,
+                Rp_Rearth=Rp_Rearth,
+                star=star,
+                dist_pc=dist_pc,
+            )
+
+        values = jax.vmap(at_wavelength)(wave.reshape(-1))
+        return jnp.moveaxis(values, 0, -1).reshape(phase_angle_rad.shape + wave.shape)
+
+    def _photon_flux_density(
         self,
         wavelength_nm: Array,
         *,
@@ -67,7 +105,9 @@ class AbstractPhysicalModel(eqx.Module):
             star=star,
             dist_pc=dist_pc,
         )
-        return contrast * star.spec_flux_density(wavelength_nm, time_d, dist_pc=dist_pc)
+        return contrast * star.photon_flux_density(
+            wavelength_nm, time_d, dist_pc=dist_pc
+        )
 
     @abstractmethod
     def contrast(

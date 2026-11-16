@@ -7,13 +7,14 @@ from functools import partial
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
 from astropy import units as u
 from hwoutils.constants import c, h, k_B, pc2m, sigma_SB
 from hwoutils.conversions import (
     jy_to_photons_per_nm_per_m2,
-    photons_per_nm_per_m2_to_jy,
 )
+from hwoutils.spectral import Band, Quadrature
 
 from skyscapes.scene import AbstractStar, BlackbodyStar, FlatStar, Star
 
@@ -57,8 +58,8 @@ def test_flat_star_diameter_pytree(diameter_arcsec):
 def test_simple_star_flux_is_flat():
     """Fails if apparent flux changes with wavelength, time or system distance."""
     s = FlatStar(flux_phot_per_nm_m2=1e9)
-    f1 = s.spec_flux_density(500.0, 0.0, dist_pc=10.0)
-    f2 = s.spec_flux_density(800.0, 100.0, dist_pc=20.0)
+    f1 = s.photon_flux_density(500.0, 0.0, dist_pc=10.0)
+    f2 = s.photon_flux_density(800.0, 100.0, dist_pc=20.0)
     assert jnp.allclose(f1, 1e9)
     assert jnp.allclose(f2, 1e9)
 
@@ -90,7 +91,7 @@ def test_blackbody_star_fields(blackbody_star):
 def test_blackbody_star_integrated_energy_flux(blackbody_star):
     """Photon energies integrated over wavelength recover Stefan-Boltzmann flux."""
     wavelength_nm = jnp.geomspace(50.0, 200_000.0, 20_000)
-    photon_flux = blackbody_star.spec_flux_density(wavelength_nm, 0.0, dist_pc=10.0)
+    photon_flux = blackbody_star.photon_flux_density(wavelength_nm, 0.0, dist_pc=10.0)
     energy_per_photon = h * c / (wavelength_nm * 1e-9)
     energy_flux = jnp.trapezoid(energy_per_photon * photon_flux, wavelength_nm)
     dilution = (blackbody_star.radius_m / (10.0 * pc2m)) ** 2
@@ -101,7 +102,7 @@ def test_blackbody_star_integrated_energy_flux(blackbody_star):
 def test_blackbody_star_photon_peak(blackbody_star):
     """The photon-count peak obeys the photon-number Wien displacement law."""
     wavelength_nm = jnp.linspace(100.0, 2000.0, 20_001)
-    photon_flux = blackbody_star.spec_flux_density(wavelength_nm, 0.0, dist_pc=10.0)
+    photon_flux = blackbody_star.photon_flux_density(wavelength_nm, 0.0, dist_pc=10.0)
     peak_nm = wavelength_nm[jnp.argmax(photon_flux)]
     expected_nm = h * c / (3.920690395 * k_B * blackbody_star.teff_K) * 1e9
     assert jnp.abs(peak_nm - expected_nm) <= wavelength_nm[1] - wavelength_nm[0]
@@ -120,9 +121,9 @@ def test_blackbody_star_scaling(
         radius_m=blackbody_star.radius_m * radius_factor,
     )
     wavelength_nm = jnp.array([200.0, 550.0, 1000.0, 10_000.0])
-    baseline = blackbody_star.spec_flux_density(wavelength_nm, 0.0, dist_pc=10.0)
+    baseline = blackbody_star.photon_flux_density(wavelength_nm, 0.0, dist_pc=10.0)
     assert jnp.array_equal(
-        scaled.spec_flux_density(wavelength_nm, 0.0, dist_pc=10.0 * distance_factor),
+        scaled.photon_flux_density(wavelength_nm, 0.0, dist_pc=10.0 * distance_factor),
         baseline * flux_factor,
     )
     updated = eqx.tree_at(
@@ -147,12 +148,14 @@ def test_blackbody_star_scaling(
 def test_blackbody_star_shape_and_time(blackbody_star, wavelength_nm):
     """Scalar and array wavelengths retain their shape, independent of time."""
     wavelength_nm = jnp.asarray(wavelength_nm)
-    flux = blackbody_star.spec_flux_density(wavelength_nm, 0.0, dist_pc=10.0)
+    flux = blackbody_star.photon_flux_density(wavelength_nm, 0.0, dist_pc=10.0)
     assert flux.shape == wavelength_nm.shape
     assert jnp.all(jnp.isfinite(flux) & (flux > 0.0))
     assert jnp.array_equal(
         flux,
-        blackbody_star.spec_flux_density(wavelength_nm, jnp.arange(7.0), dist_pc=10.0),
+        blackbody_star.photon_flux_density(
+            wavelength_nm, jnp.arange(7.0), dist_pc=10.0
+        ),
     )
 
 
@@ -173,7 +176,7 @@ def test_blackbody_star_matches_exojax(blackbody_star):
     dilution = (blackbody_star.radius_m / (10.0 * pc2m)) ** 2
     photon_energy = h * c / (wavelength_nm * 1e-9)
     expected = surface_flux_per_nm * dilution / photon_energy
-    actual = blackbody_star.spec_flux_density(wavelength_nm, 0.0, dist_pc=10.0)
+    actual = blackbody_star.photon_flux_density(wavelength_nm, 0.0, dist_pc=10.0)
     assert jnp.allclose(actual, expected, rtol=1e-6, atol=0.0)
 
 
@@ -181,12 +184,12 @@ def test_blackbody_star_matches_exojax(blackbody_star):
 def test_blackbody_star_jit_and_vmap(blackbody_star, dtype):
     """Compiled and wavelength-vectorized spectra match eager evaluation."""
     wavelength_nm = jnp.array([200.0, 550.0, 1000.0, 10_000.0], dtype=dtype)
-    eager = blackbody_star.spec_flux_density(wavelength_nm, 0.0, dist_pc=10.0)
-    compiled = jax.jit(blackbody_star.spec_flux_density)(
+    eager = blackbody_star.photon_flux_density(wavelength_nm, 0.0, dist_pc=10.0)
+    compiled = jax.jit(blackbody_star.photon_flux_density)(
         wavelength_nm, 0.0, dist_pc=10.0
     )
     vectorized = jax.vmap(
-        partial(blackbody_star.spec_flux_density, dist_pc=10.0), in_axes=(0, None)
+        partial(blackbody_star.photon_flux_density, dist_pc=10.0), in_axes=(0, None)
     )(wavelength_nm, 0.0)
     assert jnp.all(jnp.isfinite(eager) & (eager > 0.0))
     assert jnp.allclose(compiled, eager, rtol=1e-6, atol=0.0)
@@ -197,15 +200,15 @@ def test_spectrum_star_interpolates():
     """Star Jy-to-photon conversion reproduces analytic value."""
     wl = jnp.linspace(400.0, 1000.0, 7)
     t = jnp.linspace(0.0, 10.0, 5)
-    # 1 Jy everywhere -> same phot number at each (wl, t) point
+    # 1 Jy at each table node; photon density varies inversely with wavelength.
     flux_jy = jnp.ones((wl.size, t.size))
     s = Star(
         wavelengths_nm=wl,
         times_d=t,
         flux_density_jy=flux_jy,
     )
-    f = s.spec_flux_density(600.0, 5.0, dist_pc=10.0)
-    # Jy to phot: 1 Jy * 1e-26 / (600 nm * h) ~= 2.514e7
+    f = s.photon_flux_density(600.0, 5.0, dist_pc=10.0)
+    # Jy to phot: 1 Jy * 1e-26 / (600 nm * h) ~= 2.5153e4
     expected = jy_to_photons_per_nm_per_m2(1.0, 600.0)
     assert jnp.allclose(f, expected, rtol=1e-4)
 
@@ -239,107 +242,127 @@ def test_spectrum_star_wavelength_coverage(n_epochs):
     assert all(isinstance(bound, float) for bound in bounds)
 
 
-def test_bin_flux_blackbody_quadrature_and_gradients(blackbody_star):
-    """Fails if bin means use centers only, misnormalize weights, or detach gradients.
+@pytest.mark.parametrize(
+    "kind,n_epochs",
+    [
+        (kind, n)
+        for kind in AbstractStar.__subclasses__()
+        for n in ((1, 2) if kind is Star else (1,))
+    ],
+)
+def test_photon_contract(kind, n_epochs):
+    """Fails on a unit error, Jy interpolation, or lost wavelength/time axes.
 
-    Four-node error is compared to 16 nodes over 400-5000 nm at 20 percent
-    width. The Gauss-Legendre remainder is eighth order in bin width.
+    Tolerance 3e-14 is the float64 floor for the shared algebra. The rounded
+    9.9634e5 anchor allows 5e-6 relative for its five significant digits.
+    FlatStar is flat in photons; Star supplies the flat-F_nu AB=5 anchor
+    at a table node and interpolates in photons between nodes.
     """
-    centers = jnp.geomspace(400.0, 5000.0, 16)
-    widths = centers * 0.2
-    mean = eqx.filter_jit(blackbody_star.bin_mean_flux_density)(
-        centers, widths, 0.0, dist_pc=10.0
-    )
-    reference = blackbody_star.bin_mean_flux_density(
-        centers, widths, 0.0, n_nodes=16, dist_pc=10.0
-    )
-    print(
-        "Blackbody maximum relative quadrature error:",
-        float(jnp.max(jnp.abs(mean / reference - 1))),
-    )
-    assert jnp.allclose(mean, reference, rtol=1e-8, atol=0)
-    assert jnp.allclose(
-        blackbody_star.bin_mean_flux_density(
-            centers, jnp.zeros_like(widths), 0.0, dist_pc=10.0
-        ),
-        blackbody_star.spec_flux_density(centers, 0.0, dist_pc=10.0),
-        rtol=1e-14,
-    )
-
-    @eqx.filter_jit
-    def flux(parameters):
-        star = eqx.tree_at(lambda s: s.teff_K, blackbody_star, parameters[0] * 5772.0)
-        return (
-            star.bin_mean_flux_density(
-                jnp.array([parameters[1] * 550.0]),
-                jnp.array([parameters[2] * 100.0]),
-                0.0,
-                dist_pc=10.0,
-            )[0]
-            / mean[0]
+    wave = jnp.array([[500.0, 550.0], [575.0, 600.0]])
+    fnu = 3631.0 * 10**-2
+    if kind is FlatStar:
+        star = kind(9.9634e5)
+        expected = np.full(wave.shape, 9.9634e5)
+    elif kind is BlackbodyStar:
+        star = kind(5772.0, 6.957e8)
+        lam = np.asarray(wave) * 1e-9
+        expected = (
+            2
+            * np.pi
+            * 299792458.0
+            / lam**4
+            / np.expm1(6.62607015e-34 * 299792458.0 / (lam * 1.380649e-23 * 5772.0))
         )
+        expected *= (6.957e8 / (10 * 3.085677581491367e16)) ** 2 * 1e-9
+    else:
+        assert kind is Star
+        star = kind(
+            wavelengths_nm=jnp.array([450.0, 550.0, 650.0]),
+            times_d=jnp.arange(n_epochs, dtype=float),
+            flux_density_jy=jnp.full((3, n_epochs), fnu),
+            interpolation_method="linear",
+        )
+        knots = np.array([450.0, 550.0, 650.0])
+        photons = fnu * 1e-26 / (6.62607015e-34 * knots * 1e-9) * 1e-9
+        expected = np.interp(wave, knots, photons)
+        np.testing.assert_allclose(expected[0, 1], 9.9634e5, rtol=5e-6)
+    time = jnp.array([[0.0], [0.5]]) if n_epochs > 1 else 0.0
+    actual = star.photon_flux_density(wave, time, dist_pc=10.0)
+    np.testing.assert_allclose(actual, expected, rtol=3e-14, atol=0)
+    assert not hasattr(star, "spec_flux_density")
+    assert actual.shape == wave.shape
+    np.testing.assert_allclose(
+        eqx.filter_jit(star.photon_flux_density)(wave, time, dist_pc=10.0),
+        expected,
+        rtol=3e-14,
+        atol=0,
+    )
 
-    point = jnp.ones(3)
-    step = 1e-4
-    directions = jnp.eye(3) * step
-    finite_difference = jax.vmap(
-        lambda d: (flux(point + d) - flux(point - d)) / (2 * step)
-    )(directions)
-    assert jnp.allclose(jax.grad(flux)(point), finite_difference, rtol=1e-6, atol=1e-9)
-    assert jnp.allclose(jax.vmap(flux)(jnp.stack([point, point])), flux(point))
 
+@pytest.mark.parametrize("method", ["linear", "cubic"])
+def test_flat_fnu_quadrature_anchor(method):
+    """Fails on a per-nm error, missing knots, or photon integration bias.
 
-@pytest.mark.parametrize("n_epochs", [1, 2])
-def test_bin_flux_linear_partial_intervals(n_epochs):
-    """Fails if partial intervals, unresolved absorption, or zero widths are lost."""
-    wave = jnp.array([400.0, 500.0, 600.0, 800.0])
-    photons = jnp.array([4.0, 2.0, 6.0, 8.0])
-    times = jnp.arange(n_epochs, dtype=float)
-    jy = photons_per_nm_per_m2_to_jy(photons, wave)
+    A flat-F_nu AB=5 table sampled every 0.025 nm approximates 1/lambda.
+    Linear interpolation's integral error is bounded by width*step**2/12
+    times max(abs((1/lambda)'')); relative error is below 4.6e-10 here.
+    Cubic interpolation is more accurate. Order 4 integrates each polynomial
+    segment exactly; 1e-9 relative covers interpolation and roundoff.
+    The rounded 550-nm anchor uses 5e-6 relative; constant parity is exact.
+    """
+    assert h == 6.62607015e-34
+    fnu = 3631.0 * 10**-2
     star = Star(
-        wavelengths_nm=wave,
-        times_d=times,
-        flux_density_jy=jy[:, None] * (1 + times[None, :]),
-        interpolation_method="linear",
+        wavelengths_nm=jnp.linspace(500.0, 600.0, 4001),
+        times_d=jnp.array([0.0]),
+        flux_density_jy=jnp.full((4001, 1), fnu),
+        interpolation_method=method,
     )
-    centers = jnp.array([550.0, 650.0, 575.0])
-    widths = jnp.array([200.0, 200.0, 0.0])
-    epoch = jnp.array(0.5 if n_epochs == 2 else 0.0)
-    actual = eqx.filter_jit(star.bin_mean_flux_density)(centers, widths, epoch)
-    # Exact areas: 50*(3+2)/2 + 100*(2+6)/2 + 50*(6+6.5)/2.
-    expected = jnp.array([4.1875, 6.3125, 5.0]) * (1 + epoch)
-    assert jnp.allclose(actual, expected, rtol=1e-13)
-    narrow = star.bin_mean_flux_density(
-        centers, jnp.full_like(widths, 1e-14), epoch, dist_pc=10.0
+    anchor = fnu * 1e-26 / (6.62607015e-34 * 550e-9) * 1e-9
+    np.testing.assert_allclose(
+        star.photon_flux_density(550.0, 0.0, dist_pc=10.0), anchor, rtol=3e-14
     )
-    assert jnp.allclose(
-        narrow, star.spec_flux_density(centers, epoch, dist_pc=10.0), rtol=1e-13
-    )
-    assert jnp.isnan(
-        star.bin_mean_flux_density(
-            jnp.array([410.0]), jnp.array([40.0]), epoch, dist_pc=10.0
-        )[0]
-    )
-
-    @eqx.filter_jit
-    def mean(p):
-        scaled = eqx.tree_at(
-            lambda model: model._flux_interp.f, star, star._flux_interp.f * p[2]
+    np.testing.assert_allclose(anchor, 9.9634e5, rtol=5e-6)
+    np.testing.assert_array_equal(star.quadrature_knots_nm, star.wavelengths_nm)
+    rule = Quadrature.build([Band(500.0, 600.0)], star.quadrature_knots_nm, order=4)
+    actual = rule.integrate(star.photon_flux_density(rule.nodes_nm, 0.0, dist_pc=10.0))
+    expected = fnu * 1e-26 / 6.62607015e-34 * np.log(600 / 500)
+    np.testing.assert_allclose(actual, expected, rtol=1e-9, atol=0)
+    if method == "linear":
+        midpoint = Quadrature.build(
+            [Band(500.0, 600.0)], star.quadrature_knots_nm, order=1
         )
-        return scaled.bin_mean_flux_density(
-            jnp.array([p[0] * 550]), jnp.array([p[1] * 200]), epoch, dist_pc=10.0
-        )[0]
+        np.testing.assert_allclose(
+            midpoint.integrate(
+                star.photon_flux_density(midpoint.nodes_nm, 0.0, dist_pc=10.0)
+            ),
+            actual,
+            rtol=3e-14,
+            atol=0,
+        )
 
-    p = jnp.ones(3)
-    delta = jnp.eye(3) * 1e-5
-    fd = jax.vmap(lambda d: (mean(p + d) - mean(p - d)) / 2e-5)(delta)
-    gradient = jax.grad(mean)(p)
-    assert jnp.allclose(gradient, fd, rtol=1e-7, atol=1e-8)
-    assert jnp.isclose(gradient[2], expected[0], rtol=1e-13)
 
-    def zero(w):
-        return star.bin_mean_flux_density(
-            jnp.array([575.0]), jnp.array([w]), epoch, dist_pc=10.0
-        )[0]
+def test_photon_jax_and_stellar_gradient(blackbody_star):
+    """Fails if tracing or batching changes photons or temperature derivatives detach.
 
-    assert float(jax.grad(zero)(0.0)) == 0.0
+    JIT/vmap use 3e-14 relative float64 algebra; central difference step 1e-4
+    in T/5772 gives O(step**2) truncation, bounded at 1e-7 relative.
+    """
+    wave = jnp.array([500.0, 550.0, 600.0])
+
+    def evaluate(w):
+        return blackbody_star.photon_flux_density(w, 0.0, dist_pc=10.0)
+
+    loop = jnp.stack([evaluate(w) for w in wave])
+    np.testing.assert_allclose(eqx.filter_jit(evaluate)(wave), loop, rtol=3e-14, atol=0)
+    np.testing.assert_allclose(jax.vmap(evaluate)(wave), loop, rtol=3e-14, atol=0)
+
+    def normalized_flux(scale):
+        varied = eqx.tree_at(lambda s: s.teff_K, blackbody_star, scale * 5772.0)
+        return varied.photon_flux_density(550.0, 0.0, dist_pc=10.0) / evaluate(550.0)
+
+    step = 1e-4
+    fd = (normalized_flux(1 + step) - normalized_flux(1 - step)) / (2 * step)
+    derivative = jax.grad(normalized_flux)(1.0)
+    assert jnp.isfinite(derivative)
+    np.testing.assert_allclose(derivative, fd, rtol=1e-7, atol=0)

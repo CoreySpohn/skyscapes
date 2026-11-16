@@ -1,9 +1,9 @@
 """Star models for the scene hierarchy.
 
-``AbstractStar`` declares the ``spec_flux_density`` hook. ``FlatStar`` is a
+``AbstractStar`` declares the ``photon_flux_density`` hook. ``FlatStar`` is a
 flat-spectrum stand-in useful for ETC runs. ``BlackbodyStar`` supplies a
 diluted Planck spectrum.
-``Star`` converts Jansky flux data to photons and interpolates over
+``Star`` converts Jansky flux data to photons once and interpolates over
 wavelength alone for a single epoch, or (wavelength, time) for multiple
 epochs, with optional surface metadata.
 
@@ -23,7 +23,6 @@ from hwoutils.conversions import jy_to_photons_per_nm_per_m2
 from jaxtyping import Array
 
 from .._planck import _planck_photon_flux
-from ..spectral import _model_max_knots, bin_mean
 from .spots import StarSpots
 
 
@@ -34,57 +33,26 @@ class AbstractStar(eqx.Module):
     """
 
     @abstractmethod
-    def spec_flux_density(
+    def photon_flux_density(
         self,
         wavelength_nm: Array,
         time_d: Array,
         *,
-        dist_pc: Array | None = None,
+        dist_pc: Array,
     ) -> Array:
-        """Return spectral flux density in ph/s/m^2/nm.
+        """Observer photon flux density [ph s^-1 m^-2 nm^-1].
 
-        ``time_d`` is days from the scene epoch.
+        Wavelengths are nm arrays of any shape; the result preserves that
+        shape, with tabulated stars also broadcasting against ``time_d``.
+        Time is days from the scene epoch. Physical spectra use ``dist_pc``;
+        apparent spectra accept and ignore it. Concrete models evaluate
+        natively in photon units, without a conversion at evaluation time.
         """
 
     @property
     def quadrature_knots_nm(self) -> Array | None:
         """Spectral integration knots [nm], or None for an analytic spectrum."""
         return None
-
-    def bin_mean_flux_density(
-        self,
-        centers_nm: Array,
-        widths_nm: Array,
-        time_d: Array,
-        *,
-        dist_pc: Array | None = None,
-        n_nodes: int = 4,
-    ) -> Array:
-        """Mean photon flux density per bin [ph/s/m^2/nm], shape ``(W,)``.
-
-        ``time_d`` is days from the scene epoch.
-
-        Centers and nonnegative full widths have shape ``(W,)``; time is
-        scalar. Width zero returns the point value. Analytic spectra use a
-        static ``n_nodes``-point Gauss-Legendre rule (default 4). Its error
-        is O(width**(2*n_nodes)); see Davis and Rabinowitz (1984), Methods
-        of Numerical Integration. For a 5772 K blackbody, centers 400-5000
-        nm and widths <= 20 percent of center, the default relative error
-        is below 1e-8. Wider bins or Wien tails need a convergence check.
-        Linear tables split at ``quadrature_knots_nm`` and are exact. The
-        static interval cap is inferred from concrete geometry; traced geometry
-        uses a conservative full-table cap to preserve this method's signature.
-        Close over concrete bins when compiling to retain bounded work.
-        """
-        knots = self.quadrature_knots_nm
-        return bin_mean(
-            lambda w: self.spec_flux_density(w, time_d, dist_pc=dist_pc),
-            centers_nm,
-            widths_nm,
-            n_nodes=n_nodes,
-            knots_nm=knots,
-            max_knots=_model_max_knots(centers_nm, widths_nm, knots),
-        )
 
 
 class FlatStar(AbstractStar):
@@ -98,14 +66,14 @@ class FlatStar(AbstractStar):
     flux_phot_per_nm_m2: float
     diameter_arcsec: float = 0.0
 
-    def spec_flux_density(
+    def photon_flux_density(
         self,
         wavelength_nm: Array,
         time_d: Array,
         *,
-        dist_pc: Array | None = None,
+        dist_pc: Array,
     ) -> Array:
-        """Constant flux, broadcast to wavelength_nm's shape.
+        """Constant photon flux [ph s^-1 m^-2 nm^-1], wavelength-shaped.
 
         ``time_d`` is days from the scene epoch.
 
@@ -146,14 +114,14 @@ class BlackbodyStar(AbstractStar):
         """
         return 2.0 * self.radius_m / (dist_pc * pc2m) * rad2arcsec
 
-    def spec_flux_density(
+    def photon_flux_density(
         self,
         wavelength_nm: Array,
         time_d: Array,
         *,
         dist_pc: Array,
     ) -> Array:
-        """Photon flux density at the observer in ph/s/m^2/nm.
+        """Photon flux density at the observer [ph s^-1 m^-2 nm^-1].
 
         ``time_d`` is days from the scene epoch.
 
@@ -205,7 +173,11 @@ class Star(AbstractStar):
     ):
         """Build the flux interpolant on ``times_d``, days from the scene epoch.
 
-        Linear interpolation avoids overshoot.
+        Input F_nu [Jy] is converted once to photon density before interpolation.
+        F_lambda = F_nu * Jy * c / lambda_m**2; dividing by photon energy
+        h*c/lambda_m and multiplying by nm2m gives F_nu*Jy/(h*wavelength_nm)
+        in ph s^-1 m^-2 nm^-1. The hwoutils conversion supplies the constants.
+        Linear interpolation of photon density avoids overshoot.
         """
         if interpolation_method not in ("linear", "cubic"):
             raise ValueError("interpolation_method must be linear or cubic.")
@@ -250,33 +222,37 @@ class Star(AbstractStar):
             float(jnp.max(self._wavelengths_nm)),
         )
 
-    def spec_flux_density(
+    def photon_flux_density(
         self,
         wavelength_nm: Array,
         time_d: Array,
         *,
-        dist_pc: Array | None = None,
+        dist_pc: Array,
     ) -> Array:
-        """Scalar or array apparent flux [ph/s/m^2/nm]; ``dist_pc`` is ignored.
+        """Apparent photon flux [ph s^-1 m^-2 nm^-1]; ``dist_pc`` is ignored.
 
+        Interpolate photon density, broadcasting wavelength and time shapes.
         ``time_d`` is days from the scene epoch.
         """
         if self._times_d.size == 1:
             # A single-epoch source is a static spectrum, not a degenerate spline.
             wavelength_nm, _ = jnp.broadcast_arrays(wavelength_nm, time_d)
-            return self._flux_interp(wavelength_nm)
-        return self._flux_interp(wavelength_nm, time_d)
+            return self._flux_interp(wavelength_nm.reshape(-1)).reshape(
+                wavelength_nm.shape
+            )
+        wave, time = jnp.broadcast_arrays(wavelength_nm, time_d)
+        return self._flux_interp(wave.reshape(-1), time.reshape(-1)).reshape(wave.shape)
 
     @property
     def quadrature_knots_nm(self) -> Array | None:
-        """Return linear-table knots [nm]; cubic spectra retain one rule per bin.
+        """Return table breakpoints [nm] for consumer quadrature.
 
-        Splitting linear segments makes Gauss-Legendre integration exact even
-        at order one (Davis and Rabinowitz 1984, Methods of Numerical Integration).
+        Every interpolation method reports the table breakpoints. A linearly
+        interpolated photon table is integrated exactly by a Gauss-Legendre
+        rule split at the knots, even at order one (Davis and Rabinowitz 1984,
+        Methods of Numerical Integration).
         """
-        if self._interpolation_method == "linear":
-            return self.wavelengths_nm
-        return None
+        return self.wavelengths_nm
 
     def __repr__(self) -> str:
         """One-line summary of metadata + wavelength/time grid extent."""

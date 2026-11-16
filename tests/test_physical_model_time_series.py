@@ -177,7 +177,7 @@ def test_default_time_hook_preserves_existing_model_behavior(kind, request):
     times = jnp.array([0.0, 1.0])
     star = FlatStar(3.0)
     contrast = model.contrast_at_time(*args, time_d=times, star=star, dist_pc=10.0)
-    flux = model.spec_flux_density(
+    flux = model.photon_flux_density(
         args[2],
         phase_angle_rad=args[0],
         dist_AU=args[1],
@@ -186,7 +186,7 @@ def test_default_time_hook_preserves_existing_model_behavior(kind, request):
         star=star,
         dist_pc=10.0,
     )
-    expected = contrast * star.spec_flux_density(args[2], times)
+    expected = contrast * star.photon_flux_density(args[2], times, dist_pc=10.0)
     assert isinstance(model, physical_model.AbstractPhysicalModel)
     assert flux.shape == (count, 2)
     if kind in ("blackbody", "emission", "sum"):

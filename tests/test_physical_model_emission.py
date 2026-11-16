@@ -417,7 +417,7 @@ def test_flux_density_matches_si_planck_at_the_observer(engines):
         star=star,
         dist_pc=10.0,
     )
-    photons = jax.vmap(lambda w: model.spec_flux_density(w, **args))(
+    photons = jax.vmap(lambda w: model.photon_flux_density(w, **args))(
         jnp.asarray(wavelength_m * 1e9)
     )
     expected_photons = expected * JY_SI / (H_J_S * wavelength_m) * 1e-9
