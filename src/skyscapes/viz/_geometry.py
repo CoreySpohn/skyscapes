@@ -1,41 +1,20 @@
 """Frame geometry shared by the views: pure NumPy, no plotting imports.
 
-Every direction here comes from the library's own frame conventions rather
-than a second derivation of them:
-
-- The sky frame is ``(x, y, z)``: ``x`` the east (Delta alpha*) offset, ``y`` the Dec
-  offset, ``+z`` away from the observer: (east, north, away), right-handed.
-  ``Planet`` passes orbix positions through, with phase cos(beta) = z/r.
-  The disk LOS kernel uses a private toward-pointing integration depth
-  and returns only a sky image.
-- The disk midplane is placed in the sky frame by
-  ``skyscapes.io._frames.rotate_to_sky_coords``. The ExoVista loader instead
-  converts already on-sky states from (west, north, toward) to orbix's
-  (east, north, away) axes and uses cube arrays as written (+column west,
-  +row north). It converts header
-  (I, PA) to (I, -PA modulo 360) on ``System.midplane_*`` for these
-  east/north axes; it does not apply the midplane rotation again.
-  The rotation's first two output rows are the images of the disk's
-  in-plane axes: the line of nodes, at angle ``pa`` from ``+x`` toward
-  ``+y``, and the in-plane axis whose ``z`` component is ``-sin(incl)``,
-  which points at the near (forward-scattering) half of the disk. These
-  describe the same physical disk as the line-of-sight kernel.
+The sky frame is (east, north, away). Astronomical position angles are
+north through east; the disk's near in-plane axis has negative away-z.
 """
 
 from __future__ import annotations
 
-import jax.numpy as jnp
 import numpy as np
 
-from skyscapes.io._frames import rotate_to_sky_coords
 
-
-def disk_axes_sky(incl_deg, pa_deg):
+def disk_axes_sky(incl_deg, position_angle_deg):
     """Right-handed (east, north, away) unit vectors of the disk's axes.
 
     Args:
         incl_deg: Midplane inclination [deg]; 0 is face-on.
-        pa_deg: Midplane position angle [deg].
+        position_angle_deg: Midplane position angle [deg].
 
     Returns:
         ``(nodes, near, normal)``, each shape ``(3,)``: the line of nodes
@@ -43,28 +22,26 @@ def disk_axes_sky(incl_deg, pa_deg):
         and the right-handed midplane normal ``nodes x near``. For
         inclinations in (0, 180), the near vector has negative z.
     """
-    basis = np.asarray(
-        rotate_to_sky_coords(jnp.eye(3), inc_deg=float(incl_deg), pa_deg=float(pa_deg)),
-        dtype=float,
-    )
-    nodes, near = basis[0], basis[1]
+    inc, pa = np.radians([incl_deg, position_angle_deg])
+    nodes = np.array([np.sin(pa), np.cos(pa), 0.0])
+    near = np.array([-np.cos(pa) * np.cos(inc), np.sin(pa) * np.cos(inc), -np.sin(inc)])
     return nodes, near, np.cross(nodes, near)
 
 
-def minor_axis_direction(pa_deg):
+def minor_axis_direction(position_angle_deg):
     """Unit sky ``(x, y)`` direction of the projected minor axis.
 
     This is the line of nodes turned by +90 degrees in the sky plane, fixed
-    for a given ``pa_deg`` whatever the inclination, so a side view built
+    for a given ``position_angle_deg`` whatever the inclination, so a side view built
     on it does not flip while an inclination is swept.
 
     Args:
-        pa_deg: Midplane position angle [deg].
+        position_angle_deg: Midplane position angle [deg].
 
     Returns:
         Shape ``(2,)`` unit vector.
     """
-    nodes, _, _ = disk_axes_sky(0.0, pa_deg)
+    nodes, _, _ = disk_axes_sky(0.0, position_angle_deg)
     return np.array([-nodes[1], nodes[0]])
 
 
@@ -86,19 +63,19 @@ def to_side(points_xyz, minor_xy):
     return p[..., 2], p[..., 0] * minor_xy[0] + p[..., 1] * minor_xy[1]
 
 
-def ring_sky(radius, incl_deg, pa_deg, n=361):
+def ring_sky(radius, incl_deg, position_angle_deg, n=361):
     """Sky-frame points of a circle of ``radius`` in the disk midplane.
 
     Args:
         radius: Ring radius, in any length unit (the output shares it).
         incl_deg: Midplane inclination [deg].
-        pa_deg: Midplane position angle [deg].
+        position_angle_deg: Midplane position angle [deg].
         n: Number of points; the first and last coincide.
 
     Returns:
         Shape ``(n, 3)``.
     """
-    nodes, near, _ = disk_axes_sky(incl_deg, pa_deg)
+    nodes, near, _ = disk_axes_sky(incl_deg, position_angle_deg)
     t = np.linspace(0.0, 2.0 * np.pi, n)
     return radius * (np.cos(t)[:, None] * nodes + np.sin(t)[:, None] * near)
 

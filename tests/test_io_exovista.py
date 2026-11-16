@@ -164,13 +164,13 @@ def test_exovista_disk_and_planet_share_east_north_chart(fits_fixture):
     system = from_exovista(fits_fixture)
     disk = system.disk
     brightness = np.asarray(
-        disk.surface_brightness(
-            disk.wavelengths_nm[0],
+        disk.photon_radiance(
+            jnp.asarray(550.0),
             jnp.asarray(system.epoch.days(2451545.0)),
-            jnp.asarray(system.midplane_inc_deg),
-            jnp.asarray(system.midplane_pa_deg),
+            star=system.star,
+            grid=disk.native_grid,
             dist_pc=system.dist_pc,
-        ),
+        ).data,
         dtype=float,
     )
     row, col = np.indices(brightness.shape, dtype=float)

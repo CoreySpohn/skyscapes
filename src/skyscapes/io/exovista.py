@@ -37,6 +37,7 @@ from hwoutils.constants import (
 )
 from hwoutils.conversions import au_per_yr_to_m_per_s, mag_to_flux_jy
 from hwoutils.epoch import Epoch
+from hwoutils.grids import PixelGrid, SkyOrientation
 from orbix.equations.orbit import state_vector_to_keplerian
 from orbix.system import FrameOrbit, phase_angle_rad
 
@@ -416,14 +417,12 @@ def _midplane_to_east_north(inc_deg: float, pa_deg: float) -> tuple[float, float
 
     ExoVista's ``src/exovista/generate_scene.py`` ``generate_scene``
     docstring defines +x west, +y north, +z toward the observer. Negating
-    x and z maps the node vector to minus the node vector at -PA, and the
-    near in-plane vector to the near vector at -PA in (east, north, away),
-    with I unchanged. The physical near half points toward the observer
-    (negative z). This preserves both the plane and its near side below
-    and above I = 90;
-    180 - PA would preserve only the projected major-axis line.
+    x and z gives nodes (-cos(PA), sin(PA), 0) and the near vector
+    (cos(I) sin(PA), cos(I) cos(PA), -sin(I)). Astronomical angle 90+PA
+    has nodes opposite the converted nodes (the same line), and precisely
+    this near vector, preserving the physical near side even above I=90.
     """
-    return inc_deg, (-pa_deg) % 360.0
+    return inc_deg, (90.0 + pa_deg) % 360.0
 
 
 def _load_disk(hdul: fits.HDUList, fits_ext: int) -> ExovistaDisk:
@@ -437,8 +436,8 @@ def _load_disk(hdul: fits.HDUList, fits_ext: int) -> ExovistaDisk:
     Column offset = -east / pixel scale.
 
     ``from_exovista`` converts the FITS star header's (I, PA) to
-    (I, -PA modulo 360) on ``System.midplane_inc_deg`` /
-    ``System.midplane_pa_deg``. These east/north angles orient parametric
+    (I, 90 + PA modulo 360) on ``System.midplane_inc_deg`` /
+    ``System.midplane_position_angle_deg``. These east/north angles orient parametric
     disks and outlines; this loaded cube already has its geometry.
     """
     obj_data = hdul[fits_ext].data
@@ -454,7 +453,12 @@ def _load_disk(hdul: fits.HDUList, fits_ext: int) -> ExovistaDisk:
     pixel_scale_arcsec = header["PXSCLMAS"] * mas2arcsec
 
     return ExovistaDisk(
-        pixel_scale_arcsec=pixel_scale_arcsec,
+        native_grid=PixelGrid.regular(
+            contrast_cube.shape[-2:],
+            pixel_scale_arcsec,
+            "arcsec",
+            orientation=SkyOrientation(0.0),
+        ),
         wavelengths_nm=wavelengths_nm,
         contrast_cube=contrast_cube,
     )
@@ -504,7 +508,7 @@ def from_exovista(
 
     State vectors are already on-sky; their (west, north, toward) axes
     are converted to orbix's (east, north, away) axes. The FITS star
-    header's midplane (I, PA) becomes (I, -PA modulo 360) in the east/north
+    header's midplane (I, PA) becomes (I, 90 + PA modulo 360) in the east/north
     chart on ``System.midplane_*``, used by parametric disks and outlines.
     These angles are not applied again to the states or loaded image.
     Elapsed simulation years use exactly 365.25 days per year and an
@@ -572,7 +576,7 @@ def from_exovista(
         wavelengths_um = hdul[0].data
         wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
         star_header = hdul[star_ext].header
-        midplane_inc_deg, midplane_pa_deg = _midplane_to_east_north(
+        midplane_inc_deg, midplane_position_angle_deg = _midplane_to_east_north(
             float(star_header.get("I", 0.0)), float(star_header.get("PA", 0.0))
         )
 
@@ -608,5 +612,5 @@ def from_exovista(
         **elements,
         disk=disk,
         midplane_inc_deg=midplane_inc_deg,
-        midplane_pa_deg=midplane_pa_deg,
+        midplane_position_angle_deg=midplane_position_angle_deg,
     )

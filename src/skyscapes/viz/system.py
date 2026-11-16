@@ -2,7 +2,7 @@
 
 skyscapes supplies what eyepiece cannot know: where each planet is at an
 epoch (``System.positions`` and ``System.ephemeris``), where the disk's
-midplane sits (``System.midplane_inc_deg`` / ``midplane_pa_deg`` through
+midplane sits (``System.midplane_inc_deg`` / ``midplane_position_angle_deg`` through
 the library's sky rotation), which way the observer is (``-z``), and that
 RA offsets are drawn increasing to the left.
 """
@@ -100,12 +100,9 @@ def plot_system(
     observer.
 
     The disk's orientation comes only from ``System.midplane_inc_deg``
-    (in ``[0, 180]``) and ``midplane_pa_deg``; the planets' orbits carry
-    their own elements and are not assumed coplanar with it. The position
-    angle is the library's, not the astronomical one: it turns the line of
-    nodes from ``+x`` (RA offset) toward ``+y`` (Dec offset), so with ``+x``
-    east the major axis lies at astronomical PA (north through east)
-    ``90 - midplane_pa_deg`` (mod 180). Within about 6 degrees of face-on
+    (in ``[0, 180]``) and ``midplane_position_angle_deg``; the planets' orbits carry
+    their own elements and are not assumed coplanar with it. The major-axis
+    position angle is north through east. Within about 6 degrees of face-on
     the near-side label is left off.
 
     Args:
@@ -171,7 +168,7 @@ def plot_system(
     incl = float(system.midplane_inc_deg)
     if not 0.0 <= incl <= 180.0:
         raise ValueError(f"midplane_inc_deg must lie in [0, 180], got {incl}")
-    pa = float(system.midplane_pa_deg)
+    pa = float(system.midplane_position_angle_deg)
     dist_pc = float(system.dist_pc)
 
     scatters, lines, texts = [], [], []

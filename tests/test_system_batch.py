@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from hwoutils.epoch import Epoch
+from hwoutils.grids import PixelGrid, SkyOrientation
 
 from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.scene import FlatStar, Planet, System
@@ -280,9 +281,14 @@ def test_invalid_batches(kind):
             lambda s: s.disk,
             b,
             ExovistaDisk(
-                pixel_scale_arcsec=0.01,
                 wavelengths_nm=jnp.array([500.0, 700.0]),
                 contrast_cube=jnp.ones((2, 2, 2)),
+                native_grid=PixelGrid.regular(
+                    (jnp.ones((2, 2, 2))).shape[-2:],
+                    0.01,
+                    "arcsec",
+                    orientation=SkyOrientation(0.0),
+                ),
             ),
             is_leaf=lambda x: x is None,
         )

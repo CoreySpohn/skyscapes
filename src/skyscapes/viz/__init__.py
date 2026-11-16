@@ -1,36 +1,14 @@
-"""Plotting for skyscapes types, built on eyepiece primitives.
+"""Scene visualizations in east/north/away sky coordinates.
 
-Requires the ``viz`` extra (``pip install 'skyscapes[viz]'``), which brings
-eyepiece and, through it, matplotlib and hwostyle. The base install stays
-free of all three: names are re-exported lazily (PEP 562), so importing
-this package imports no plotting stack, and the eyepiece requirement is
-checked only when a plot function is first touched.
-
-Every view draws in the library's own frames. The sky frame is
-``(x, y, z)`` with ``x`` the east offset (Delta RA cos Dec, drawn increasing
-to the left), ``y`` the north (Dec) offset and ``+z`` pointing from the star
-away from the observer: (east, north, away), right-handed.
-``Planet.propagate`` passes orbix positions through with cos(beta) = z/r;
-``Planet.position_arcsec`` reads the first two rows. The disk LOS kernel
-keeps a private toward-pointing depth and returns only a sky image. The
-disk midplane is placed in that frame by ``System.midplane_inc_deg`` and
-``System.midplane_pa_deg`` through ``io._frames.rotate_to_sky_coords``,
-so a drawn outline and a parametric surface-brightness map agree. The
-ExoVista loader converts header (I, PA) to (I, -PA modulo 360) in this
-east/north chart; it converts already projected states and uses cube
-arrays as written (+column west, +row north), without applying the
-midplane rotation again.
-That position angle turns the line of nodes from ``+x`` toward ``+y``; it
-is not the astronomical position angle, which (with ``+x`` east) is
-``90 - pa`` (mod 180) for the major axis. Inclinations run over
-``[0, 180]`` in every view.
+Disk major-axis position angles are astronomical, north through east.
+Inclination is zero face-on. Photon radiance images carry their PixelGrid.
 """
 
 import importlib
 
 _LAZY = {
     "plot_disk_geometry": "skyscapes.viz.disk",
-    "plot_disk_image": "skyscapes.viz.disk",
+    "plot_disk_radiance": "skyscapes.viz.disk",
     "plot_local_zodi_geometry": "skyscapes.viz.zodi",
     "plot_scattering_angle": "skyscapes.viz.scattering",
     "plot_system": "skyscapes.viz.system",

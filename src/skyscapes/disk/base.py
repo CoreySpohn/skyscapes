@@ -1,46 +1,43 @@
-"""Abstract disk interface for extended-source surface brightness."""
-
-from __future__ import annotations
+"""Scattered photon radiance on caller-owned sky grids."""
 
 from abc import abstractmethod
 
 import equinox as eqx
-from jaxtyping import Array
+from hwoutils.grids import Image, PixelGrid
+
+
+def check_sky_grid(grid):
+    """Require angular sampling with an explicit detector-to-sky orientation."""
+    if grid.unit != "arcsec" or grid.orientation is None:
+        raise ValueError("disk grid must be arcsec with a SkyOrientation")
+
+
+def radiance_image(data, grid):
+    """Name wavelength axes and the radiance unit, without pixel integration."""
+    return Image(
+        data,
+        grid,
+        tuple(f"wavelength_{i}" for i in range(data.ndim - 2)),
+        measure="per_unit_area",
+        quantity="ph s^-1 m^-2 nm^-1 sr^-1",
+    )
 
 
 class AbstractDisk(eqx.Module):
-    """Extended-source surface brightness map.
+    """Extended scattered light sampled at sky pixel centers.
 
-    Subclasses return contrast (flux ratio relative to the host star) per
-    pixel. The concrete ``System`` multiplies by ``star.spec_flux_density``
-    to turn that into ph/s/m^2/nm per pixel. Image rows increase north and
-    columns increase west (FITS display convention); sky east maps to
-    negative column offset. ``time_d`` is days from the scene epoch.
-
-    ``dist_pc``, ``incl_deg`` and ``pa_deg`` are supplied at render time
-    rather than stored
-    on the disk so the System's midplane orientation drives every disk
-    component consistently. Disks whose geometry is pre-baked into their
-    representation (e.g. ``ExovistaDisk``'s contrast cube) may ignore the
-    arguments; parametric disks (``GraterDisk``, ``ExovistaParametricDisk``)
-    consume them.
+    Values are photon radiance per steradian, independent of pixel area.
+    Consumers integrate a pixel by multiplying by
+    ``grid.pixel_area * hwoutils.constants.arcsec2rad**2``.
+    Times are scalar days from the scene epoch; wavelengths have any shape.
     """
 
     @abstractmethod
-    def surface_brightness(
-        self,
-        wavelength_nm: Array,
-        time_d: Array,
-        incl_deg: Array,
-        pa_deg: Array,
-        *,
-        dist_pc: Array | None = None,
-    ) -> Array:
-        """Return contrast per pixel, shape ``(ny, nx)``.
+    def photon_radiance(
+        self, wavelength_nm, time_d, *, star, dist_pc, grid: PixelGrid
+    ) -> Image:
+        """Return an Image with shape ``wavelength_nm.shape + grid.shape``.
 
-        ``time_d`` is days from the scene epoch.
+        ``grid`` must have unit arcsec and a SkyOrientation. The image has
+        measure per_unit_area and quantity ph s^-1 m^-2 nm^-1 sr^-1.
         """
-
-    @abstractmethod
-    def spatial_extent(self) -> tuple[float, float]:
-        """Return ``(width_arcsec, height_arcsec)``."""

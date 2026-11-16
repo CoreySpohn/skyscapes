@@ -11,8 +11,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from zodi import DensityDust
 
 from skyscapes.disk import AbstractDisk, GraterDisk
+from tests.conftest import radiance, sky_grid
+
+_GRID = sky_grid(51, 51, 0.2)
 
 
 def eqx_replace(module, **updates):
@@ -31,6 +35,9 @@ def make_disk(g_HG: float = 0.3, Ag: float = 0.5, **overrides) -> GraterDisk:
     over the default wavelength range.
     """
     defaults = dict(
+        amplitude=DensityDust(
+            level=1.0, profile_id="grater-1999", calibration_id="unit-profile"
+        ),
         sma_AU=jnp.array(50.0),
         alpha_in=jnp.array(5.0),
         alpha_out=jnp.array(-5.0),
@@ -42,23 +49,24 @@ def make_disk(g_HG: float = 0.3, Ag: float = 0.5, **overrides) -> GraterDisk:
         wavelengths_nm=jnp.array([400.0, 1000.0]),
         g_HG_grid=jnp.array([g_HG, g_HG]),
         Ag_grid=jnp.array([Ag, Ag]),
-        nx=51,
-        ny=51,
-        pixel_scale_arcsec=0.2,  # px_AU = 2 AU at 10 pc -> image covers ~+/-50 AU
         n_slices_los=31,
     )
     defaults.update(overrides)
     return GraterDisk(**defaults)
 
 
-def _render(d: GraterDisk, wavelength_nm=500.0, time_d=0.0, incl_deg=60.0, pa_deg=0.0):
-    """Convenience: render a disk at default render-time geometry."""
-    return d.surface_brightness(
-        jnp.array(wavelength_nm),
-        jnp.array(time_d),
-        jnp.array(incl_deg),
-        jnp.array(pa_deg),
-        dist_pc=10.0,
+def _render(
+    d,
+    wavelength_nm=500.0,
+    time_d=0.0,
+    inclination_deg=60.0,
+    position_angle_deg=90.0,
+    *,
+    grid=_GRID,
+):
+    """Render on an explicit caller-owned grid."""
+    return radiance(
+        d, wavelength_nm, time_d, inclination_deg, position_angle_deg, grid=grid
     )
 
 
@@ -68,7 +76,7 @@ def test_grater_disk_is_abstract():
 
 
 def test_shape_and_finiteness():
-    """surface_brightness returns the expected shape with finite, non-neg values."""
+    """photon_radiance returns the expected shape with finite, non-neg values."""
     sb = _render(make_disk())
     assert sb.shape == (51, 51)
     assert bool(jnp.all(jnp.isfinite(sb)))
@@ -78,7 +86,7 @@ def test_shape_and_finiteness():
 
 def test_pole_on_is_axisymmetric():
     """incl=0 + pa=0 -> image equals its 90 deg rotation (within tol)."""
-    sb = _render(make_disk(), incl_deg=0.0, pa_deg=0.0)
+    sb = _render(make_disk(), position_angle_deg=90.0 - (0.0), inclination_deg=0.0)
     sb_rot = jnp.rot90(sb)
     peak = float(sb.max())
     rel_err = float(jnp.max(jnp.abs(sb - sb_rot)) / peak)
@@ -87,8 +95,12 @@ def test_pole_on_is_axisymmetric():
 
 def test_hg_sign_flip_swaps_asymmetry():
     """Flipping g_HG flips the forward/back asymmetry of an inclined disk."""
-    sb_fwd = _render(make_disk(g_HG=0.3), incl_deg=60.0, pa_deg=0.0)
-    sb_bwd = _render(make_disk(g_HG=-0.3), incl_deg=60.0, pa_deg=0.0)
+    sb_fwd = _render(
+        make_disk(g_HG=0.3), position_angle_deg=90.0 - (0.0), inclination_deg=60.0
+    )
+    sb_bwd = _render(
+        make_disk(g_HG=-0.3), position_angle_deg=90.0 - (0.0), inclination_deg=60.0
+    )
     ny = sb_fwd.shape[0]
     top_fwd = float(sb_fwd[: ny // 2].sum())
     bot_fwd = float(sb_fwd[ny // 2 :].sum())
@@ -114,8 +126,10 @@ def test_supplementary_inclination_is_the_mirrored_physical_map(incl):
     ``-cos(incl)``).
     """
     d = make_disk(g_HG=0.4)
-    low = np.asarray(_render(d, incl_deg=incl, pa_deg=0.0))
-    high = np.asarray(_render(d, incl_deg=180.0 - incl, pa_deg=0.0))
+    low = np.asarray(_render(d, position_angle_deg=90.0 - (0.0), inclination_deg=incl))
+    high = np.asarray(
+        _render(d, position_angle_deg=90.0 - (0.0), inclination_deg=180.0 - incl)
+    )
     for sb in (low, high):
         assert np.all(np.isfinite(sb))
         assert np.all(sb >= 0.0), f"negative radiance, min {sb.min():.3g}"
@@ -135,28 +149,32 @@ def test_retrograde_orientation_is_the_same_midplane():
     pixel for pixel. Tolerance basis: floating-point.
     """
     d = make_disk(g_HG=0.4)
-    ref = np.asarray(_render(d, incl_deg=55.0, pa_deg=30.0))
-    same = np.asarray(_render(d, incl_deg=125.0, pa_deg=210.0))
+    ref = np.asarray(_render(d, position_angle_deg=90.0 - (30.0), inclination_deg=55.0))
+    same = np.asarray(
+        _render(d, position_angle_deg=90.0 - (210.0), inclination_deg=125.0)
+    )
     assert np.all(same >= 0.0)
     np.testing.assert_allclose(same, ref, rtol=1e-9, atol=1e-12 * ref.max())
 
 
 def test_jit_round_trip():
-    """JIT'd surface_brightness matches the eager output."""
+    """JIT'd photon_radiance matches the eager output."""
     d = make_disk()
 
     @jax.jit
     def f(disk):
-        return disk.surface_brightness(
+        return radiance(
+            disk,
             jnp.array(500.0),
             jnp.array(0.0),
             jnp.array(60.0),
-            jnp.array(0.0),
+            90.0 - (jnp.array(0.0)),
             dist_pc=10.0,
+            grid=_GRID,
         )
 
     sb_jit = f(d)
-    sb_eager = _render(d, incl_deg=60.0)
+    sb_eager = _render(d, inclination_deg=60.0)
     # jit and eager fuse the log-spaced LOS trapezoid reduction differently, so the
     # near-zero outer-disk pixels agree only to the field scale, not to 1e-12.
     atol = 1e-6 * float(jnp.max(sb_eager))
@@ -206,7 +224,7 @@ def test_high_inclination_is_finite(incl):
     (|cos| = 0.035) are highly inclined on either side of 90 but far from the
     cos_i -> 0 singularity.
     """
-    sb = _render(make_disk(), incl_deg=incl)
+    sb = _render(make_disk(), inclination_deg=incl)
     assert sb.shape == (51, 51)
     assert bool(jnp.all(jnp.isfinite(sb)))
     assert bool(jnp.all(sb >= 0.0))
@@ -222,15 +240,13 @@ def test_edge_on_render_gradient_and_convergence(incl, cutoff_width):
     Smooth radial cutoffs remove node-crossing jumps. Max image residuals
     are normalized by peak brightness, not by vanishing off-disk pixels.
     """
+    grid = sky_grid(17, 9, 0.04)
     disk = replace(
         _belt(257),
-        nx=17,
-        ny=9,
-        pixel_scale_arcsec=0.04,
         cutoff_width_AU=jnp.asarray(cutoff_width),
     )
     render = eqx.filter_jit(
-        lambda d, i: d.surface_brightness(550.0, 0.0, i, 13.0, dist_pc=10.0)
+        lambda d, i: radiance(d, 550.0, 0.0, i, 90.0 - (13.0), dist_pc=10.0, grid=grid)
     )
     images = [
         render(replace(disk, n_slices_los=n), jnp.asarray(incl))
@@ -262,15 +278,13 @@ def test_edge_on_continuity_and_smooth_cutoff_gradients(quadrature):
     continuous. The Gauss-Legendre window has no threshold in inclination and
     must pass the same probes.
     """
+    grid = sky_grid(17, 9, 0.04)
     disk = replace(
         _belt(257, quadrature=quadrature),
-        nx=17,
-        ny=9,
-        pixel_scale_arcsec=0.04,
         cutoff_width_AU=jnp.asarray(0.2),
     )
     render = eqx.filter_jit(
-        lambda d, i: d.surface_brightness(550.0, 0.0, i, 0.0, dist_pc=10.0)
+        lambda d, i: radiance(d, 550.0, 0.0, i, 90.0 - (0.0), dist_pc=10.0, grid=grid)
     )
     angles = jnp.array([89.3, 89.43, 89.5, 90.0, 90.5])
     images = jax.vmap(lambda i: render(disk, i))(angles)
@@ -328,12 +342,12 @@ def _belt(
         wavelengths_nm=jnp.array([400.0, 1000.0]),
         g_HG_grid=jnp.array([0.4, 0.4]),
         Ag_grid=jnp.array([0.3, 0.3]),
-        nx=121,
-        ny=121,
-        pixel_scale_arcsec=0.0085,
         n_slices_los=n_slices_los,
         n_scale_heights=n_scale_heights,
         quadrature=quadrature,
+        amplitude=DensityDust(
+            level=1.0, profile_id="grater-1999", calibration_id="unit-profile"
+        ),
     )
 
 
@@ -378,7 +392,14 @@ def test_los_node_ladder_converges_at_second_order(incl):
     60, 80 and 120 deg).
     """
     imgs = {
-        n: np.asarray(_render(_belt(n), wavelength_nm=550.0, incl_deg=incl))
+        n: np.asarray(
+            _render(
+                _belt(n),
+                wavelength_nm=550.0,
+                inclination_deg=incl,
+                grid=sky_grid(121, 121, 0.0085),
+            )
+        )
         for n in (21, 41, 81)
     }
     for img in imgs.values():
@@ -416,7 +437,14 @@ def test_vertical_support_ladder_converges_at_the_outer_radius(incl):
     changes below 3e-4 in the integrated responses).
     """
     imgs = {
-        k: np.asarray(_render(_belt(161, k), wavelength_nm=550.0, incl_deg=incl))
+        k: np.asarray(
+            _render(
+                _belt(161, k),
+                wavelength_nm=550.0,
+                inclination_deg=incl,
+                grid=sky_grid(121, 121, 0.0085),
+            )
+        )
         for k in (1.0, 2.0, 4.0, 6.0, 12.0)
     }
     resp = {k: _belt_responses(img, incl) for k, img in imgs.items()}
@@ -445,8 +473,22 @@ def test_support_window_is_sized_at_the_outer_radius():
     """
     from math import erf
 
-    cut = np.asarray(_render(_belt(161, 1.0), wavelength_nm=550.0, incl_deg=0.0))
-    full = np.asarray(_render(_belt(161, 12.0), wavelength_nm=550.0, incl_deg=0.0))
+    cut = np.asarray(
+        _render(
+            _belt(161, 1.0),
+            wavelength_nm=550.0,
+            inclination_deg=0.0,
+            grid=sky_grid(121, 121, 0.0085),
+        )
+    )
+    full = np.asarray(
+        _render(
+            _belt(161, 12.0),
+            wavelength_nm=550.0,
+            inclination_deg=0.0,
+            grid=sky_grid(121, 121, 0.0085),
+        )
+    )
     c = full.shape[0] // 2
     for col in (c + 40, c + 47, c + 54):
         r_AU = (col - c) * _BELT_PX_AU
@@ -474,15 +516,16 @@ def test_wavelength_vmap_returns_cube():
     )
     wls = jnp.array([550.0, 650.0, 850.0])
     cube = jax.vmap(
-        partial(d.surface_brightness, dist_pc=10.0), in_axes=(0, None, None, None)
+        partial(radiance, d, grid=_GRID, dist_pc=10.0), in_axes=(0, None, None, None)
     )(wls, jnp.array(0.0), jnp.array(60.0), jnp.array(0.0))
-    assert cube.shape == (3, d.ny, d.nx)
+    assert cube.shape == (3, _GRID.shape[0], _GRID.shape[1])
     assert bool(jnp.all(jnp.isfinite(cube)))
     assert not jnp.allclose(cube[0], cube[1])
 
 
 def test_ring_major_axis_has_fits_sky_pa():
     """North-through-east PA is measured with east=-column, north=+row."""
+    grid = sky_grid(101, 101, 0.1)
     disk = make_disk(
         g_HG=0.0,
         sma_AU=jnp.array(20.0),
@@ -491,12 +534,16 @@ def test_ring_major_axis_has_fits_sky_pa():
         ksi0_AU=jnp.array(0.4),
         rmin_AU=jnp.array(10.0),
         rmax_AU=jnp.array(30.0),
-        nx=101,
-        ny=101,
-        pixel_scale_arcsec=0.1,
     )
     sky_pa = 60.0
-    image = np.asarray(_render(disk, incl_deg=60.0, pa_deg=90.0 - sky_pa))
+    image = np.asarray(
+        _render(
+            disk,
+            position_angle_deg=90.0 - (90.0 - sky_pa),
+            inclination_deg=60.0,
+            grid=grid,
+        )
+    )
     row, col = np.indices(image.shape, dtype=float)
     east, north = -(col - 50), row - 50
     ee = np.sum(image * east**2)
@@ -509,12 +556,11 @@ def test_ring_major_axis_has_fits_sky_pa():
 
 def test_legacy_window_values():
     """Fails if the trapezoid rule changes outside the edge-on extension."""
-    d = make_disk(
-        nx=9, ny=7, n_slices_los=65, pixel_scale_arcsec=1.0, quadrature="trapezoid"
-    )
+    grid = sky_grid(9, 7, 1.0)
+    d = make_disk(n_slices_los=65, quadrature="trapezoid")
     values = []
     for incl in (0.0, 60.0, 88.0, 89.3, 90.7, 120.0):
-        img = _render(d, incl_deg=incl)
+        img = _render(d, inclination_deg=incl, grid=grid)
         values.append([float(img.sum()), float(img.max()), float(img[3, 6])])
     expected = [
         [0.00033461184740070203, 1.601973253891392e-05, 5.807893853785125e-07],

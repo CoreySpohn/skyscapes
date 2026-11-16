@@ -12,20 +12,7 @@ References:
     - `grater-jax <https://github.com/UCSB-Exoplanet-Polarimetry-Lab/GRaTeR-JAX>`_
       (Kondapalli, Lewis, Ashcraft, Millar-Blanchaer).
 
-Notes on convention:
-    Disk orientation (``incl_deg`` / ``pa_deg``) is passed in at
-    ``surface_brightness`` time rather than stored on the disk -- the
-    System's ``midplane_inc_deg`` / ``midplane_pa_deg`` drives every
-    component consistently and there is one source of truth.
-
-    Wavelength dependence enters via the HG asymmetry parameter ``g_HG``
-    and the albedo-like scaling ``Ag``, both stored as 1-D grids over
-    ``wavelengths_nm`` and interpolated at call time with a cubic
-    spline. The geometric kernel itself is wavelength-independent, so
-    ``surface_brightness`` keeps its scalar-in / ``(ny, nx)``-out shape
-    contract; ``vmap`` over wavelength gives a cube without changing
-    the interface.
-
+Notes on quadrature:
     The line-of-sight rule is a static choice (``quadrature``). The default
     Gauss-Legendre rule integrates over the exact extent of the flared layer
     along each line of sight and is smooth through edge-on, so exactly
@@ -38,19 +25,21 @@ Notes on convention:
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import equinox as eqx
 import interpax
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array
+from zodi import AbstractDustAmplitude
 
-from .._repr import fmt_scalar_or_array
 from ._los import (
     check_quadrature,
     layer_expansion_parameter,
     los_integrate_scattered,
 )
-from .base import AbstractDisk
+from ._parametric import AbstractParametricDisk
 
 
 def henyey_greenstein(cos_phi: Array, g: Array) -> Array:
@@ -125,11 +114,11 @@ def two_power_law_density(
     return radial * vertical
 
 
-class GraterDisk(AbstractDisk):
+class GraterDisk(AbstractParametricDisk):
     """Augereau 1999 scattered-light disk.
 
     Density, scattering, and spectral parameters are fittable PyTree leaves.
-    Image geometry and LOS integration settings are static configuration.
+    LOS integration settings are static; the caller supplies the sky grid.
 
     **Choosing the line-of-sight rule.** All rules converge to the same
     integral; the choice sets the truncation error and the cost, which is
@@ -174,12 +163,13 @@ class GraterDisk(AbstractDisk):
             annulus overlap.
         wavelengths_nm: 1-D wavelength grid for ``g_HG_grid`` /
             ``Ag_grid``, shape ``(n_wave,)`` [nm]. Must be sorted.
-            ``surface_brightness`` calls outside this range return NaN.
+            ``photon_radiance`` calls outside this range return NaN.
         g_HG_grid: Henyey-Greenstein asymmetry at each grid wavelength.
         Ag_grid: Albedo-like scaling at each grid wavelength.
 
-        nx, ny: Output image shape.
-        pixel_scale_arcsec: Pixel scale [arcsec/pixel].
+        amplitude: Typed density or calibrated surface-brightness amplitude.
+        inclination_deg: Inclination, zero face-on.
+        position_angle_deg: Major axis north through east.
         n_slices_los: Number of LOS nodes (per side of the midplane for
             ``"gauss_half"``).
         n_scale_heights: ``"trapezoid"`` only: LOS half-extent in units of
@@ -207,10 +197,11 @@ class GraterDisk(AbstractDisk):
     g_HG_grid: Array
     Ag_grid: Array
 
-    nx: int = eqx.field(static=True)
-    ny: int = eqx.field(static=True)
-    pixel_scale_arcsec: float = eqx.field(static=True)
+    profile_id: ClassVar[str] = "grater-1999"
+    amplitude: AbstractDustAmplitude
     n_slices_los: int = eqx.field(static=True)
+    inclination_deg: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
+    position_angle_deg: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
     n_scale_heights: float = eqx.field(static=True, default=6.0)
 
     cutoff_width_AU: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
@@ -260,25 +251,10 @@ class GraterDisk(AbstractDisk):
             * (self.rmax_AU / self.sma_AU) ** self.beta
         )
 
-    def surface_brightness(
-        self,
-        wavelength_nm: Array,
-        time_d: Array,
-        incl_deg: Array,
-        pa_deg: Array,
-        *,
-        dist_pc: Array,
-    ) -> Array:
-        """Render the Augereau 1999 scattered-light disk on a sky-plane grid.
-
-        ``time_d`` is days from the scene epoch.
-
-        ``wavelength_nm`` selects ``g_HG`` and ``Ag`` via cubic-spline
-        interpolation over ``wavelengths_nm`` / ``g_HG_grid`` /
-        ``Ag_grid``. Queries outside the grid return NaN.
-        ``time_d`` is part of the AbstractDisk interface but ignored
-        (static disk).
-        """
+    def _scattered_integral(
+        self, wavelength_nm, east_AU, north_AU, inclination_deg, position_angle_deg
+    ):
+        """Unit-density LOS integral times the spectral scattering coefficient."""
         # Wavelength-dependent scattering coefficients.
         g_HG = interpax.interp1d(
             wavelength_nm,
@@ -337,14 +313,12 @@ class GraterDisk(AbstractDisk):
         integral = los_integrate_scattered(
             density_fn,
             phase_fn,
-            incl_deg=incl_deg,
-            pa_deg=pa_deg,
+            incl_deg=inclination_deg,
+            position_angle_deg=position_angle_deg,
             rmin_AU=self.rmin_AU,
             rmax_AU=self.rmax_AU,
-            nx=self.nx,
-            ny=self.ny,
-            pixel_scale_arcsec=self.pixel_scale_arcsec,
-            dist_pc=dist_pc,
+            east_AU=east_AU,
+            north_AU=north_AU,
             n_slices_los=self.n_slices_los,
             quadrature=self.quadrature,
             scale_height_fn=scale_height_fn,
@@ -352,30 +326,3 @@ class GraterDisk(AbstractDisk):
             zmax_AU=self._zmax_AU() if self.quadrature == "trapezoid" else None,
         )
         return Ag * integral
-
-    def spatial_extent(self) -> tuple[float, float]:
-        """Return ``(width_arcsec, height_arcsec)``."""
-        return (
-            self.nx * self.pixel_scale_arcsec,
-            self.ny * self.pixel_scale_arcsec,
-        )
-
-    def __repr__(self) -> str:
-        """Compact summary of radial/vertical/HG parameters + image/Ag grid."""
-        n_wl = int(self.wavelengths_nm.shape[0])
-        wl_min = float(self.wavelengths_nm.min())
-        wl_max = float(self.wavelengths_nm.max())
-        return (
-            f"GraterDisk(sma={fmt_scalar_or_array(self.sma_AU)} AU, "
-            f"radial: alpha_in={fmt_scalar_or_array(self.alpha_in)}, "
-            f"alpha_out={fmt_scalar_or_array(self.alpha_out)}, "
-            f"r=[{fmt_scalar_or_array(self.rmin_AU)}, "
-            f"{fmt_scalar_or_array(self.rmax_AU)}] AU; "
-            f"vertical: ksi0={fmt_scalar_or_array(self.ksi0_AU)} AU, "
-            f"beta={fmt_scalar_or_array(self.beta)}, "
-            f"gamma={fmt_scalar_or_array(self.gamma)}; "
-            f"HG/Ag grid: {n_wl} pts in {wl_min:.0f}-{wl_max:.0f} nm; "
-            f"image: {self.ny}x{self.nx} @ {self.pixel_scale_arcsec} arcsec/px, "
-            f"n_slices_los={self.n_slices_los}, "
-            f"quadrature={self.quadrature!r})"
-        )

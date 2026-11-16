@@ -22,6 +22,7 @@ from hwoutils.constants import (
 )
 from hwoutils.conversions import photons_per_nm_per_m2_to_jy
 from hwoutils.epoch import Epoch
+from hwoutils.grids import PixelGrid, SkyOrientation
 
 from skyscapes.disk import ExovistaDisk
 from skyscapes.physical_model import (
@@ -81,7 +82,13 @@ def test_system_with_disk_field():
     p = _make_planet(0.3, 1.0)
     wl = jnp.linspace(400.0, 1000.0, 5)
     cube = jnp.full((wl.size, 4, 4), 1e-6)
-    disk = ExovistaDisk(pixel_scale_arcsec=0.01, wavelengths_nm=wl, contrast_cube=cube)
+    disk = ExovistaDisk(
+        wavelengths_nm=wl,
+        contrast_cube=cube,
+        native_grid=PixelGrid.regular(
+            (cube).shape[-2:], 0.01, "arcsec", orientation=SkyOrientation(0.0)
+        ),
+    )
     sys_obj = _system(star, (p,), disk=disk, star_mass_Msun=1.989e30 / Msun2kg)
     assert sys_obj.disk is disk
 
@@ -861,7 +868,7 @@ def test_classical_builder_traced_order_and_ownership():
         ".planets[0].Rp_Rearth",
         ".planets[0].physical_model.Ag",
         ".midplane_inc_deg",
-        ".midplane_pa_deg",
+        ".midplane_position_angle_deg",
         ".valid",
     }
     assert len(mass_distance_paths) == 3

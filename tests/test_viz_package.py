@@ -70,7 +70,7 @@ def test_exports_are_listed_and_unknown_names_raise():
 
     expected = {
         "plot_disk_geometry",
-        "plot_disk_image",
+        "plot_disk_radiance",
         "plot_local_zodi_geometry",
         "plot_scattering_angle",
         "plot_system",

@@ -4,6 +4,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from zodi import DensityDust
 
 from skyscapes import viz
 from skyscapes.disk import GraterDisk
@@ -27,24 +28,27 @@ def midplane_measurements(fits_fixture):
     """Measure a forward-scattering ring on the demo cube's exact pixel grid."""
     system = from_exovista(fits_fixture)
     loaded = system.disk
-    wavelength_nm = loaded.wavelengths_nm[0]
+    wavelength_nm = jnp.asarray(550.0)
     args = tuple(
         jnp.asarray(value)
         for value in (
             wavelength_nm,
             system.epoch.days(2451545.0),
             system.midplane_inc_deg,
-            system.midplane_pa_deg,
+            system.midplane_position_angle_deg,
         )
     )
     reference = np.asarray(
-        loaded.surface_brightness(*args, dist_pc=system.dist_pc), dtype=float
+        loaded.photon_radiance(
+            *args[:2], star=system.star, grid=loaded.native_grid, dist_pc=system.dist_pc
+        ).data,
+        dtype=float,
     )
     ny, nx = reference.shape
     # The suite's two-power-law Grater ring, sized to fit this field so
     # clipping does not set its moments. Only orientation is compared;
     # this is not a fit to ExoVista's density or scattering function.
-    radius_AU = 0.25 * min(nx, ny) * loaded.pixel_scale_arcsec * system.dist_pc
+    radius_AU = 0.25 * min(nx, ny) * loaded.native_grid.step * system.dist_pc
     parametric = GraterDisk(
         sma_AU=jnp.asarray(radius_AU),
         alpha_in=jnp.array(5.0),
@@ -57,13 +61,18 @@ def midplane_measurements(fits_fixture):
         wavelengths_nm=jnp.array([wavelength_nm, loaded.wavelengths_nm[-1]]),
         g_HG_grid=jnp.array([0.3, 0.3]),
         Ag_grid=jnp.array([0.5, 0.5]),
-        nx=nx,
-        ny=ny,
-        pixel_scale_arcsec=loaded.pixel_scale_arcsec,
+        amplitude=DensityDust(
+            level=1.0, profile_id="grater-1999", calibration_id="unit-profile"
+        ),
+        inclination_deg=system.midplane_inc_deg,
+        position_angle_deg=system.midplane_position_angle_deg,
         n_slices_los=31,
     )
     rendered = np.asarray(
-        parametric.surface_brightness(*args, dist_pc=system.dist_pc), dtype=float
+        parametric.photon_radiance(
+            *args[:2], star=system.star, grid=loaded.native_grid, dist_pc=system.dist_pc
+        ).data,
+        dtype=float,
     )
     for image in (reference, rendered):
         assert np.all(np.isfinite(image)) and np.all(image >= 0)

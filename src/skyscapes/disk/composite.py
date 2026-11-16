@@ -1,77 +1,48 @@
-"""CompositeDisk: sum of multiple ``AbstractDisk`` components.
+"""Sum of scattered-light components on a caller's sky grid."""
 
-Mirrors how ``skyscapes.scene.System`` composes multiple ``Planet`` objects
-via a tuple: a ``CompositeDisk`` holds a tuple of disk components and
-renders their summed ``surface_brightness`` on a shared grid.
+import equinox as eqx
 
-All components must share the same ``spatial_extent()`` so the per-component
-rendered arrays can be added directly without resampling. Mismatched
-geometries are rejected at construction.
-"""
+from .base import AbstractDisk, radiance_image
 
-from __future__ import annotations
 
-from jaxtyping import Array
+def orient_disk(disk, inclination_deg, position_angle_deg):
+    """Return a parametric disk at the system midplane; stored cubes stay fixed."""
+    from ._parametric import AbstractParametricDisk
 
-from .._repr import indent
-from .base import AbstractDisk
+    if isinstance(disk, CompositeDisk):
+        return eqx.tree_at(
+            lambda d: d.components,
+            disk,
+            tuple(
+                orient_disk(c, inclination_deg, position_angle_deg)
+                for c in disk.components
+            ),
+        )
+    if isinstance(disk, AbstractParametricDisk):
+        return eqx.tree_at(
+            lambda d: (d.inclination_deg, d.position_angle_deg),
+            disk,
+            (inclination_deg, position_angle_deg),
+        )
+    return disk
 
 
 class CompositeDisk(AbstractDisk):
-    """Sum of multiple disk components rendered on a shared grid.
-
-    Attributes:
-        components: Tuple of ``AbstractDisk`` instances. At least one
-            component is required. All components must report the same
-            ``spatial_extent()`` so their rendered ``(ny, nx)`` arrays
-            sum elementwise.
-    """
+    """Components may have different native grids; each renders on the target."""
 
     components: tuple[AbstractDisk, ...]
 
     def __check_init__(self):
-        """Reject empty composites and mismatched component extents."""
-        if len(self.components) == 0:
+        """Validate the declared disk inputs."""
+        if not self.components:
             raise ValueError("CompositeDisk requires at least one component.")
-        ref_extent = self.components[0].spatial_extent()
-        for i, c in enumerate(self.components[1:], start=1):
-            ext = c.spatial_extent()
-            if ext != ref_extent:
-                raise ValueError(
-                    f"CompositeDisk component {i} has spatial_extent={ext}, "
-                    f"which does not match component 0's {ref_extent}. All "
-                    f"components must share the same grid for direct summation."
-                )
 
-    def surface_brightness(
-        self,
-        wavelength_nm: Array,
-        time_d: Array,
-        incl_deg: Array,
-        pa_deg: Array,
-        *,
-        dist_pc: Array,
-    ) -> Array:
-        """Return the per-pixel sum of all component contrast maps.
-
-        ``time_d`` is days from the scene epoch.
-        """
-        contrib = self.components[0].surface_brightness(
-            wavelength_nm, time_d, incl_deg, pa_deg, dist_pc=dist_pc
+    def photon_radiance(self, wavelength_nm, time_d, *, star, dist_pc, grid):
+        """Sum photon radiance densities on exactly the requested grid."""
+        data = sum(
+            c.photon_radiance(
+                wavelength_nm, time_d, star=star, dist_pc=dist_pc, grid=grid
+            ).data
+            for c in self.components
         )
-        for c in self.components[1:]:
-            contrib = contrib + c.surface_brightness(
-                wavelength_nm, time_d, incl_deg, pa_deg, dist_pc=dist_pc
-            )
-        return contrib
-
-    def spatial_extent(self) -> tuple[float, float]:
-        """Return the shared ``(width_arcsec, height_arcsec)``."""
-        return self.components[0].spatial_extent()
-
-    def __repr__(self) -> str:
-        """Nested summary listing each component disk."""
-        lines = [f"CompositeDisk(n_components={len(self.components)})"]
-        for i, c in enumerate(self.components):
-            lines.append(indent(f"[{i}] {c!r}"))
-        return "\n".join(lines)
+        return radiance_image(data, grid)

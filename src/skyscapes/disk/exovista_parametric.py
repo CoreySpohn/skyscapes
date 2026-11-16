@@ -20,7 +20,7 @@ What's reproduced (Stark 2022 / ``Image.cpp``):
 
   - Three-component Henyey-Greenstein phase function
     ``sum_i(w_i * HG(g_i))``, with scalar ``(g_i, w_i)`` parameters.
-  - ``nzodis`` density scaling (zodi units).
+  - Typed amplitude calibration of the declared unit density profile.
   - 1/r^2 stellar illumination dilution (applied by the LOS kernel via
     division by the squared distance to the star).
 
@@ -37,7 +37,7 @@ What's intentionally simplified vs the full ExoVista pipeline:
     produces a color gradient absent here).
 
 The class is intentionally faithful to the ExoVista parameterization
-(``r0_AU``, ``dror``, ``rinner_AU``, ``hor``, ``nzodis``, ``eta``,
+(``r0_AU``, ``dror``, ``rinner_AU``, ``hor``, ``eta``,
 three HG ``(g_i, w_i)``) rather than a smaller user-friendly subset.
 ``CompositeDisk`` is the right way to build full multi-component scenes.
 
@@ -47,18 +47,20 @@ References:
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import equinox as eqx
 import interpax
 import jax.numpy as jnp
 from jaxtyping import Array
+from zodi import AbstractDustAmplitude
 
-from .._repr import fmt_scalar_or_array
 from ._los import (
     check_quadrature,
     layer_expansion_parameter,
     los_integrate_scattered,
 )
-from .base import AbstractDisk
+from ._parametric import AbstractParametricDisk
 from .grater import henyey_greenstein
 
 
@@ -91,7 +93,7 @@ def exovista_density(
     dror: Array,
     rinner_AU: Array,
     hor: Array,
-    nzodis: Array,
+    density_multiplier: Array,
     eta: Array,
 ) -> Array:
     """ExoVista per-component disk density (Image.cpp formula).
@@ -105,7 +107,7 @@ def exovista_density(
             ``(r/rinner)^3`` cubic ramp suppresses the density.
         hor: Opening angle. The local 1-sigma Gaussian vertical scale at
             radius ``r`` is ``h = r * hor``.
-        nzodis: Density normalization (zodi units).
+        density_multiplier: Dimensionless multiplier of this density profile.
         eta: Poynting-Robertson drag / collision-timescale ratio for the
             inward-decay component.
 
@@ -123,7 +125,7 @@ def exovista_density(
     vertical = jnp.exp(-0.5 * (z / h_local) ** 2)
     vertical = vertical / (h_local * sqrt_two_pi)
 
-    n = nzodis * vertical
+    n = density_multiplier * vertical
 
     # Piecewise radial profile. The ring owns its two edges, where it equals
     # the neighboring branch; a strict comparison would leave r = r0 +- dr in
@@ -161,11 +163,11 @@ def exovista_density(
     return n
 
 
-class ExovistaParametricDisk(AbstractDisk):
+class ExovistaParametricDisk(AbstractParametricDisk):
     """ExoVista-style disk component (faithful per-component reproduction).
 
     Density, scattering, and spectral parameters are fittable PyTree leaves.
-    Image geometry and LOS integration settings are static configuration.
+    LOS integration settings are static; the caller supplies the sky grid.
 
     The vertical profile ``exp(-0.5 (z / (hor r))^2)`` is the form
     ``exp(-(|z| / h)^gamma)`` with ``gamma = 2`` and ``h = sqrt(2) hor r``,
@@ -189,7 +191,6 @@ class ExovistaParametricDisk(AbstractDisk):
             is suppressed by ``(r/rinner_AU)^3``. Set to a value smaller
             than ``rmin_AU`` to disable.
         hor: Opening angle (Gaussian vertical scale / radius).
-        nzodis: Density normalization in zodi units.
         eta: PR-drag / collision-timescale ratio at ``r0 - dr``.
         g0, g1, g2: Three-component HG asymmetry parameters.
         w0, w1, w2: Three-component HG weights. Should sum to 1; not
@@ -200,8 +201,9 @@ class ExovistaParametricDisk(AbstractDisk):
             outside this range return NaN.
         Ag_grid: Phenomenological albedo scaling vs wavelength.
 
-        nx, ny: Output image shape.
-        pixel_scale_arcsec: Pixel scale [arcsec/pixel].
+        amplitude: Typed density or calibrated surface-brightness amplitude.
+        inclination_deg: Inclination, zero face-on.
+        position_angle_deg: Major axis north through east.
         n_slices_los: Number of LOS nodes (per side of the midplane for
             ``"gauss_half"``).
         n_scale_heights: ``"trapezoid"`` only: LOS half-extent in units of
@@ -215,7 +217,6 @@ class ExovistaParametricDisk(AbstractDisk):
     dror: Array
     rinner_AU: Array
     hor: Array
-    nzodis: Array
     eta: Array
     g0: Array
     g1: Array
@@ -228,10 +229,11 @@ class ExovistaParametricDisk(AbstractDisk):
     wavelengths_nm: Array
     Ag_grid: Array
 
-    nx: int = eqx.field(static=True)
-    ny: int = eqx.field(static=True)
-    pixel_scale_arcsec: float = eqx.field(static=True)
+    profile_id: ClassVar[str] = "exovista-parametric"
+    amplitude: AbstractDustAmplitude
     n_slices_los: int = eqx.field(static=True)
+    inclination_deg: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
+    position_angle_deg: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
     n_scale_heights: float = eqx.field(static=True, default=6.0)
     quadrature: str = eqx.field(static=True, default="legendre")
 
@@ -276,19 +278,10 @@ class ExovistaParametricDisk(AbstractDisk):
         """
         return self.n_scale_heights * self.r0_AU * self.hor
 
-    def surface_brightness(
-        self,
-        wavelength_nm: Array,
-        time_d: Array,
-        incl_deg: Array,
-        pa_deg: Array,
-        *,
-        dist_pc: Array,
-    ) -> Array:
-        """Render the ExoVista-style disk on a sky-plane grid.
-
-        ``time_d`` is days from the scene epoch.
-        """
+    def _scattered_integral(
+        self, wavelength_nm, east_AU, north_AU, inclination_deg, position_angle_deg
+    ):
+        """Unit-density LOS integral times the spectral scattering coefficient."""
         Ag = interpax.interp1d(
             wavelength_nm,
             self.wavelengths_nm,
@@ -310,7 +303,7 @@ class ExovistaParametricDisk(AbstractDisk):
                 dror=self.dror,
                 rinner_AU=self.rinner_AU,
                 hor=self.hor,
-                nzodis=self.nzodis,
+                density_multiplier=1.0,
                 eta=self.eta,
             )
 
@@ -331,14 +324,12 @@ class ExovistaParametricDisk(AbstractDisk):
         integral = los_integrate_scattered(
             density_fn,
             phase_fn,
-            incl_deg=incl_deg,
-            pa_deg=pa_deg,
+            incl_deg=inclination_deg,
+            position_angle_deg=position_angle_deg,
             rmin_AU=self.rmin_AU,
             rmax_AU=self.rmax_AU,
-            nx=self.nx,
-            ny=self.ny,
-            pixel_scale_arcsec=self.pixel_scale_arcsec,
-            dist_pc=dist_pc,
+            east_AU=east_AU,
+            north_AU=north_AU,
             n_slices_los=self.n_slices_los,
             quadrature=self.quadrature,
             scale_height_fn=scale_height_fn,
@@ -346,37 +337,3 @@ class ExovistaParametricDisk(AbstractDisk):
             zmax_AU=self._zmax_AU() if self.quadrature == "trapezoid" else None,
         )
         return Ag * integral
-
-    def spatial_extent(self) -> tuple[float, float]:
-        """Return ``(width_arcsec, height_arcsec)``."""
-        return (
-            self.nx * self.pixel_scale_arcsec,
-            self.ny * self.pixel_scale_arcsec,
-        )
-
-    def __repr__(self) -> str:
-        """Compact summary of ring/density/HG parameters + image/Ag grid."""
-        n_wl = int(self.wavelengths_nm.shape[0])
-        wl_min = float(self.wavelengths_nm.min())
-        wl_max = float(self.wavelengths_nm.max())
-        return (
-            f"ExovistaParametricDisk("
-            f"ring: r0={fmt_scalar_or_array(self.r0_AU)} AU, "
-            f"dror={fmt_scalar_or_array(self.dror)}; "
-            f"PR-drag inner: rinner={fmt_scalar_or_array(self.rinner_AU)} AU; "
-            f"density: nzodis={fmt_scalar_or_array(self.nzodis)}, "
-            f"eta={fmt_scalar_or_array(self.eta)}, "
-            f"hor={fmt_scalar_or_array(self.hor)}; "
-            f"3-comp HG: g=[{fmt_scalar_or_array(self.g0)}, "
-            f"{fmt_scalar_or_array(self.g1)}, "
-            f"{fmt_scalar_or_array(self.g2)}], "
-            f"w=[{fmt_scalar_or_array(self.w0)}, "
-            f"{fmt_scalar_or_array(self.w1)}, "
-            f"{fmt_scalar_or_array(self.w2)}]; "
-            f"r=[{fmt_scalar_or_array(self.rmin_AU)}, "
-            f"{fmt_scalar_or_array(self.rmax_AU)}] AU; "
-            f"Ag grid: {n_wl} pts in {wl_min:.0f}-{wl_max:.0f} nm; "
-            f"image: {self.ny}x{self.nx} @ {self.pixel_scale_arcsec} arcsec/px, "
-            f"n_slices_los={self.n_slices_los}, "
-            f"quadrature={self.quadrature!r})"
-        )

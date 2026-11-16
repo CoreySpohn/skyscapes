@@ -8,9 +8,13 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from zodi import DensityDust
 
 from skyscapes.disk import AbstractDisk, ExovistaParametricDisk
 from skyscapes.disk.exovista_parametric import exovista_density
+from tests.conftest import radiance, sky_grid
+
+_GRID = sky_grid(51, 51, 0.1)
 
 
 def make_disk(**overrides) -> ExovistaParametricDisk:
@@ -24,7 +28,6 @@ def make_disk(**overrides) -> ExovistaParametricDisk:
         dror=jnp.array(0.1),
         rinner_AU=jnp.array(2.0),
         hor=jnp.array(0.05),
-        nzodis=jnp.array(3.0),
         eta=jnp.array(1.0),
         g0=jnp.array(0.9),
         g1=jnp.array(0.6),
@@ -36,22 +39,29 @@ def make_disk(**overrides) -> ExovistaParametricDisk:
         rmax_AU=jnp.array(80.0),
         wavelengths_nm=jnp.array([400.0, 1000.0]),
         Ag_grid=jnp.array([0.5, 0.5]),
-        nx=51,
-        ny=51,
-        pixel_scale_arcsec=0.1,
         n_slices_los=41,
+        amplitude=DensityDust(
+            level=jnp.array(3.0),
+            profile_id="exovista-parametric",
+            calibration_id="unit-profile",
+        ),
     )
     defaults.update(overrides)
     return ExovistaParametricDisk(**defaults)
 
 
-def _render(d, wavelength_nm=550.0, time_d=0.0, incl_deg=60.0, pa_deg=0.0):
-    return d.surface_brightness(
-        jnp.array(wavelength_nm),
-        jnp.array(time_d),
-        jnp.array(incl_deg),
-        jnp.array(pa_deg),
-        dist_pc=10.0,
+def _render(
+    d,
+    wavelength_nm=550.0,
+    time_d=0.0,
+    inclination_deg=60.0,
+    position_angle_deg=90.0,
+    *,
+    grid=_GRID,
+):
+    """Render on an explicit caller-owned grid."""
+    return radiance(
+        d, wavelength_nm, time_d, inclination_deg, position_angle_deg, grid=grid
     )
 
 
@@ -61,7 +71,7 @@ def test_is_abstract():
 
 
 def test_shape_and_finiteness():
-    """surface_brightness returns finite non-negative output of correct shape."""
+    """photon_radiance returns finite non-negative output of correct shape."""
     sb = _render(make_disk())
     assert sb.shape == (51, 51)
     assert bool(jnp.all(jnp.isfinite(sb)))
@@ -71,7 +81,7 @@ def test_shape_and_finiteness():
 
 def test_pole_on_is_axisymmetric():
     """Pole-on rendering is axisymmetric."""
-    sb = _render(make_disk(), incl_deg=0.0, pa_deg=0.0)
+    sb = _render(make_disk(), position_angle_deg=90.0 - (0.0), inclination_deg=0.0)
     sb_rot = jnp.rot90(sb)
     peak = float(sb.max())
     assert float(jnp.max(jnp.abs(sb - sb_rot)) / peak) < 1e-4
@@ -83,20 +93,15 @@ def test_ring_peak_at_r0():
     The full disk also has a PR-drag interior + r^-1.5 halo, so we
     restrict the test to pixels within a few ring widths of r0.
     """
+    grid = sky_grid(101, 101, 0.1)
     r0 = 25.0
     dror = 0.1
-    d = make_disk(
-        r0_AU=jnp.array(r0),
-        dror=jnp.array(dror),
-        nx=101,
-        ny=101,
-        pixel_scale_arcsec=0.1,
-    )
-    sb = _render(d, incl_deg=0.0, pa_deg=0.0)
+    d = make_disk(r0_AU=jnp.array(r0), dror=jnp.array(dror))
+    sb = _render(d, position_angle_deg=90.0 - (0.0), inclination_deg=0.0, grid=grid)
     ny, nx = sb.shape
     yy, xx = jnp.mgrid[:ny, :nx]
     r_pix = jnp.sqrt((xx - (nx - 1) / 2) ** 2 + (yy - (ny - 1) / 2) ** 2)
-    px_AU = d.pixel_scale_arcsec * 10.0
+    px_AU = grid.step * 10.0
     r_AU = r_pix * px_AU
     dr_AU = dror * r0
     near_ring = (r_AU > r0 - 3 * dr_AU) & (r_AU < r0 + 3 * dr_AU)
@@ -109,21 +114,19 @@ def test_ring_peak_at_r0():
 def test_outer_halo_falls_as_r_minus_one_point_five():
     """Far outside the ring, the surface brightness column follows ~r^-1.5."""
     # Pole-on so the radial profile is unambiguous in image coords.
+    grid = sky_grid(201, 201, 0.05)
     d = make_disk(
         r0_AU=jnp.array(10.0),
         dror=jnp.array(0.1),
         rmin_AU=jnp.array(0.5),
         rmax_AU=jnp.array(60.0),
         rinner_AU=jnp.array(0.5),
-        nx=201,
-        ny=201,
-        pixel_scale_arcsec=0.05,
     )
-    sb = _render(d, incl_deg=0.0)
+    sb = _render(d, inclination_deg=0.0, grid=grid)
     ny, nx = sb.shape
     yy, xx = jnp.mgrid[:ny, :nx]
     r_pix = jnp.sqrt((xx - (nx - 1) / 2) ** 2 + (yy - (ny - 1) / 2) ** 2)
-    px_AU = d.pixel_scale_arcsec * 10.0
+    px_AU = grid.step * 10.0
     r_AU = r_pix * px_AU
     # Sample two radii well outside the ring; ratio should follow r^-1.5
     # times the 1/r^2 illumination, i.e. surface brightness ~ r^-3.5 in
@@ -155,7 +158,7 @@ def test_density_is_continuous_at_the_ring_edges():
         dror=jnp.array(0.1),
         rinner_AU=jnp.array(2.0),
         hor=jnp.array(0.05),
-        nzodis=jnp.array(3.0),
+        density_multiplier=jnp.array(3.0),
         eta=jnp.array(1.0),
     )
     on_edge = exovista_density(edges, jnp.zeros(2), **parameters)
@@ -175,8 +178,8 @@ def test_three_hg_weight_concentrates_forward():
         w1=jnp.array(0.0),
         w2=jnp.array(1.0),
     )
-    sb_fwd = _render(d_fwd_heavy, incl_deg=60.0, pa_deg=0.0)
-    sb_iso = _render(d_iso_heavy, incl_deg=60.0, pa_deg=0.0)
+    sb_fwd = _render(d_fwd_heavy, position_angle_deg=90.0 - (0.0), inclination_deg=60.0)
+    sb_iso = _render(d_iso_heavy, position_angle_deg=90.0 - (0.0), inclination_deg=60.0)
     ny = sb_fwd.shape[0]
     # Row index increases along +y. At pa = 0 and incl < 90 the near,
     # forward-scattering half lies along +y (rows ny // 2 onward) and the far
@@ -204,8 +207,10 @@ def test_supplementary_inclination_is_the_mirrored_physical_map(incl):
     Tolerance basis: floating-point.
     """
     d = make_disk()
-    low = np.asarray(_render(d, incl_deg=incl, pa_deg=0.0))
-    high = np.asarray(_render(d, incl_deg=180.0 - incl, pa_deg=0.0))
+    low = np.asarray(_render(d, position_angle_deg=90.0 - (0.0), inclination_deg=incl))
+    high = np.asarray(
+        _render(d, position_angle_deg=90.0 - (0.0), inclination_deg=180.0 - incl)
+    )
     for sb in (low, high):
         assert np.all(np.isfinite(sb))
         assert np.all(sb >= 0.0), f"negative radiance, min {sb.min():.3g}"
@@ -222,12 +227,14 @@ def test_jit_round_trip():
 
     @jax.jit
     def f(disk):
-        return disk.surface_brightness(
+        return radiance(
+            disk,
             jnp.array(550.0),
             jnp.array(0.0),
             jnp.array(60.0),
-            jnp.array(0.0),
+            90.0 - (jnp.array(0.0)),
             dist_pc=10.0,
+            grid=_GRID,
         )
 
     sb_eager = _render(d)
@@ -241,8 +248,8 @@ def test_jit_round_trip():
 def test_edge_on_has_supplementary_symmetry(incl):
     """Fails if the shared edge-on extension breaks ExovistaParametricDisk geometry."""
     d = make_disk()
-    image = jax.jit(lambda i: _render(d, incl_deg=i))(jnp.asarray(incl))
-    mirrored = _render(d, incl_deg=180.0 - incl)
+    image = jax.jit(lambda i: _render(d, inclination_deg=i))(jnp.asarray(incl))
+    mirrored = _render(d, inclination_deg=180.0 - incl)
     np.testing.assert_allclose(image, mirrored[::-1], rtol=1e-9, atol=1e-12)
     assert jnp.all(jnp.isfinite(image)) and image.max() > 0
 
@@ -282,7 +289,9 @@ def test_los_node_ladder_converges_at_second_order(incl):
     """
     imgs = {
         n: np.asarray(
-            _render(make_disk(n_slices_los=n, quadrature="trapezoid"), incl_deg=incl)
+            _render(
+                make_disk(n_slices_los=n, quadrature="trapezoid"), inclination_deg=incl
+            )
         )
         for n in (21, 41, 81)
     }
@@ -309,12 +318,7 @@ def _halo_view(n_scale_heights: float, **overrides) -> ExovistaParametricDisk:
     Trapezoid rule: the support tests below are about its window.
     """
     settings = dict(
-        nx=81,
-        ny=81,
-        pixel_scale_arcsec=0.2,
-        n_slices_los=161,
-        n_scale_heights=n_scale_heights,
-        quadrature="trapezoid",
+        n_slices_los=161, n_scale_heights=n_scale_heights, quadrature="trapezoid"
     )
     settings.update(overrides)
     return make_disk(**settings)
@@ -340,7 +344,9 @@ def test_vertical_support_ladder_converges_on_the_ring():
     for incl in (0.0, 60.0):
         ring = {}
         for k in (1.5, 3.0, 6.0, 24.0):
-            img = np.asarray(_render(_halo_view(k), incl_deg=incl))
+            img = np.asarray(
+                _render(_halo_view(k), inclination_deg=incl, grid=sky_grid(81, 81, 0.2))
+            )
             assert np.all(img >= 0.0)
             if incl == 0.0:
                 ring[k] = _radial_band(img, 18.0, 22.0)
@@ -366,9 +372,19 @@ def test_vertical_support_converges_in_the_outer_halo():
     support four times larger. Known limitation: the band loses ~6 percent.
     """
     default = _radial_band(
-        np.asarray(_render(_halo_view(6.0), incl_deg=0.0)), 55.0, 75.0
+        np.asarray(
+            _render(_halo_view(6.0), inclination_deg=0.0, grid=sky_grid(81, 81, 0.2))
+        ),
+        55.0,
+        75.0,
     )
-    wide = _radial_band(np.asarray(_render(_halo_view(24.0), incl_deg=0.0)), 55.0, 75.0)
+    wide = _radial_band(
+        np.asarray(
+            _render(_halo_view(24.0), inclination_deg=0.0, grid=sky_grid(81, 81, 0.2))
+        ),
+        55.0,
+        75.0,
+    )
     assert abs(default / wide - 1.0) < 1e-3
 
 
@@ -380,12 +396,22 @@ def test_legendre_window_captures_the_outer_halo():
     and 1281 nodes to 1e-3, at 48 nodes. Tolerance basis: measured 3e-5.
     """
     wide = _radial_band(
-        np.asarray(_render(_halo_view(24.0, n_slices_los=1281), incl_deg=0.0)),
+        np.asarray(
+            _render(
+                _halo_view(24.0, n_slices_los=1281),
+                inclination_deg=0.0,
+                grid=sky_grid(81, 81, 0.2),
+            )
+        ),
         55.0,
         75.0,
     )
     local = _halo_view(6.0, n_slices_los=48, quadrature="legendre")
-    band = _radial_band(np.asarray(_render(local, incl_deg=0.0)), 55.0, 75.0)
+    band = _radial_band(
+        np.asarray(_render(local, inclination_deg=0.0, grid=sky_grid(81, 81, 0.2))),
+        55.0,
+        75.0,
+    )
     assert abs(band / wide - 1.0) < 1e-3
 
 
@@ -397,7 +423,7 @@ def test_wavelength_vmap_returns_cube():
     )
     wls = jnp.array([550.0, 650.0, 850.0])
     cube = jax.vmap(
-        partial(d.surface_brightness, dist_pc=10.0), in_axes=(0, None, None, None)
+        partial(radiance, d, grid=_GRID, dist_pc=10.0), in_axes=(0, None, None, None)
     )(wls, jnp.array(0.0), jnp.array(60.0), jnp.array(0.0))
-    assert cube.shape == (3, d.ny, d.nx)
+    assert cube.shape == (3, _GRID.shape[0], _GRID.shape[1])
     assert bool(jnp.all(jnp.isfinite(cube)))

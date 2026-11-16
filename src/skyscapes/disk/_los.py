@@ -1,12 +1,6 @@
 """Shared LOS-around-midplane integration kernel for parametric disks.
 
-Lifted out of ``GraterDisk.surface_brightness`` so multiple disk classes
-(GraterDisk, ExovistaParametricDisk, ...) can plug in their own density
-profiles and phase functions while sharing the geometric integration.
-Images follow the FITS display convention: +column west, +row north.
-With ``imshow(origin="lower")`` and no axis inversion, north is up and
-east is left; astronomical PA (north through east) is counterclockwise.
-The sky-to-pixel sign is column offset = -east / pixel scale.
+Coordinates are explicit east/north offsets in AU; sampling belongs to the caller.
 
 Three families of line-of-sight rule share one integrand
 (:data:`QUADRATURES`). They differ only in where the nodes sit along the
@@ -41,7 +35,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from hwoutils.constants import deg2rad
-from hwoutils.transforms import ccw_rotation_matrix
 from jax.scipy.special import gammaln as jax_gammaln
 from jaxtyping import Array
 from scipy.special import gammaln as scipy_gammaln
@@ -255,13 +248,11 @@ def los_integrate_scattered(
     phase_fn: PhaseFn,
     *,
     incl_deg: Array,
-    pa_deg: Array,
+    position_angle_deg: Array,
     rmin_AU: Array,
     rmax_AU: Array,
-    nx: int,
-    ny: int,
-    pixel_scale_arcsec: float,
-    dist_pc: Array,
+    east_AU: Array,
+    north_AU: Array,
     n_slices_los: int,
     quadrature: str = "legendre",
     scale_height_fn: ScaleHeightFn | None = None,
@@ -273,26 +264,10 @@ def los_integrate_scattered(
     Private integration chart: (east, north, toward), with depth ``l_grid``
     positive toward the observer (the negative of public sky z). Sky ``x``
     is east (from ``System.positions``), and sky ``y`` is north.
-    Image columns increase west and rows increase north (FITS convention):
-    column offset = -east / pixel scale. With ``imshow(origin="lower")``
-    and no axis inversion, north is up, east is left, and astronomical PA
-    (north through east) is counterclockwise.
-    Only a 2D brightness map leaves this kernel;
-    no vector is returned in the private chart. ``pa_deg`` rotates the disk's
-    projected major axis (the line of nodes) from ``+x`` toward ``+y``, so
-    ``pa_deg = 0`` puts the major axis along ``+x``. This is not the
-    astronomical position angle: with ``+x`` east, the major axis lies at
-    astronomical PA (north through east) ``90 - pa_deg`` (mod 180). The
-    near, forward-scattering half of the disk lies along
-    ``(-sin(pa), cos(pa))`` for ``incl_deg < 90``. ``incl_deg`` is the
-    angle between the disk normal and the observer's line of sight
-    (0 = pole-on); above 90 the near half lies along ``(sin(pa), -cos(pa))``
-    instead, so ``180 - incl_deg`` renders the ``incl_deg`` map mirrored
-    across the line of nodes and ``(180 - incl_deg, pa_deg + 180)`` renders
-    the same map. The coordinate transforms keep the sign of
-    ``cos(incl_deg)``; the LOS window half-width and the quadrature weights
-    are path lengths and are positive at every inclination, so the map is a
-    nonnegative surface brightness on both sides of 90.
+    The line of nodes is (sin(PA), cos(PA)) in (east, north), with
+    astronomical position angle PA north through east. The near half for
+    inclinations below 90 degrees is (-cos(PA), sin(PA)); above 90 it
+    reverses. Inclination zero is face-on. Path lengths are always positive.
 
     Write ``y_d = y cos(i) + l sin(i)`` and
     ``z_d = -y sin(i) + l cos(i)``. The midplane crossing is at depth
@@ -368,14 +343,11 @@ def los_integrate_scattered(
             points (e.g. avoid ``r=0`` for ``r^alpha`` profiles).
         phase_fn: ``cos_phi -> phase`` evaluated at every LOS sample.
         incl_deg: Disk inclination [deg].
-        pa_deg: Disk position angle [deg], from ``+x`` toward ``+y`` (see
-            above; not the astronomical PA).
+        position_angle_deg: Major-axis angle north through east [deg].
         rmin_AU: Inner truncation radius [AU].
         rmax_AU: Outer truncation radius [AU].
-        nx: Output image width [pixels] (static).
-        ny: Output image height [pixels] (static).
-        pixel_scale_arcsec: Pixel scale [arcsec/pixel] (static).
-        dist_pc: System distance [pc].
+        east_AU: East offsets, shape (ny, nx), in AU.
+        north_AU: North offsets, shape (ny, nx), in AU.
         n_slices_los: Number of LOS nodes (static); per side of the
             midplane for ``"gauss_half"``.
         quadrature: One of :data:`QUADRATURES` (static).
@@ -392,7 +364,7 @@ def los_integrate_scattered(
 
     Returns:
         LOS-integrated scattered-light map, shape ``(ny, nx)``.
-        Caller multiplies by an albedo / normalization to get contrast.
+        Integral of rho * phase / distance_AU**2 over depth_AU.
     """
     check_quadrature(quadrature, n_slices_los)
     if quadrature == "trapezoid":
@@ -401,18 +373,11 @@ def los_integrate_scattered(
     elif scale_height_fn is None:
         raise ValueError(f"quadrature={quadrature!r} needs scale_height_fn.")
 
-    px_AU = pixel_scale_arcsec * dist_pc
-    x_pix = -(jnp.arange(nx) - (nx - 1) / 2.0) * px_AU
-    y_pix = (jnp.arange(ny) - (ny - 1) / 2.0) * px_AU
-    x_sky, y_sky = jnp.meshgrid(x_pix, y_pix)
-
     incl = incl_deg * deg2rad
-    cos_i = jnp.cos(incl)
-    sin_i = jnp.sin(incl)
-
-    r_pa_inv = ccw_rotation_matrix(-pa_deg)
-    x_rot = r_pa_inv[0, 0] * x_sky + r_pa_inv[0, 1] * y_sky
-    y_rot = r_pa_inv[1, 0] * x_sky + r_pa_inv[1, 1] * y_sky
+    cos_i, sin_i = jnp.cos(incl), jnp.sin(incl)
+    pa = position_angle_deg * deg2rad
+    x_rot = jnp.sin(pa) * east_AU + jnp.cos(pa) * north_AU
+    y_rot = -jnp.cos(pa) * east_AU + jnp.sin(pa) * north_AU
 
     if quadrature == "trapezoid":
         abs_cos = jnp.abs(cos_i)

@@ -12,7 +12,7 @@ beta satisfies `cos(beta) = z / r` for the star-relative vector
 `System.positions` returns rows 0 and 1 as (Delta alpha*, Delta Dec), where
 Delta alpha* = Delta RA cos Dec. ExoVista positions and velocities are
 converted from (west, north, toward) with `(-x, y, -z)` before deriving
-elements; the header midplane mapping remains `(-PA) % 360`.
+elements; the header midplane maps to astronomical `(90 + PA) % 360`.
 
 ## The hierarchy
 
@@ -50,7 +50,7 @@ class System(eqx.Module):
     dynamics: orbix.system.System
     disk: AbstractDisk | None = None
     midplane_inc_deg: float = 0.0
-    midplane_pa_deg: float = 0.0
+    midplane_position_angle_deg: float = 0.0
     ...
 ```
 
@@ -157,7 +157,7 @@ arrays with shape `(n_times, n_spots)`:
 keys, excluding blank, `COMMENT`, and `HISTORY` cards. These records
 preserve the source information, including the original west-based `PA`.
 The system's disk orientation instead uses `System.midplane_inc_deg = I`
-and `System.midplane_pa_deg = (-PA) % 360` in the east/north chart, for
+and `System.midplane_position_angle_deg = (90 + PA) % 360` in the east/north chart, for
 parametric disks and visualization outlines. The metadata do not supply
 spot evolution or an evaluator for spatially resolved stellar intensity. A downstream
 diameter-only coronagraph response does not acquire asymmetric
@@ -328,37 +328,51 @@ photon-flux method, supplying geometry and observer distance.
 | `GraterDisk` | Two-power-law density × Henyey-Greenstein scattering; parametric / synthetic |
 | `CompositeDisk` | Sum of any other disks (e.g. main disk + a clump) |
 
-All disk images follow the [FITS display convention](scene-frames):
-+row is north and +column is west. With `imshow(origin="lower")`, north is
-up and east is left. Map a sky offset to pixels using
-`col = (nx - 1) / 2 - east / pixel_scale_arcsec` and
-`row = (ny - 1) / 2 + north / pixel_scale_arcsec`.
-`GraterDisk` and `ExovistaParametricDisk` share that pixel grid;
-`CompositeDisk` sums component images without resampling.
-`ExovistaDisk` uses the FITS cube as written, with no column flip, and
-interpolates only in wavelength. `plot_disk_image` supplies the descending
-east-offset extent needed to place sky-coordinate overlays on those pixels.
+Disks return `photon_radiance(wavelength_nm, time_d, *, star, dist_pc, grid)`:
+an `Image` in ph s^-1 m^-2 nm^-1 sr^-1 on a caller-owned arcsec `PixelGrid`
+with `SkyOrientation`. Multiply its data by `grid.pixel_area * arcsec2rad**2`
+for per-pixel photon flux density. Leading image axes match the wavelength array.
+The native ExoVista cube is host contrast per pixel; its radiance divides by
+the native pixel solid angle before resampling as a density. Composites ask
+every component to render on the requested grid before summation.
 
-Loaded disks (`ExovistaDisk`) capture real ExoVista physics but are
-non-differentiable through the disk's morphology. Parametric disks
-(`GraterDisk`, `ExovistaParametricDisk`) are fully differentiable --
-you can take gradients of observables with respect to disk parameters.
+Parametric disks carry `inclination_deg` (zero face-on),
+`position_angle_deg` (major axis north through east), and a typed `amplitude`.
+A system overrides the parametric angles with its midplane angles. Stored
+cubes retain their native sky geometry. No detector handedness is implicit.
 
-Requires a user-supplied disk flux normalization.
-
-```python notest
+```python
+from zodi import SurfaceBrightnessDust
+from hwoutils.grids import PixelGrid, SkyOrientation
 from skyscapes.disk import GraterDisk
 
 disk = GraterDisk(
-    sma_inner_AU=2.0,
-    sma_outer_AU=10.0,
-    alpha_in=2.0,
-    alpha_out=-2.0,
-    scale_height_AU=0.1,
-    flux_density_at_1au_jy_per_arcsec2=...,
-    g_hg=0.3,
+    sma_AU=1.0,
+    alpha_in=5.0,
+    alpha_out=-5.0,
+    ksi0_AU=0.03,
+    gamma=2.0,
+    beta=1.0,
+    rmin_AU=0.1,
+    rmax_AU=3.0,
+    wavelengths_nm=jnp.array([400.0, 1000.0]),
+    g_HG_grid=jnp.array([0.3, 0.3]),
+    Ag_grid=jnp.array([0.5, 0.5]),
+    amplitude=SurfaceBrightnessDust(level=3),
+    n_slices_los=48,
 )
+grid = PixelGrid.regular((101, 101), 0.01, "arcsec", orientation=SkyOrientation(0.0))
+image = disk.photon_radiance(550.0, 0.0, star=star, dist_pc=10.0, grid=grid)
 ```
+
+`DensityDust` instead supplies a multiplier of the named profile, with
+`profile_id="grater-1999"` or `"exovista-parametric"`. Conversion requires
+`density_level(amplitude, profile, star=star, dist_pc=distance)`; its inverse
+is `surface_brightness_level(density, profile, calibration=template, ...)`.
+The face-on LOS integral at the calibration radius fixes the normalization.
+The default Vega V monochromatic zero point is 3636 Jy at 550 nm;
+`zero_point_jy` overrides it for another calibration. AB uses the hwoutils
+AB definition. The passband center is a monochromatic anchor, not a filter integral.
 
 For retrievals on a real disk, fit `ExovistaParametricDisk` to the
 ExoVista data once, then use the parametric form in the inference

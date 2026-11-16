@@ -13,10 +13,14 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from zodi import DensityDust
 
 from skyscapes.disk import ExovistaParametricDisk, GraterDisk
 from skyscapes.disk._los import gauss_rule
 from skyscapes.disk.grater import two_power_law_density
+from tests.conftest import radiance, sky_grid
+
+_GRID = sky_grid(16, 16, 0.015)
 
 _PA_DEG = 30.0
 
@@ -24,6 +28,9 @@ _PA_DEG = 30.0
 def _ring(quadrature: str, n_slices_los: int, **overrides) -> GraterDisk:
     """Narrow ring at 0.7 AU (alpha = 5, h/r = 0.05) with tapered edges."""
     settings = dict(
+        amplitude=DensityDust(
+            level=1.0, profile_id="grater-1999", calibration_id="unit-profile"
+        ),
         sma_AU=jnp.array(0.7),
         alpha_in=jnp.array(5.0),
         alpha_out=jnp.array(-5.0),
@@ -35,9 +42,6 @@ def _ring(quadrature: str, n_slices_los: int, **overrides) -> GraterDisk:
         wavelengths_nm=jnp.array([400.0, 1000.0]),
         g_HG_grid=jnp.array([0.3, 0.3]),
         Ag_grid=jnp.array([1.0, 1.0]),
-        nx=16,
-        ny=16,
-        pixel_scale_arcsec=0.015,
         n_slices_los=n_slices_los,
         cutoff_width_AU=jnp.array(0.1),
         quadrature=quadrature,
@@ -47,14 +51,20 @@ def _ring(quadrature: str, n_slices_los: int, **overrides) -> GraterDisk:
 
 
 @eqx.filter_jit
-def _image(disk, incl_deg):
-    return disk.surface_brightness(
-        jnp.array(500.0), jnp.array(0.0), incl_deg, jnp.array(_PA_DEG), dist_pc=10.0
+def _image(disk, incl_deg, grid=_GRID):
+    return radiance(
+        disk,
+        jnp.array(500.0),
+        jnp.array(0.0),
+        incl_deg,
+        90.0 - (jnp.array(_PA_DEG)),
+        dist_pc=10.0,
+        grid=grid,
     )
 
 
-def _render(disk, incl_deg: float) -> np.ndarray:
-    return np.asarray(_image(disk, jnp.array(incl_deg)))
+def _render(disk, incl_deg: float, grid=_GRID) -> np.ndarray:
+    return np.asarray(_image(disk, jnp.array(incl_deg), grid))
 
 
 def _peak_error(image: np.ndarray, reference: np.ndarray) -> float:
@@ -201,12 +211,14 @@ def test_gradients_match_central_differences(quadrature, n_slices_los, incl, gam
         updated = eqx.tree_at(
             lambda d: [getattr(d, name) for name in _FIT_FIELDS], disk, values
         )
-        image = updated.surface_brightness(
+        image = radiance(
+            updated,
             jnp.array(500.0),
             jnp.array(0.0),
             incl * scale[-1],
-            jnp.array(_PA_DEG),
+            90.0 - (jnp.array(_PA_DEG)),
             dist_pc=10.0,
+            grid=_GRID,
         )
         return jnp.sum(weights * image)
 
@@ -274,7 +286,6 @@ def _exovista(quadrature: str, n_slices_los: int) -> ExovistaParametricDisk:
         dror=jnp.array(0.1),
         rinner_AU=jnp.array(2.0),
         hor=jnp.array(0.05),
-        nzodis=jnp.array(3.0),
         eta=jnp.array(1.0),
         g0=jnp.array(0.9),
         g1=jnp.array(0.6),
@@ -286,11 +297,13 @@ def _exovista(quadrature: str, n_slices_los: int) -> ExovistaParametricDisk:
         rmax_AU=jnp.array(80.0),
         wavelengths_nm=jnp.array([400.0, 1000.0]),
         Ag_grid=jnp.array([0.5, 0.5]),
-        nx=16,
-        ny=16,
-        pixel_scale_arcsec=0.3,
         n_slices_los=n_slices_los,
         quadrature=quadrature,
+        amplitude=DensityDust(
+            level=jnp.array(3.0),
+            profile_id="exovista-parametric",
+            calibration_id="unit-profile",
+        ),
     )
 
 
@@ -304,14 +317,19 @@ def test_exovista_rules_converge_to_the_reference():
     2.8e-3 (legendre 96 at 90 deg) and 3.7e-4 (gauss 7 at 30 deg), with a
     factor of 5 to 8 margin.
     """
-    reference = {i: _render(_exovista("legendre", 513), i) for i in (30.0, 60.0, 90.0)}
+    reference = {
+        i: _render(_exovista("legendre", 513), i, sky_grid(16, 16, 0.3))
+        for i in (30.0, 60.0, 90.0)
+    }
     cases = (
         ("legendre", 96, 60.0, 1e-3),
         ("legendre", 96, 90.0, 2e-2),
         ("gauss", 7, 30.0, 3e-3),
     )
     for quadrature, n_slices_los, incl, tolerance in cases:
-        image = _render(_exovista(quadrature, n_slices_los), incl)
+        image = _render(
+            _exovista(quadrature, n_slices_los), incl, sky_grid(16, 16, 0.3)
+        )
         error = _peak_error(image, reference[incl])
         print(f"exovista {quadrature} {n_slices_los} at {incl}: {error:.2e}")
         assert error < tolerance

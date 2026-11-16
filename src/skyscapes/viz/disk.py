@@ -1,6 +1,6 @@
 """Disk views: the projected surface-brightness map and the geometry behind it.
 
-``plot_disk_image`` evaluates a disk's ``surface_brightness`` once and draws
+``plot_disk_radiance`` evaluates a disk's ``photon_radiance`` once and draws
 it with ``eyepiece.imshow_log`` on an arcsec grid, RA offset increasing to
 the left. ``plot_disk_geometry`` draws the same disk edge-on to the reader:
 its midplane at the inclination, the observer's direction, one sightline
@@ -14,8 +14,10 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 from hwoutils.conversions import au_to_arcsec
+from hwoutils.grids import Image, PixelGrid, SkyOrientation, resample
 
 from skyscapes.disk import AbstractDisk
+from skyscapes.disk.composite import orient_disk
 from skyscapes.viz import _geometry, _style
 from skyscapes.viz._draw import (
     DEGREE,
@@ -58,26 +60,32 @@ _SIDE_LABELS = (
 )
 
 
-def _resolve_disk(obj, incl_deg, pa_deg, dist_pc):
+def _resolve_disk(obj, incl_deg, position_angle_deg, dist_pc):
     """``(disk, incl, pa, dist)`` from a System/Scene, a disk, or neither."""
     system = getattr(obj, "system", obj)
     if hasattr(system, "midplane_inc_deg") and hasattr(system, "disk"):
         incl = system.midplane_inc_deg if incl_deg is None else incl_deg
-        pa = system.midplane_pa_deg if pa_deg is None else pa_deg
+        pa = (
+            system.midplane_position_angle_deg
+            if position_angle_deg is None
+            else position_angle_deg
+        )
         dist = system.dist_pc if dist_pc is None else dist_pc
         return system.disk, incl, pa, dist
     if isinstance(obj, AbstractDisk):
-        return obj, incl_deg, pa_deg, dist_pc
-    return None, incl_deg, pa_deg, dist_pc
+        return obj, incl_deg, position_angle_deg, dist_pc
+    return None, incl_deg, position_angle_deg, dist_pc
 
 
-def plot_disk_image(
+def plot_disk_radiance(
     disk_or_image,
     *,
+    grid=None,
+    star=None,
     wavelength_nm=None,
     time_d=0.0,
     incl_deg=None,
-    pa_deg=None,
+    position_angle_deg=None,
     pixel_scale_arcsec=None,
     dist_pc=None,
     radii_AU=None,
@@ -93,34 +101,24 @@ def plot_disk_image(
 ):
     """Draw a disk's projected surface brightness, log-scaled, in arcsec.
 
-    A disk is rendered once here with its own ``surface_brightness`` at
-    the given wavelength, time, inclination and position angle; a bare
-    ``(ny, nx)`` array follows the FITS convention: +column west, +row
-    north. Column offset = -east / pixel scale. ``imshow(origin="lower")``
-    shows north up and east left, with astronomical PA (north through east)
-    counterclockwise. A descending east-offset extent labels the image in
-    sky coordinates, with no additional x-axis inversion.
-    The disk's truncation rings, projected at the same orientation, are
-    overlaid as outlines, so the geometry and the rendered light can be
-    checked against each other by eye.
+    Disk rendering requires an explicit grid and host star (a system supplies
+    the star and distance). Image inputs carry their sky geometry; bare
+    arrays are north-up photon radiance and require pixel_scale_arcsec.
 
     Args:
         disk_or_image: A ``System`` or ``Scene`` (its disk, midplane
             orientation and distance are used), an ``AbstractDisk``, or a
-            bare ``(ny, nx)`` contrast map.
+            bare ``(ny, nx)`` photon radiance map.
         wavelength_nm: Wavelength to render at [nm]. Required for a disk.
         time_d: Time to render at, in days from the scene epoch.
         incl_deg: Midplane inclination [deg], in ``[0, 180]``. Defaults to
             the system's; required for a bare disk; optional for an array
             (outline only). ``i`` and ``180 - i`` at ``pa + 180`` are the
             same midplane and render the same map.
-        pa_deg: Midplane position angle [deg], as ``incl_deg``.
-            ``pa_deg`` is the library's position angle, not the astronomical
-            one: it turns the line of nodes from ``+x`` (RA offset) toward
-            ``+y`` (Dec offset), so with ``+x`` east the major axis lies at
-            astronomical PA (north through east) ``90 - pa_deg`` (mod 180).
-        pixel_scale_arcsec: Pixel scale [arcsec/pixel]. Read from the disk
-            when it has one; required for an array.
+        position_angle_deg: Major-axis angle north through east [deg].
+        grid: Arcsec PixelGrid with SkyOrientation, required for rendering.
+        star: Host star; a system supplies it.
+        pixel_scale_arcsec: Sampling for a bare north-up radiance array.
         dist_pc: Distance [pc], used to place the AU outlines. Read from
             the system; required for a bare parametric disk.
         radii_AU: ``(r_in, r_out)`` for the outlines. None reads a
@@ -151,7 +149,7 @@ def plot_disk_image(
         An ``eyepiece.PlotResult`` with ``"image"`` (and ``"cbar"``),
         ``"lines"`` (gids ``disk/inner``, ``disk/outer``) when outlined, and
         ``"scatter"`` (``star``, and ``sightline`` when marked).
-        ``update(image, incl_deg=None, pa_deg=None)`` sets new image data
+        ``update(image, incl_deg=None, position_angle_deg=None)`` sets new image data
         under the first draw's norm and, when angles are given, moves the
         outlines and the sightline marker; it computes no surface
         brightness, so render the frames first.
@@ -166,28 +164,57 @@ def plot_disk_image(
     """
     ep = eyepiece()
     shown = resolve_show(show, IMAGE_PARTS)
-    disk, incl, pa, dist = _resolve_disk(disk_or_image, incl_deg, pa_deg, dist_pc)
+    disk, incl, pa, dist = _resolve_disk(
+        disk_or_image, incl_deg, position_angle_deg, dist_pc
+    )
     if incl is not None:
         _check_incl(incl)
     if disk is not None:
-        if wavelength_nm is None or incl is None or pa is None:
-            raise ValueError(
-                "rendering a disk needs wavelength_nm, incl_deg and pa_deg "
-                "(a System supplies the angles)"
-            )
-        image = disk.surface_brightness(
-            jnp.asarray(wavelength_nm, dtype=float),
-            jnp.asarray(time_d, dtype=float),
-            jnp.asarray(incl, dtype=float),
-            jnp.asarray(pa, dtype=float),
+        system = getattr(disk_or_image, "system", disk_or_image)
+        if star is None:
+            star = getattr(system, "star", None)
+        if wavelength_nm is None or star is None or grid is None or dist is None:
+            raise ValueError("rendering needs wavelength_nm, star, dist_pc and grid")
+        if incl is not None and pa is not None:
+            disk = orient_disk(disk, incl, pa)
+        image = disk.photon_radiance(
+            jnp.asarray(wavelength_nm),
+            jnp.asarray(time_d),
+            star=star,
             dist_pc=dist,
+            grid=grid,
         )
-        if pixel_scale_arcsec is None:
-            pixel_scale_arcsec = getattr(disk, "pixel_scale_arcsec", None)
     elif hasattr(disk_or_image, "midplane_inc_deg") or hasattr(disk_or_image, "system"):
         raise ValueError("the system has no disk to draw")
     else:
         image = disk_or_image
+    display = None
+    if isinstance(image, Image):
+        grid = image.grid
+        # Display in east/north while retaining the full input grid's footprint.
+        ny, nx = grid.shape
+        x, y = grid.pixel_to_unit(
+            jnp.array([-0.5, nx - 0.5, -0.5, nx - 0.5]),
+            jnp.array([-0.5, -0.5, ny - 0.5, ny - 0.5]),
+        )
+        east, north = grid.orientation.detector_to_sky(x, y)
+        emin, emax, nmin, nmax = map(
+            float, (east.min(), east.max(), north.min(), north.max())
+        )
+        dx, dy = (emax - emin) / nx, (nmax - nmin) / ny
+        display = PixelGrid(
+            (ny, nx),
+            emax / dx - 0.5,
+            -nmin / dy - 0.5,
+            ((dx, 0.0), (0.0, dy)),
+            "arcsec",
+            orientation=SkyOrientation(0.0),
+        )
+        image = resample(image, display).data
+        extent = (emax, emin, nmin, nmax)
+        pixel_scale_arcsec = dx
+    else:
+        extent = None
     image = np.asarray(image, dtype=float)
     if image.ndim != 2:
         raise ValueError(f"expected a 2D image, got shape {image.shape}")
@@ -203,17 +230,17 @@ def plot_disk_image(
     base = ep.imshow_log(
         image,
         ax=ax,
-        extent=(half_x, -half_x, -half_y, half_y),
+        extent=extent if extent is not None else (half_x, -half_x, -half_y, half_y),
         floor=floor,
         vmin=floor,
         vmax=max(peak, 10.0 * floor),
         colorbar=colorbar,
-        cbar_label="disk contrast per pixel",
+        cbar_label="disk radiance [ph s^-1 m^-2 nm^-1 sr^-1]",
         imshow_kw=imshow_kw,
         cbar_kw=cbar_kw,
     )
     ax = base.ax
-    ax.set_ylim(-half_y, half_y)
+    ax.set_ylim(*(extent[2:] if extent is not None else (-half_y, half_y)))
     ax.set_xlabel(_SKY_LABELS[0])
     ax.set_ylabel(_SKY_LABELS[1])
 
@@ -274,17 +301,29 @@ def plot_disk_image(
         place(float(incl), float(pa))
     hide({"star": [star], "outline": rings, "sightline": [marker]}, shown)
 
-    def update(new_image, incl_deg=None, pa_deg=None):
+    def update(new_image, incl_deg=None, position_angle_deg=None):
         """Show a new image; move the outlines when angles are given."""
+        if isinstance(new_image, Image):
+            target = (
+                display
+                if display is not None
+                else PixelGrid.regular(
+                    (ny, nx),
+                    pixel_scale_arcsec,
+                    "arcsec",
+                    orientation=SkyOrientation(0.0),
+                )
+            )
+            new_image = resample(new_image, target).data
         new_image = np.asarray(new_image, dtype=float)
         if incl_deg is not None:
             _check_incl(incl_deg)
         _check_brightness(new_image)
         base.update(new_image)
-        if incl_deg is None and pa_deg is None:
+        if incl_deg is None and position_angle_deg is None:
             return
         state["incl"] = state["incl"] if incl_deg is None else incl_deg
-        state["pa"] = state["pa"] if pa_deg is None else pa_deg
+        state["pa"] = state["pa"] if position_angle_deg is None else position_angle_deg
         if state["incl"] is not None and state["pa"] is not None:
             place(float(state["incl"]), float(state["pa"]))
 
@@ -535,7 +574,7 @@ def plot_disk_geometry(
     system_or_disk,
     *,
     incl_deg=None,
-    pa_deg=None,
+    position_angle_deg=None,
     radii_AU=None,
     grain_radius_AU=None,
     thickness_AU=None,
@@ -572,12 +611,7 @@ def plot_disk_geometry(
             the system's. Above 90 the near half lies below the sky-plane
             crossing of the minor axis, and a near-side grain scatters at
             ``i - 90``.
-        pa_deg: Midplane position angle [deg]; defaults to the system's,
-            else 0. It fixes which sky direction the vertical axis is.
-            ``pa_deg`` is the library's position angle, not the astronomical
-            one: it turns the line of nodes from ``+x`` (RA offset) toward
-            ``+y`` (Dec offset), so with ``+x`` east the major axis lies at
-            astronomical PA (north through east) ``90 - pa_deg`` (mod 180).
+        position_angle_deg: Major-axis angle north through east [deg].
         radii_AU: ``(r_in, r_out)``. None reads a parametric disk's
             truncation radii.
         grain_radius_AU: Disk radius of the marked grain, positive on the
@@ -649,7 +683,7 @@ def plot_disk_geometry(
         )
 
     shown = resolve_show(show, GEOMETRY_PARTS, GEOMETRY_GROUPS)
-    disk, incl, pa, _ = _resolve_disk(system_or_disk, incl_deg, pa_deg, 0.0)
+    disk, incl, pa, _ = _resolve_disk(system_or_disk, incl_deg, position_angle_deg, 0.0)
     if incl is None:
         raise ValueError("incl_deg is required for a bare disk")
     pa = 0.0 if pa is None else float(pa)

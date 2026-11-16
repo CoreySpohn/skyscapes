@@ -129,15 +129,13 @@ class System(eqx.Module):
             zero-based chain planet indices. Defaults to the identity.
         disk: Optional extended-source disk (``AbstractDisk | None``).
         midplane_inc_deg: Disk midplane inclination [deg] in [0, 180],
-            with 0 face-on (the default). Together with ``midplane_pa_deg``,
+            with 0 face-on (the default). Together with ``midplane_position_angle_deg``,
             orients parametric disks and visualization outlines in the
             right-handed (east, north, away) sky frame. ``io.from_exovista``
             preserves the FITS star header's I. Planet orbits and loaded
             disk images already carry their own geometry.
-        midplane_pa_deg: Disk line-of-nodes angle [deg], measured from east
-            (+x) toward north (+y), default 0. This is not astronomical PA.
-            ``io.from_exovista`` converts the FITS star header's west-based
-            PA to ``(-PA) % 360``, preserving the near half toward the observer (-z).
+        midplane_position_angle_deg: Major-axis position angle north through
+            east [deg]. ExoVista headers map to (90 + PA) modulo 360.
     """
 
     star: AbstractStar
@@ -147,8 +145,30 @@ class System(eqx.Module):
     _source_layout: Array | None = None
     disk: AbstractDisk | None = None
     midplane_inc_deg: float = 0.0
-    midplane_pa_deg: float = 0.0
+    midplane_position_angle_deg: float = 0.0
     body_index: tuple[int, ...] = eqx.field(static=True, default=())
+
+    def photon_radiance(self, wavelength_nm, time_d, *, grid):
+        """Disk photon radiance on grid, using the system's midplane angles.
+
+        Returns ph s^-1 m^-2 nm^-1 sr^-1 with shape wavelength_nm.shape
+        + grid.shape, measure="per_unit_area". No disk returns a zero image.
+        Batched systems exclude disks.
+        """
+        from ..disk.base import check_sky_grid, radiance_image
+        from ..disk.composite import orient_disk
+
+        check_sky_grid(grid)
+        if self.disk is None:
+            return radiance_image(
+                jnp.zeros(jnp.shape(wavelength_nm) + grid.shape), grid
+            )
+        disk = orient_disk(
+            self.disk, self.midplane_inc_deg, self.midplane_position_angle_deg
+        )
+        return disk.photon_radiance(
+            wavelength_nm, time_d, star=self.star, dist_pc=self.dist_pc, grid=grid
+        )
 
     @property
     def n_planets(self) -> int:
@@ -162,7 +182,7 @@ class System(eqx.Module):
         dynamics,
         disk=None,
         midplane_inc_deg=0.0,
-        midplane_pa_deg=0.0,
+        midplane_position_angle_deg=0.0,
         *,
         body_index=None,
         valid=None,
@@ -184,7 +204,7 @@ class System(eqx.Module):
         )
         self.disk = disk
         self.midplane_inc_deg = midplane_inc_deg
-        self.midplane_pa_deg = midplane_pa_deg
+        self.midplane_position_angle_deg = midplane_position_angle_deg
         self.body_index = (
             tuple(range(self.n_planets)) if body_index is None else tuple(body_index)
         )
@@ -288,7 +308,7 @@ class System(eqx.Module):
         valid=None,
         disk=None,
         midplane_inc_deg=0.0,
-        midplane_pa_deg=0.0,
+        midplane_position_angle_deg=0.0,
     ):
         """Build a Jacobi chain from elements and masses in scene planet order.
 
@@ -344,7 +364,7 @@ class System(eqx.Module):
             dynamics,
             disk,
             midplane_inc_deg,
-            midplane_pa_deg,
+            midplane_position_angle_deg,
             body_index=inverse,
             valid=valid,
         )
@@ -656,7 +676,7 @@ class System(eqx.Module):
                 f"System(n_planet_modules={n_modules}, "
                 f"K_total={n_total}, "
                 f"midplane: i={self.midplane_inc_deg:.2f} deg, "
-                f"PA={self.midplane_pa_deg:.2f} deg)"
+                f"PA={self.midplane_position_angle_deg:.2f} deg)"
             ),
             indent("star: " + repr(self.star)),
             indent("dynamics: " + repr(self.dynamics)),

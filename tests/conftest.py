@@ -16,9 +16,13 @@ from jax import config
 # touch JAX state so the slow integration test can run on CI.
 config.update("jax_enable_x64", True)
 
+import jax.numpy as jnp  # noqa: E402
 import pytest  # noqa: E402
+from hwoutils.grids import PixelGrid, SkyOrientation  # noqa: E402
 
 from skyscapes.datasets import fetch_scene  # noqa: E402
+from skyscapes.disk.composite import orient_disk  # noqa: E402
+from skyscapes.scene import FlatStar  # noqa: E402
 
 # Released hwoutils versions may not include the optional budget plugin yet.
 pytest_plugins = []
@@ -132,3 +136,31 @@ def two_body_reference(
 def fits_fixture() -> str:
     """Path to the canonical ExoVista demo FITS (cached via pooch)."""
     return fetch_scene()
+
+
+# Shared sky sampling for disk shape and quadrature tests.
+def sky_grid(nx=51, ny=51, step=0.2):
+    """North-up sampling; geometric centers also cover even images."""
+    return PixelGrid.regular((ny, nx), step, "arcsec", orientation=SkyOrientation(0.0))
+
+
+def radiance(
+    disk,
+    wavelength_nm,
+    time_d=0.0,
+    inclination_deg=60.0,
+    position_angle_deg=90.0,
+    *,
+    grid,
+    dist_pc=10.0,
+):
+    """Unit illumination at 1 AU isolates profile/LOS tests from photometry.
+
+    Phi_observer = (d_pc*pc2AU)^-2 makes Phi_incident(1 AU)=1.
+    Absolute photometry has separate primitive anchors in test_disk.py.
+    """
+    disk = orient_disk(disk, inclination_deg, position_angle_deg)
+    star = FlatStar(jnp.asarray((dist_pc * pc2AU) ** -2))
+    return disk.photon_radiance(
+        jnp.asarray(wavelength_nm), time_d, star=star, dist_pc=dist_pc, grid=grid
+    ).data

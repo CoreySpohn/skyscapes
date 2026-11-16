@@ -7,8 +7,10 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from astropy.io import fits
+from hwoutils.constants import arcsec2rad
 
 from skyscapes.io.exovista import _load_disk
+from skyscapes.scene import FlatStar
 
 
 @pytest.mark.parametrize("enable_x64", [False, True])
@@ -31,8 +33,16 @@ def test_load_disk_interpolates_without_dtype_warnings(enable_x64, wavelength_dt
     ):
         warnings.simplefilter("error")
         disk = _load_disk(hdul, fits_ext=2)
-        brightness = disk.surface_brightness(
-            jnp.asarray(550.0), 0.0, 0.0, 0.0, dist_pc=10.0
+        brightness = (
+            disk.photon_radiance(
+                jnp.asarray(550.0),
+                0.0,
+                star=FlatStar(1.0),
+                grid=disk.native_grid,
+                dist_pc=10.0,
+            ).data
+            * disk.native_grid.pixel_area
+            * arcsec2rad**2
         )
         dtype = jnp.float64 if enable_x64 else jnp.float32
         assert disk.wavelengths_nm.dtype == dtype
@@ -41,4 +51,4 @@ def test_load_disk_interpolates_without_dtype_warnings(enable_x64, wavelength_dt
         np.testing.assert_array_equal(disk.contrast_cube, cube[:-1].astype(np.float32))
         # The samples follow ((wavelength_nm - 300) / 100)**2 * 1e-8.
         np.testing.assert_allclose(brightness, [[6.25e-8]], rtol=5e-7, atol=0)
-        assert disk.pixel_scale_arcsec == 0.01
+        assert disk.native_grid.step == 0.01

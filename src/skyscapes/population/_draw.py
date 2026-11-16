@@ -85,7 +85,8 @@ class PlanetPopulation(eqx.Module):
         mean_anomaly_deg: Mean anomaly at the reference epoch.
         type_index: Index into `PlanetTypes` (the albedo spectrum), 0 if absent.
         midplane_inc_deg: ``[n_stars]`` inclination of the system midplane to the sky.
-        midplane_pa_deg: ``[n_stars]`` position angle of the system midplane.
+        midplane_position_angle_deg: ``[n_stars]`` major-axis position angle,
+            north through east [deg].
     """
 
     present: jnp.ndarray
@@ -99,7 +100,7 @@ class PlanetPopulation(eqx.Module):
     mean_anomaly_deg: jnp.ndarray
     type_index: jnp.ndarray
     midplane_inc_deg: jnp.ndarray
-    midplane_pa_deg: jnp.ndarray
+    midplane_position_angle_deg: jnp.ndarray
 
 
 _PLANET_FIELDS = (
@@ -412,7 +413,7 @@ def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=N
         mean_anomaly_deg=masked("mean_anomaly_deg"),
         type_index=type_index,
         midplane_inc_deg=midplane_inc,
-        midplane_pa_deg=midplane_pa,
+        midplane_position_angle_deg=(90.0 + midplane_pa) % 360.0,
     )
 
 
@@ -526,7 +527,7 @@ def sky_elements(population, star_mass_Msun):
         population.mass_Mearth,
         jnp.asarray(star_mass_Msun, float),
         population.midplane_inc_deg * rad,
-        population.midplane_pa_deg * rad,
+        (population.midplane_position_angle_deg - 90.0) * rad,
     )
     return SkyElements(
         a_AU=population.a_AU,

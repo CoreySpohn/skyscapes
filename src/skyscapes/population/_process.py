@@ -224,7 +224,7 @@ class OccurrencePopulation(eqx.Module):
             dynamics,
             valid=valid,
             midplane_inc_deg=mid_inc,
-            midplane_pa_deg=mid_pa,
+            midplane_position_angle_deg=(90.0 + mid_pa) % 360.0,
         )
 
     def _sample_star(self, key, star):

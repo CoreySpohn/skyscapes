@@ -30,6 +30,9 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 from hwoutils.constants import Mearth2kg, Msun2kg
+from hwoutils.grids import PixelGrid, SkyOrientation
+from zodi import SurfaceBrightnessDust
+import equinox as eqx
 
 from skyscapes import System, viz
 from skyscapes.disk import GraterDisk
@@ -56,11 +59,10 @@ disk = GraterDisk(
     wavelengths_nm=jnp.array([400.0, 1000.0]),
     g_HG_grid=jnp.array([0.4, 0.4]),
     Ag_grid=jnp.array([0.3, 0.3]),
-    nx=121,
-    ny=121,
-    pixel_scale_arcsec=0.0085,
+    amplitude=SurfaceBrightnessDust(level=3, reference_radius_au=3.0),
     n_slices_los=41,
 )
+grid = PixelGrid.regular((121, 121), 0.0085, "arcsec", orientation=SkyOrientation(0.0))
 system = System.from_classical(
     star=star,
     planets=(planets,),
@@ -75,7 +77,7 @@ system = System.from_classical(
     M0_rad=jnp.array([0.0, 2.0]),
     disk=disk,
     midplane_inc_deg=60.0,
-    midplane_pa_deg=30.0,
+    midplane_position_angle_deg=60.0,
 )
 ```
 
@@ -85,45 +87,24 @@ system = System.from_classical(
 | Quantity | Convention |
 |---|---|
 | Sky frame | `(x, y, z)`, star-centered. `x` is the east offset (Delta alpha* = Delta RA cos Dec), `y` the north (Dec) offset, and `+z` points away from the observer. This (east, north, away) frame is right-handed, with dz/dt positive receding. `System.ephemeris` holds barycentric states; `System.positions` returns star-relative `(x, y)` in arcsec. The phase angle is the standard star-planet-observer angle, 0 at full phase (planet behind the star) and pi at new phase, as orbix returns it, so `cos(beta) = z / r` in this frame. |
-| Sky images | All disk arrays use the FITS display convention described below; ExoVista cubes are used as written. |
-| Disk orientation | Set once, on the system, by `System.midplane_inc_deg` and `System.midplane_pa_deg`. Parametric disks and outlines use that orientation; loaded cubes retain their rendered geometry. The planets' orbits carry their own elements and need not be coplanar with it. |
-| Inclination | The angle between the midplane normal and the line of sight, in `[0, 180]`, 0 for a face-on disk. The projected axis ratio is `abs(cos(i))`, and `i` at `pa` is the same midplane as `180 - i` at `pa + 180`. The parametric disks render the same nonnegative map for both; above 90 degrees the near, forward-scattering half lies on the opposite side of the line of nodes from its position at `180 - i` and the same `pa`. |
-| Position angle | The projected major axis (the line of nodes) lies at `pa` from `+x` toward `+y`, so `pa = 0` puts it along the RA axis. This is **not** the astronomical position angle: with `+x` east, the major axis lies at astronomical PA (north through east) `90 - pa`, modulo 180. |
-| Near side | The half of the disk displaced toward the observer, at negative z. Its grains scatter forward, so a forward-scattering phase function brightens it. |
-| Scattering angle | The angle at a grain between the incident propagation direction (star to grain) and the direction toward the observer; 0 is forward scattering. The illumination angle is its supplement. |
+| Sky images | Pixel centers and orientation come from the caller's `PixelGrid`. The standard north-up grid has `SkyOrientation(0, parity=-1)`, east to the left. Other rotations, parity and pixel bases are explicit. |
+| Disk orientation | `System.midplane_inc_deg` and `System.midplane_position_angle_deg` override parametric disk orientations. Loaded cubes retain their native geometry. |
+| Inclination | Zero face-on; the projected axis ratio is `abs(cos(i))`. The representations `(i, PA)` and `(180-i, PA+180)` describe the same plane and near half. |
+| Position angle | Astronomical, north through east: PA=0 places the major axis north-south, PA=90 east-west. |
+| Near side | For inclination below 90, the near minor direction is `(-cos(PA), sin(PA))` in east/north; it reverses above 90. Grains toward the observer scatter forward. |
+| Scattering angle | Zero forward scattering; the planetary illumination phase is its supplement. |
 
-Image arrays have row index increasing north and column index increasing
-west. Thus `imshow(origin="lower")` with no axis inversion shows north up
-and east left (Calabretta and Greisen 2002, A&A 395, 1077, Sect. 5).
-Astronomical PA, north through east, is counterclockwise on this image.
-One sky-to-pixel step carries the sign: `column offset = -east / scale`;
-`row offset = north / scale`, about the center `((nx - 1) / 2, (ny - 1) / 2)`.
-For axes labelled in sky offsets, `plot_disk_image` uses the descending
-extent `(+half_x, -half_x, -half_y, +half_y)`: RA offset increases to the
-left without a separate x-axis inversion. Planets and outlines retain
-their east/north sky coordinates.
+`plot_disk_radiance` displays photon radiance in east/north coordinates,
+resampling an oriented Image to a north-up display grid. Bare arrays are
+already north-up radiance and need an explicit pixel scale.
 
-The views place the disk through the same rotation the line-of-sight
-kernels integrate in, so an outline drawn by a view and a disk rendered by
-`surface_brightness` agree. ExoVista scenes reach that rotation through
-the converted (east, north, away) states and the header `(I, PA)` below.
-
-The loader also converts the FITS star header's `(I, PA)` into
-`System.midplane_inc_deg = I` and `System.midplane_pa_deg = (-PA) % 360`.
-The `generate_scene` docstring in ExoVista's `src/exovista/generate_scene.py`
-defines its chart as west, north, toward the observer. In that chart the
-node vector is `(cos(PA), sin(PA), 0)` and the in-plane vector toward the
-near half is `(-cos(I) sin(PA), cos(I) cos(PA), sin(I))`.
-Negating x and z gives minus the node vector at `-PA` (the same line) and
-exactly the near vector at `-PA` in (east, north, away), with inclination
-unchanged. This also works for `I > 90`, where `cos(I)` reverses the projected near direction.
-The equivalent representation `(180 - I, 180 - PA)` describes the same
-plane and near half, following the inclination equivalence above.
-Using `180 - PA` with I unchanged instead reverses the near half.
-For header `(60, 30)`, the converted major axis is 150 degrees from east
-toward north (astronomical PA 120), and the near half is at astronomical
-PA 30. These angles orient parametric disks and outlines consistently
-with the loaded cube without rotating the loaded image or states again.
+The ExoVista loader converts header `(I, PA)` to astronomical
+`(I, (90+PA) % 360)`. Negating the writer's west and toward axes gives
+nodes `(-cos(PA), sin(PA), 0)` and near vector
+`(cos(I) sin(PA), cos(I) cos(PA), -sin(I))`. The converted angle preserves
+that node line and the near vector. Header `(60,30)` therefore becomes
+`(60,120)`, with the near half at astronomical PA 30. Stored images and
+already on-sky orbital states are not rotated again.
 
 ## The system on the sky and side on
 
@@ -190,14 +171,14 @@ viz.plot_scattering_angle(
 ## From the midplane to the projected image
 
 {func}`~skyscapes.viz.plot_disk_geometry` draws the disk side on with one
-sightline through one grain, and {func}`~skyscapes.viz.plot_disk_image`
-renders the disk's `surface_brightness` on the sky. Passing both the same
+sightline through one grain, and {func}`~skyscapes.viz.plot_disk_radiance`
+renders the disk's `photon_radiance` on the sky. Passing both the same
 `grain_radius_AU` marks the sightline's position on the image.
 
 ```{code-cell} ipython3
 fig, axes = plt.subplots(1, 2, figsize=(10, 4.6), layout="constrained")
 viz.plot_disk_geometry(system, grain_radius_AU=3.0, thickness_AU=0.6, ax=axes[0])
-viz.plot_disk_image(system, wavelength_nm=550.0, grain_radius_AU=3.0, ax=axes[1]);
+viz.plot_disk_radiance(system, grid=grid, wavelength_nm=550.0, grain_radius_AU=3.0, ax=axes[1]);
 ```
 
 A grain on the minor axis of the near side scatters at `90 - i` degrees,
@@ -245,7 +226,7 @@ viz.plot_disk_geometry(
     observer_text="to the telescope",
     ax=axes[0],
 )
-viz.plot_disk_image(
+viz.plot_disk_radiance(
     system,
     wavelength_nm=550.0,
     grain_radius_AU=3.0,
@@ -268,10 +249,11 @@ from IPython.display import HTML
 
 inclinations = jnp.linspace(10.0, 80.0, 12)
 frames = [
-    disk.surface_brightness(
-        jnp.array(550.0), jnp.array(0.0), incl, jnp.array(30.0),
-        dist_pc=system.dist_pc,
-    )
+    eqx.tree_at(lambda d: (d.inclination_deg, d.position_angle_deg), disk,
+                (incl, jnp.array(60.0))).photon_radiance(
+        jnp.array(550.0), jnp.array(0.0), star=star,
+        dist_pc=system.dist_pc, grid=grid,
+    ).data
     for incl in inclinations
 ]
 
@@ -279,12 +261,12 @@ fig, axes = plt.subplots(1, 2, figsize=(9, 4.2), layout="constrained")
 geometry = viz.plot_disk_geometry(
     system, incl_deg=float(inclinations[0]), grain_radius_AU=3.0, ax=axes[0]
 )
-image = viz.plot_disk_image(
+image = viz.plot_disk_radiance(
     frames[0],
     vmax=max(float(frame.max()) for frame in frames),
-    pixel_scale_arcsec=disk.pixel_scale_arcsec,
+    pixel_scale_arcsec=grid.step,
     incl_deg=float(inclinations[0]),
-    pa_deg=30.0,
+    position_angle_deg=60.0,
     dist_pc=10.0,
     radii_AU=(1.5, 5.0),
     grain_radius_AU=3.0,

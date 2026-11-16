@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from .amplitude import (
+    density_level,
+    surface_brightness_level,
+    zero_magnitude_photon_flux_density,
+)
 from .base import AbstractDisk
 from .composite import CompositeDisk
 from .exovista import ExovistaDisk
@@ -14,4 +19,7 @@ __all__ = [
     "ExovistaDisk",
     "ExovistaParametricDisk",
     "GraterDisk",
+    "density_level",
+    "surface_brightness_level",
+    "zero_magnitude_photon_flux_density",
 ]

@@ -1,79 +1,60 @@
-"""ExovistaDisk: port of legacy Disk -- wavelength-interpolated contrast cube."""
+"""Stored host-relative pixel contrasts with explicit native sky geometry."""
 
-from __future__ import annotations
-
+import equinox as eqx
 import interpax
+import jax.numpy as jnp
+from hwoutils.constants import arcsec2rad
+from hwoutils.grids import PixelGrid, resample
 from jaxtyping import Array
 
-from .base import AbstractDisk
+from .base import AbstractDisk, check_sky_grid, radiance_image
 
 
 class ExovistaDisk(AbstractDisk):
-    """Wavelength-interpolated 3D contrast cube loaded from ExoVista FITS.
+    """Wavelength-interpolated contrast cube on a native PixelGrid.
 
-    The cube is used as written: +column west, +row north (FITS display
-    convention). With ``imshow(origin="lower")`` and no axis inversion,
-    north is up and east is left; astronomical PA (north through east)
-    is counterclockwise. Column offset = -east / pixel scale.
-    Interpolation is only along wavelength and preserves the spatial axes.
-
-    Attributes:
-        pixel_scale_arcsec: Pixel scale [arcsec/pixel].
-        wavelengths_nm: 1-D wavelength grid [nm], shape ``(n_wl,)``.
-        contrast_cube: Contrast cube, shape ``(n_wl, ny, nx)``.
+    contrast_cube holds F_pixel/Phi_star, shape (n_wave, ny, nx). Since
+    F_pixel = L * Omega_native and Omega_native = native_grid.pixel_area
+    * arcsec2rad**2 sr, L = contrast_cube * Phi_star / Omega_native.
+    Resampling L as per_unit_area preserves density, with no target pixel
+    area factor. Geometry is baked into the cube; system angles are ignored.
     """
 
-    pixel_scale_arcsec: float
+    native_grid: PixelGrid = eqx.field(static=True)
     wavelengths_nm: Array
     contrast_cube: Array
     _contrast_interp: interpax.CubicSpline
 
-    def __init__(
-        self,
-        pixel_scale_arcsec: float,
-        wavelengths_nm: Array,
-        contrast_cube: Array,
-    ):
-        """Store geometry and pre-build the wavelength cubic spline."""
-        self.pixel_scale_arcsec = pixel_scale_arcsec
+    def __init__(self, native_grid, wavelengths_nm, contrast_cube):
+        """Store the native geometry and construct the spectral interpolant."""
+        self.native_grid = native_grid
         self.wavelengths_nm = wavelengths_nm
         self.contrast_cube = contrast_cube
         self._contrast_interp = interpax.CubicSpline(
             wavelengths_nm, contrast_cube, axis=0
         )
 
-    def surface_brightness(
-        self,
-        wavelength_nm: Array,
-        time_d: Array,
-        incl_deg: Array,
-        pa_deg: Array,
-        *,
-        dist_pc: Array | None = None,
-    ) -> Array:
-        """Contrast map at the requested wavelength, shape ``(ny, nx)``.
+    def __check_init__(self):
+        """Validate the declared disk inputs."""
+        check_sky_grid(self.native_grid)
+        if self.contrast_cube.shape != (
+            len(self.wavelengths_nm),
+            *self.native_grid.shape,
+        ):
+            raise ValueError("contrast_cube must match wavelengths and native_grid")
 
-        ``time_d`` is days from the scene epoch.
-
-        ``time_d``, ``incl_deg``, ``pa_deg``, and ``dist_pc`` are part of the
-        AbstractDisk interface but ignored here: the cube is a single
-        time snapshot with disk geometry already baked in by the loader.
-        """
-        return self._contrast_interp(wavelength_nm)
-
-    def spatial_extent(self) -> tuple[float, float]:
-        """Return ``(width_arcsec, height_arcsec)``."""
-        ny, nx = self.contrast_cube.shape[-2:]
-        return (nx * self.pixel_scale_arcsec, ny * self.pixel_scale_arcsec)
-
-    def __repr__(self) -> str:
-        """One-line summary of cube shape, pixel scale, and wavelength grid."""
-        n_wl = int(self.wavelengths_nm.shape[0])
-        ny, nx = self.contrast_cube.shape[-2:]
-        wl_min = float(self.wavelengths_nm.min())
-        wl_max = float(self.wavelengths_nm.max())
-        return (
-            f"ExovistaDisk(loaded cube, "
-            f"image: {ny}x{nx} @ {self.pixel_scale_arcsec} arcsec/px, "
-            f"wl={wl_min:.0f}-{wl_max:.0f} nm ({n_wl} pts))"
+    def photon_radiance(self, wavelength_nm, time_d, *, star, dist_pc, grid):
+        """Convert native pixel contrasts to radiance, then resample density."""
+        check_sky_grid(grid)
+        wave = jnp.asarray(wavelength_nm, dtype=float)
+        contrast = self._contrast_interp(wave.reshape(-1)).reshape(
+            wave.shape + self.native_grid.shape
         )
+        flux = star.photon_flux_density(wave, time_d, dist_pc=dist_pc)
+        data = (
+            contrast
+            * flux[..., None, None]
+            / (self.native_grid.pixel_area * arcsec2rad**2)
+        )
+        native = radiance_image(data, self.native_grid)
+        return native if grid == self.native_grid else resample(native, grid)

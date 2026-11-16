@@ -18,12 +18,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from hwoutils.constants import G, Mearth2kg, Msun2kg
+from hwoutils.grids import PixelGrid, SkyOrientation
+from zodi import DensityDust
 
 import skyscapes.viz as viz
 from skyscapes import Scene, System
 from skyscapes.disk import ExovistaDisk, GraterDisk
 from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.scene import FlatStar, Planet
+from tests.conftest import radiance, sky_grid
+
+_DISK_GRID = sky_grid(81, 81, 1.3 * 5.0 / 10.0 / (81 / 2))
 
 matplotlib.use("Agg")
 
@@ -51,9 +56,9 @@ def make_disk(g=0.4, nx=81, rmin=1.5, rmax=5.0):
         wavelengths_nm=jnp.array([400.0, 1000.0]),
         g_HG_grid=jnp.array([g, g]),
         Ag_grid=jnp.array([0.3, 0.3]),
-        nx=nx,
-        ny=nx,
-        pixel_scale_arcsec=1.3 * rmax / DIST_PC / (nx / 2),
+        amplitude=DensityDust(
+            level=1.0, profile_id="grater-1999", calibration_id="unit-profile"
+        ),
         n_slices_los=21,
     )
 
@@ -95,7 +100,7 @@ def make_system(incl=60.0, pa=30.0, disk=None, planets=True):
         **elements,
         disk=make_disk() if disk is None else disk,
         midplane_inc_deg=incl,
-        midplane_pa_deg=pa,
+        midplane_position_angle_deg=90.0 - pa,
     )
 
 
@@ -205,8 +210,8 @@ VIEWS = {
         s, 0.0, ax=ax, track_time_d=jnp.linspace(0, 900, 50)
     ),
     "system_side": lambda s, ax: viz.plot_system(s, 0.0, view="side", ax=ax),
-    "disk_image": lambda s, ax: viz.plot_disk_image(
-        s, wavelength_nm=550.0, ax=ax, grain_radius_AU=3.0
+    "disk_image": lambda s, ax: viz.plot_disk_radiance(
+        s, wavelength_nm=550.0, ax=ax, grain_radius_AU=3.0, grid=_DISK_GRID
     ),
     "disk_geometry": lambda s, ax: viz.plot_disk_geometry(s, ax=ax, thickness_AU=0.5),
     "zodi_top": lambda s, ax: viz.plot_local_zodi_geometry(30.0, 135.0, ax=ax),
@@ -253,14 +258,16 @@ def test_views_accept_a_scene():
     """A Scene is unpacked to its System by every system-level view."""
     scene = Scene(system=make_system())
     viz.plot_system(scene, 0.0)
-    viz.plot_disk_image(scene, wavelength_nm=550.0)
+    viz.plot_disk_radiance(scene, wavelength_nm=550.0, grid=_DISK_GRID)
     viz.plot_disk_geometry(scene)
 
 
 def test_disk_image_keeps_its_slot_in_a_grid():
     """Drawing into one of two slots leaves the slots equal in width."""
     fig, axes = plt.subplots(1, 2, layout="constrained")
-    viz.plot_disk_image(make_system(), wavelength_nm=550.0, ax=axes[0])
+    viz.plot_disk_radiance(
+        make_system(), wavelength_nm=550.0, ax=axes[0], grid=_DISK_GRID
+    )
     fig.canvas.draw()
     w0 = axes[0].get_position(original=True).width
     w1 = axes[1].get_position(original=True).width
@@ -312,12 +319,14 @@ def test_projected_ring_axis_ratio_is_abs_cos_i(incl, pa):
 def test_ring_orientation_matches_the_rendered_disk(incl, pa):
     """The outline's major axis matches the kernel's rendered image moments."""
     system = make_system(incl, pa)
-    image = system.disk.surface_brightness(
+    image = radiance(
+        system.disk,
         jnp.array(550.0),
         jnp.array(0.0),
         jnp.array(incl),
-        jnp.array(pa),
+        90.0 - (jnp.array(pa)),
         dist_pc=DIST_PC,
+        grid=_DISK_GRID,
     )
     _, image_angle = image_axes(image)
     result = viz.plot_system(system, 0.0)
@@ -329,7 +338,7 @@ def test_disk_image_pixels_land_at_their_sky_coordinates():
     """The descending extent puts column zero east and RA increasing left."""
     image = np.full((21, 21), 1e-8)
     image[15, 3] = 1.0  # FITS column below center is east; row above is north.
-    result = viz.plot_disk_image(image, pixel_scale_arcsec=0.1)
+    result = viz.plot_disk_radiance(image, pixel_scale_arcsec=0.1)
     left, right, bottom, top = result.artists["image"].get_extent()
     assert (left, right, bottom, top) == pytest.approx((1.05, -1.05, -1.05, 1.05))
     assert result.artists["image"].origin == "lower"
@@ -346,7 +355,9 @@ def test_disk_image_pixels_land_at_their_sky_coordinates():
 
 def test_disk_image_outline_matches_the_rendered_image():
     """The outline drawn on the image follows the image's own orientation."""
-    result = viz.plot_disk_image(make_system(55.0, 70.0), wavelength_nm=550.0)
+    result = viz.plot_disk_radiance(
+        make_system(55.0, 70.0), wavelength_nm=550.0, grid=_DISK_GRID
+    )
     _, image_angle = image_axes(result.artists["image"].get_array())
     _, ring_angle = principal_axes(by_gid(result)["disk/outer"].get_xydata()[:-1])
     assert angle_diff_mod180(ring_angle, image_angle) < 0.5
@@ -357,12 +368,14 @@ def test_near_side_is_where_the_kernel_scatters_forward(pa):
     """The labeled near side is the bright half of a forward-scattering disk."""
     system = make_system(60.0, pa, disk=make_disk(g=0.6))
     image = np.asarray(
-        system.disk.surface_brightness(
+        radiance(
+            system.disk,
             jnp.array(550.0),
             jnp.array(0.0),
             jnp.array(60.0),
-            jnp.array(pa),
+            90.0 - (jnp.array(pa)),
             dist_pc=DIST_PC,
+            grid=_DISK_GRID,
         )
     )
     ny, nx = image.shape
@@ -403,7 +416,7 @@ def test_system_views_use_east_north_away(view):
         i_rad=jnp.deg2rad(jnp.array([60.0])),
         w_rad=jnp.array([0.0]),
         M0_rad=jnp.array([jnp.pi / 2]),
-        midplane_pa_deg=90.0,
+        midplane_position_angle_deg=0.0,
     )
     track_days = 30.0
     result = viz.plot_system(
@@ -416,7 +429,7 @@ def test_system_views_use_east_north_away(view):
         inc = np.deg2rad(60.0)
         east, north = np.sin(u) * np.cos(inc), np.cos(u)
         away = np.sin(u) * np.sin(inc)
-        # At PA = 90 deg, the side-view minor-axis offset is -east.
+        # At astronomical PA = 0, the minor-axis offset is -east.
         if view == "sky":
             return [east / DIST_PC, north / DIST_PC]
         return [away, -east]
@@ -551,14 +564,10 @@ def test_disk_geometry_update_moves_only_inclination_artists():
 def test_disk_image_update_moves_image_and_outline_only():
     """``update(image, incl_deg=...)`` swaps the data and moves the outline."""
     system = make_system(60.0, 30.0)
-    result = viz.plot_disk_image(system, wavelength_nm=550.0, grain_radius_AU=3.0)
-    frame = system.disk.surface_brightness(
-        jnp.array(550.0),
-        jnp.array(0.0),
-        jnp.array(30.0),
-        jnp.array(30.0),
-        dist_pc=DIST_PC,
+    result = viz.plot_disk_radiance(
+        system, wavelength_nm=550.0, grain_radius_AU=3.0, grid=_DISK_GRID
     )
+    frame = make_system(30.0, 30.0).photon_radiance(550.0, 0.0, grid=_DISK_GRID)
     original = result.artists["image"].get_array().copy()
     before = _all_states(result)
     result.update(frame, incl_deg=30.0)
@@ -590,7 +599,13 @@ def test_pre_rendered_disk_draws_no_invented_outline():
     """An ExovistaDisk declares no radii: no rings unless the caller gives them."""
     wl = jnp.linspace(400.0, 1000.0, 3)
     cube = jnp.full((3, 8, 8), 1e-7)
-    disk = ExovistaDisk(pixel_scale_arcsec=0.1, wavelengths_nm=wl, contrast_cube=cube)
+    disk = ExovistaDisk(
+        wavelengths_nm=wl,
+        contrast_cube=cube,
+        native_grid=PixelGrid.regular(
+            (cube).shape[-2:], 0.1, "arcsec", orientation=SkyOrientation(0.0)
+        ),
+    )
     system = make_system(disk=disk)
     assert "disk/outer" not in by_gid(viz.plot_system(system, 0.0))
     given = by_gid(viz.plot_system(system, 0.0, disk_radii_AU=(1.0, 4.0)))
@@ -604,9 +619,9 @@ def test_pre_rendered_disk_draws_no_invented_outline():
     [
         (lambda s: viz.plot_system(s, 0.0, view="top"), "view"),
         (lambda s: viz.plot_system(s), "time_d"),
-        (lambda s: viz.plot_disk_image(np.ones((4, 4))), "pixel_scale"),
-        (lambda s: viz.plot_disk_image(s.disk), "wavelength_nm"),
-        (lambda s: viz.plot_disk_image(np.ones(4), pixel_scale_arcsec=0.1), "2D"),
+        (lambda s: viz.plot_disk_radiance(np.ones((4, 4))), "pixel_scale"),
+        (lambda s: viz.plot_disk_radiance(s.disk), "wavelength_nm"),
+        (lambda s: viz.plot_disk_radiance(np.ones(4), pixel_scale_arcsec=0.1), "2D"),
         (lambda s: viz.plot_disk_geometry(s, incl_deg=200.0), "incl_deg"),
         (lambda s: viz.plot_local_zodi_geometry(95.0, 10.0), "ecliptic_lat"),
         (lambda s: viz.plot_local_zodi_geometry(10.0, 190.0), "solar_lon"),
@@ -627,12 +642,14 @@ def test_bad_inputs_raise_named_errors(call, match):
 def _kernel_centroid(system, incl, pa):
     """Flux centroid (east, north offsets) of the kernel's rendered disk."""
     image = np.asarray(
-        system.disk.surface_brightness(
+        radiance(
+            system.disk,
             jnp.array(550.0),
             jnp.array(0.0),
             jnp.array(incl),
-            jnp.array(pa),
+            90.0 - (jnp.array(pa)),
             dist_pc=DIST_PC,
+            grid=_DISK_GRID,
         )
     )
     ny, nx = image.shape
@@ -647,7 +664,9 @@ def test_image_sightline_marker_sits_on_the_projected_minor_axis(incl, pa):
     centroid = _kernel_centroid(system, incl, pa)
     for radius in (3.0, -3.0):
         gids = by_gid(
-            viz.plot_disk_image(system, wavelength_nm=550.0, grain_radius_AU=radius)
+            viz.plot_disk_radiance(
+                system, wavelength_nm=550.0, grain_radius_AU=radius, grid=_DISK_GRID
+            )
         )
         marker = gids["sightline"].get_offsets()[0]
         expected = abs(radius) * abs(np.cos(np.radians(incl))) / DIST_PC
@@ -766,9 +785,15 @@ def test_face_on_disk_has_no_near_side_label():
 def test_disk_image_draws_the_same_midplane_above_90_degrees():
     """``(120, 30)`` and ``(60, 210)`` are one midplane and draw one image."""
     system = make_system(120.0, 30.0, disk=make_disk(g=0.6))
-    above = viz.plot_disk_image(system, wavelength_nm=550.0)
-    below = viz.plot_disk_image(
-        system.disk, wavelength_nm=550.0, incl_deg=60.0, pa_deg=210.0, dist_pc=DIST_PC
+    above = viz.plot_disk_radiance(system, wavelength_nm=550.0, grid=_DISK_GRID)
+    below = viz.plot_disk_radiance(
+        system.disk,
+        wavelength_nm=550.0,
+        incl_deg=60.0,
+        dist_pc=DIST_PC,
+        grid=_DISK_GRID,
+        star=system.star,
+        position_angle_deg=90.0 - (210.0),
     )
     a = np.asarray(above.artists["image"].get_array())
     b = np.asarray(below.artists["image"].get_array())
@@ -779,12 +804,12 @@ def test_disk_image_draws_the_same_midplane_above_90_degrees():
 def test_disk_image_refuses_blank_and_negative_arrays():
     """A map with no positive pixel, or real negatives, is not drawn blank."""
     with pytest.raises(ValueError, match="nonnegative"):
-        viz.plot_disk_image(np.zeros((8, 8)), pixel_scale_arcsec=0.1)
+        viz.plot_disk_radiance(np.zeros((8, 8)), pixel_scale_arcsec=0.1)
     image = np.ones((8, 8))
     image[2, 3] = -0.5
     with pytest.raises(ValueError, match="nonnegative"):
-        viz.plot_disk_image(image, pixel_scale_arcsec=0.1)
-    result = viz.plot_disk_image(np.ones((8, 8)), pixel_scale_arcsec=0.1)
+        viz.plot_disk_radiance(image, pixel_scale_arcsec=0.1)
+    result = viz.plot_disk_radiance(np.ones((8, 8)), pixel_scale_arcsec=0.1)
     with pytest.raises(ValueError, match="nonnegative"):
         result.update(-np.ones((8, 8)))
 
@@ -801,8 +826,11 @@ def test_every_view_accepts_zero_to_180_and_refuses_beyond():
         with pytest.raises(ValueError, match="180"):
             viz.plot_disk_geometry(make_system(incl, 30.0))
         with pytest.raises(ValueError, match="180"):
-            viz.plot_disk_image(
-                np.ones((8, 8)), pixel_scale_arcsec=0.1, incl_deg=incl, pa_deg=0.0
+            viz.plot_disk_radiance(
+                np.ones((8, 8)),
+                pixel_scale_arcsec=0.1,
+                incl_deg=incl,
+                position_angle_deg=90.0 - (0.0),
             )
 
 
@@ -973,8 +1001,12 @@ SHOW_VIEWS = {
         DISK_PARTS,
     ),
     "disk_image": (
-        lambda show: viz.plot_disk_image(
-            make_system(60.0, 30.0), wavelength_nm=550.0, grain_radius_AU=3.0, show=show
+        lambda show: viz.plot_disk_radiance(
+            make_system(60.0, 30.0),
+            wavelength_nm=550.0,
+            grain_radius_AU=3.0,
+            show=show,
+            grid=_DISK_GRID,
         ),
         DISK_IMAGE_PARTS,
     ),
@@ -1064,7 +1096,7 @@ def test_show_accepts_one_name_and_refuses_unknown_parts():
     with pytest.raises(ValueError, match="cloud"):
         viz.plot_disk_geometry(make_system(), show=("cloud",))
     with pytest.raises(ValueError, match="rings"):
-        viz.plot_disk_image(
+        viz.plot_disk_radiance(
             np.ones((8, 8)), pixel_scale_arcsec=0.1, show=("star", "rings")
         )
 

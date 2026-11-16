@@ -173,7 +173,7 @@ def from_systems(cls, systems, *, capacity=None, batch_shape=None):
             (_planet(radius, model),),
             dynamics,
             midplane_inc_deg=system.midplane_inc_deg,
-            midplane_pa_deg=system.midplane_pa_deg,
+            midplane_position_angle_deg=system.midplane_position_angle_deg,
             valid=np.arange(capacity) < count,
         )
         # Fixed-size host layout data preserves source order and group boundaries.
@@ -249,7 +249,7 @@ def to_systems(system):
                     tuple(planets),
                     dynamics,
                     midplane_inc_deg=row.midplane_inc_deg,
-                    midplane_pa_deg=row.midplane_pa_deg,
+                    midplane_position_angle_deg=row.midplane_position_angle_deg,
                     body_index=body_index,
                 )
             )
@@ -318,7 +318,7 @@ def from_table(cls, table, *, template):
         restored.dynamics,
         disk=restored.disk,
         midplane_inc_deg=restored.midplane_inc_deg,
-        midplane_pa_deg=restored.midplane_pa_deg,
+        midplane_position_angle_deg=restored.midplane_position_angle_deg,
         valid=restored.valid,
         body_index=tuple(int(i) for i in table["body_index"]),
     )
