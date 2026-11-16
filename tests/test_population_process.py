@@ -576,3 +576,28 @@ def test_mark_coordinate_round_trip(process, marks):
         read = eqx.filter_jit(process.mark_read)(padded)
         assert all(np.isfinite(x).all() for x in jax.tree.leaves(read))
         assert read[2].dtype == jnp.int32
+
+
+def test_earth_like_flags(process, worlds):
+    """Fails if the scene flag departs from the candidate box or marks padding.
+
+    The flag is compared exactly with the box function applied to the
+    star-relative semi-major axis, the mass-radius image and the host
+    luminosity read independently from the same scenes.
+    """
+    from skyscapes.population import earth_like, mass_to_radius
+    from skyscapes.population._process import _MASS_RATIO, _relative_orbits
+
+    hosts, scenes = _hosts(), worlds[1]
+    flag = np.asarray(eqx.filter_jit(process.earth_like)(scenes, hosts))
+    a = np.asarray(_read_a(scenes))
+    mass = np.asarray(
+        jax.vmap(jax.vmap(lambda s: _relative_orbits(s)[2]))(scenes) / _MASS_RATIO
+    )
+    valid = np.asarray(scenes.valid)
+    lum = np.asarray(hosts.luminosity_Lsun)[None, :, None]
+    radius = np.asarray(mass_to_radius(np.where(valid, mass, 1.0)))
+    expected = valid & np.asarray(earth_like(np.where(valid, a, 1.0), radius, lum))
+    np.testing.assert_array_equal(flag, expected)
+    assert flag.shape == valid.shape and flag.any() and not flag[~valid].any()
+    assert (valid & ~flag).any()

@@ -23,6 +23,7 @@ from ._draw import (
     _sample_types,
     _sky_elements_one,
     _type_weights,
+    earth_like,
 )
 from ._tables import OccurrenceTable, PlanetTypes, _type_albedo, mass_to_radius
 
@@ -533,6 +534,34 @@ class OccurrencePopulation(eqx.Module):
         )
         value = self.mark_log_density(system, stars) + log_rate[..., None]
         return jnp.where(system.valid, value, 0.0)
+
+    def earth_like(self, system, stars):
+        """Whether each planet is an exoEarth candidate, bool B + (K,).
+
+        Applies :func:`earth_like` to the star-relative osculating semi-major
+        axis at scene time zero, the mass-radius image of the planet mass and
+        the host luminosity. stars has length S matching the last batch axis,
+        or length one to broadcast. Padded and unbound slots return False.
+        """
+        luminosity = (
+            jnp.broadcast_to(stars.luminosity_Lsun, system.batch_shape)
+            if system.batch_shape
+            else stars.luminosity_Lsun[0]
+        )
+
+        def one(scene, lum):
+            r, v, mass_sun = _relative_orbits(scene)
+            mu = GM_SUN_AU3_PER_D2 * (scene.star_mass_Msun + mass_sun)
+            energy = 2 / jnp.linalg.norm(r, axis=-1) - jnp.sum(v * v, axis=-1) / mu
+            bound = scene.valid & (energy > 0) & (mass_sun > 0)
+            a = 1 / jnp.where(bound, energy, 1.0)
+            radius = mass_to_radius(jnp.where(bound, mass_sun / _MASS_RATIO, 1.0))
+            return bound & earth_like(a, radius, lum)
+
+        read = one
+        for _ in system.batch_shape:
+            read = jax.vmap(read)
+        return read(system, luminosity)
 
     def type_albedo(self, system, wavelength_nm):
         """Geometric albedo, B + (K,), at scalar wavelength_nm; padding is zero.
