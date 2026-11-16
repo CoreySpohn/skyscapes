@@ -46,6 +46,13 @@
   observer on the left at -z, with z labelled away from the observer. The
   scattering diagram labels the illumination angle beta.
 
+## [4.1.0](https://github.com/CoreySpohn/skyscapes/compare/v4.0.1...v4.1.0) (2026-11-16)
+
+
+### Features
+
+* **scene:** a padded, masked batch of systems on the scene System, with table and list round trips ([15c2c74](https://github.com/CoreySpohn/skyscapes/commit/15c2c745112e49c31541ec0b1ebb679d5510744c))
+
 ## [4.0.1](https://github.com/CoreySpohn/skyscapes/compare/v4.0.0...v4.0.1) (2026-11-16)
 
 
