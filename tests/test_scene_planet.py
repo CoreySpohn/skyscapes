@@ -10,13 +10,11 @@ import pytest
 from hwoutils.constants import G, Mearth2kg, Msun2kg, Rearth2AU, pc2AU, rad2arcsec
 from orbix.equations.orbit import mean_motion, period_n
 from orbix.equations.phase import lambert_phase_exact
-from orbix.kepler.markley import solve_trig
-from orbix.orbit import KeplerianOrbit
 
 from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.scene import FlatStar, Planet, System
 
-SOLVER = solve_trig
+from .conftest import two_body_reference
 
 
 def _single_scene(*, mass=1.0, i_rad=jnp.pi / 3, M0_rad=jnp.pi / 4, W_rad=0.0):
@@ -35,9 +33,9 @@ def _single_scene(*, mass=1.0, i_rad=jnp.pi / 3, M0_rad=jnp.pi / 4, W_rad=0.0):
     )
 
 
-def _reference_orbit(scene):
-    return KeplerianOrbit(
-        **scene.dynamics.orbits.to_classical(), t0_d=scene.dynamics.orbits.epoch_d
+def _reference_elements(scene):
+    return dict(
+        **scene.dynamics.orbits.to_classical(), epoch_d=scene.dynamics.orbits.epoch_d
     )
 
 
@@ -76,28 +74,31 @@ def test_planet_alpha_dMag_matches_orbix():
 
     alpha_new, dMag_new = p.alpha_dMag(time_d)
 
-    orbit = KeplerianOrbit(
+    elements = dict(
         a_AU=jnp.array([1.0]),
         e=jnp.array([0.0]),
         W_rad=jnp.array([0.0]),
         i_rad=jnp.array([jnp.pi / 3]),
         w_rad=jnp.array([0.0]),
         M0_rad=jnp.array([jnp.pi / 4]),
-        t0_d=jnp.array([0.0]),
+        epoch_d=jnp.array([0.0]),
     )
     # The planet adds its own mass to the central mass (two-body mu).
-    Ms_kg = jnp.array([1.989e30]) + p.planet_mass_Msun * Msun2kg
+    total_mass_kg = jnp.array([1.989e30]) + p.planet_mass_Msun * Msun2kg
     dist_pc = jnp.array([10.0])
     Ag = jnp.array([0.3])
     Rp_AU = jnp.array([1.0]) * Rearth2AU
 
-    r_AU, _, dist_AU = orbit.propagate(SOLVER, time_d, Ms_kg=Ms_kg)
+    reference = two_body_reference(
+        time_d, **elements, star_mass_kg=total_mass_kg, dist_pc=dist_pc
+    )
+    r_AU, dist_AU = reference.position_AU, reference.distance_AU
     # Raw orbix z points away: cos(beta) = z / r.
     cos_a = r_AU[:, 2, :] / dist_AU
     phase = lambert_phase_exact(cos_a, jnp.sqrt(1.0 - cos_a**2))
     log_arg = Ag[:, None] * (Rp_AU[:, None] / dist_AU) ** 2 * phase
     dMag_ref = -2.5 * jnp.log10(log_arg + jnp.finfo(log_arg.dtype).tiny)
-    alpha_ref = orbit.separation_arcsec(SOLVER, time_d, Ms_kg=Ms_kg, dist_pc=dist_pc)
+    alpha_ref = reference.separation_arcsec
 
     assert jnp.allclose(alpha_new, alpha_ref, rtol=1e-6)
     assert jnp.allclose(dMag_new, dMag_ref, rtol=1e-6)
@@ -125,10 +126,10 @@ def test_planet_spec_flux_density_equals_contrast_times_star():
 def test_scene_reference_mean_anomaly_range():
     """mean_anomaly returns (K, T) in [0, 360)."""
     p = _single_scene()
-    orbit = _reference_orbit(p)
+    elements = _reference_elements(p)
     times = jnp.array([0.0, 100.0, 365.0])
     M = jnp.rad2deg(
-        (orbit.M0_rad[:, None] + p.dynamics.orbits.n_rad_per_d[:, None] * times)
+        (elements["M0_rad"][:, None] + p.dynamics.orbits.n_rad_per_d[:, None] * times)
         % (2 * jnp.pi)
     )
     # Shape (K=1, T=3), and the values should be in [0, 360)
@@ -273,7 +274,7 @@ def test_scene_ephemeris_passes_orbix_through_exactly():
 def test_scene_mass_and_observables(mass):
     """Fails if mass sanitization changes existing positions or contrasts.
 
-    Truth is the existing two-body expressions with Markley propagation.
+    Truth is the independent NumPy two-body reference with Newton iteration.
     Mass sanitization remains exact; positions and contrast allow 3e-13
     relative float64 basis/epoch roundoff (3e-13 arcsec absolute for position).
     The system no longer includes grid interpolation error.
@@ -291,7 +292,14 @@ def test_scene_mass_and_observables(mass):
     np.testing.assert_array_equal(
         p.planet_mass_Msun, [Mearth2kg / Msun2kg if mass == 1 else 0]
     )
-    r, phase, dist = _reference_orbit(p).propagate(solve_trig, times, Ms_kg=old_mass)
+    reference = two_body_reference(
+        times, **_reference_elements(p), star_mass_kg=old_mass
+    )
+    r, phase, dist = (
+        reference.position_AU,
+        reference.phase_angle_rad,
+        reference.distance_AU,
+    )
     scale = rad2arcsec / (p.dist_pc * pc2AU)
     old_position = jnp.stack([r[:, 0, :] * scale, r[:, 1, :] * scale])
     old_contrast = p.planets[0].physical_model.contrast_at_time(

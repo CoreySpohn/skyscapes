@@ -10,6 +10,8 @@ from skyscapes.physical_model import (
     LambertianPhysicalModel,
 )
 
+from .conftest import two_body_reference
+
 
 def test_lambertian_is_abstract_physical_model():
     """LambertianPhysicalModel subclasses AbstractPhysicalModel."""
@@ -82,28 +84,25 @@ def test_lambertian_wavelength_independent():
 def test_lambertian_matches_orbix_alpha_dmag():
     """Hand-built LambertianPhysicalModel reproduces the exact Lambert dMag."""
     from orbix.equations.phase import lambert_phase_exact
-    from orbix.kepler.shortcuts.grid import get_grid_solver
-    from orbix.orbit import KeplerianOrbit
 
-    solver = get_grid_solver(level="scalar", E=False, trig=True, jit=True)
-
-    orbit = KeplerianOrbit(
+    elements = dict(
         a_AU=jnp.array([1.0]),
         e=jnp.array([0.0]),
         W_rad=jnp.array([0.0]),
         i_rad=jnp.array([jnp.pi / 3]),  # non-trivial inclination
         w_rad=jnp.array([0.0]),
         M0_rad=jnp.array([jnp.pi / 4]),
-        t0_d=jnp.array([0.0]),
+        epoch_d=jnp.array([0.0]),
     )
-    Ms_kg = jnp.array([1.989e30])
+    star_mass_kg = jnp.array([1.989e30])
     Ag = jnp.array([0.3])
     Rp_AU = jnp.array([1.0]) * Rearth2AU
     time_d = jnp.array([0.0])
 
-    # Rebuild the same phase/distance via orbit.propagate then feed
-    # LambertianPhysicalModel. The output contrast must match dMag exactly.
-    _, phase_angle_rad, dist_AU = orbit.propagate(solver, time_d, Ms_kg=Ms_kg)
+    # Independent two-body phase/distance feed LambertianPhysicalModel.
+    # The output contrast must match the analytic Lambert dMag.
+    reference = two_body_reference(time_d, **elements, star_mass_kg=star_mass_kg)
+    phase_angle_rad, dist_AU = reference.phase_angle_rad, reference.distance_AU
 
     phase = lambert_phase_exact(jnp.cos(phase_angle_rad), jnp.sin(phase_angle_rad))
     log_arg = Ag[:, None] * (Rp_AU[:, None] / dist_AU) ** 2 * phase

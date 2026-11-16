@@ -18,7 +18,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from hwoutils.constants import G, Mearth2kg, Msun2kg
-from orbix.orbit import KeplerianOrbit
 
 import skyscapes.viz as viz
 from skyscapes import Scene, System
@@ -388,15 +387,6 @@ def test_system_views_use_east_north_away(view):
     M = 90 deg has positive east and away offsets. Brown (2005),
     ApJ 624, 1010, Eq. 4: that far-side planet is gibbous.
     """
-    orbit = KeplerianOrbit(
-        a_AU=jnp.array([1.0]),
-        e=jnp.array([0.0]),
-        W_rad=jnp.array([0.0]),
-        i_rad=jnp.deg2rad(jnp.array([60.0])),
-        w_rad=jnp.array([0.0]),
-        M0_rad=jnp.array([jnp.pi / 2]),
-        t0_d=jnp.array([0.0]),
-    )
     planet = Planet(
         Rp_Rearth=jnp.array([1.0]),
         physical_model=LambertianPhysicalModel(Ag=jnp.array([0.3])),
@@ -407,10 +397,12 @@ def test_system_views_use_east_north_away(view):
         star_mass_Msun=1.0,
         planet_mass_Msun=jnp.array([1.0]) * Mearth2kg / Msun2kg,
         dist_pc=DIST_PC,
-        **{
-            key: getattr(orbit, key)
-            for key in ("a_AU", "e", "i_rad", "W_rad", "w_rad", "M0_rad")
-        },
+        a_AU=jnp.array([1.0]),
+        e=jnp.array([0.0]),
+        W_rad=jnp.array([0.0]),
+        i_rad=jnp.deg2rad(jnp.array([60.0])),
+        w_rad=jnp.array([0.0]),
+        M0_rad=jnp.array([jnp.pi / 2]),
         midplane_pa_deg=90.0,
     )
     track_days = 30.0

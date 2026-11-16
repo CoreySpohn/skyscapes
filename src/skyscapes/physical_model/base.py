@@ -81,7 +81,7 @@ class AbstractPhysicalModel(eqx.Module):
 
         Args:
             phase_angle_rad: Star-planet-observer phase angle ``beta``,
-                shape ``(K, T)`` (matching ``AbstractOrbit.propagate``).
+                shape ``(K, T)`` for K planets and T times.
             dist_AU: Star-planet distance, shape ``(K, T)``.
             wavelength_nm: Scalar wavelength [nm]. Use ``System.contrast_cube``
                 to evaluate an array of wavelengths.

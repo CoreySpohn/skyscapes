@@ -22,8 +22,6 @@ from hwoutils.constants import (
 )
 from hwoutils.conversions import photons_per_nm_per_m2_to_jy
 from hwoutils.epoch import Epoch
-from orbix.kepler.markley import solve_trig
-from orbix.orbit import KeplerianOrbit
 
 from skyscapes.disk import ExovistaDisk
 from skyscapes.physical_model import (
@@ -36,6 +34,7 @@ from skyscapes.physical_model import (
 from skyscapes.scene import BlackbodyStar, FlatStar, Planet, Star, System
 from skyscapes.spectral import Bandpass, bin_mean
 
+from .conftest import two_body_reference
 from .test_io_exovista_versions import scene_file as exovista_scene_file  # noqa: F401
 
 
@@ -422,9 +421,9 @@ def test_stellar_observables_scale_sign_and_sum(mass):
     amplitude /= (Msun2kg + mp) ** (2 / 3)
     rv = single.star_radial_velocity(times)
     np.testing.assert_allclose(rv, [-amplitude, amplitude], rtol=3e-14, atol=0)
-    velocity = _reference_orbit(single).velocity_AU_d(
-        solve_trig, times, Ms_kg=Msun2kg, Mp_kg=mp
-    )
+    velocity = two_body_reference(
+        times, **_reference_elements(single), star_mass_kg=Msun2kg, planet_mass_kg=mp
+    ).velocity_AU_per_d
     assert rv[1] > 0 > velocity[0, 2, 1]
     other = _make_planet(0.5, 2.0)
     pair = _system(
@@ -577,14 +576,14 @@ def _ephemeris_scene(e=0.05, inc=0.7, masses=(0.001, 0.005), reverse=False):
     )
 
 
-def _reference_orbit(system, index=0):
-    """Independent two-body orbit, read in scene order for comparisons."""
+def _reference_elements(system, index=0):
+    """Classical inputs in scene order for the independent two-body reference."""
     i = system.body_index[index]
     elements = {
         key: value[i : i + 1]
         for key, value in system.dynamics.orbits.to_classical().items()
     }
-    return KeplerianOrbit(**elements, t0_d=system.dynamics.orbits.epoch_d[i : i + 1])
+    return dict(**elements, epoch_d=system.dynamics.orbits.epoch_d[i : i + 1])
 
 
 def _scene_observables(system, times, **kwargs):
@@ -612,11 +611,18 @@ def _scene_observables(system, times, **kwargs):
 
 
 def _independent_observables(system, times, index=0):
-    """Direct KeplerianOrbit/Markley truth with independent two-body masses."""
+    """NumPy Newton/perifocal truth with independent two-body masses."""
     planet, star = system.planets[index], system.star
-    orbit = _reference_orbit(system, index)
+    elements = _reference_elements(system, index)
     ms, mp = system.star_mass_Msun * Msun2kg, system.planet_mass_Msun[index] * Msun2kg
-    r, phase, distance = orbit.propagate(solve_trig, times, Ms_kg=ms + mp)
+    reference = two_body_reference(
+        times, **elements, star_mass_kg=ms + mp, dist_pc=system.dist_pc
+    )
+    r, phase, distance = (
+        reference.position_AU,
+        reference.phase_angle_rad,
+        reference.distance_AU,
+    )
     geometry = dict(
         phase_angle_rad=phase,
         dist_AU=distance,
@@ -630,20 +636,15 @@ def _independent_observables(system, times, index=0):
     )
     flux = planet.physical_model.spec_flux_density(jnp.asarray(500.0), **geometry)
     positions = r[:, :2, :].transpose(1, 0, 2) * (rad2arcsec / (system.dist_pc * pc2AU))
-    alpha = orbit.separation_arcsec(
-        solve_trig, times, Ms_kg=ms + mp, dist_pc=system.dist_pc
+    alpha = reference.separation_arcsec
+    stellar_reference = two_body_reference(
+        times, **elements, star_mass_kg=ms, planet_mass_kg=mp, dist_pc=system.dist_pc
     )
     return dict(
         positions=positions,
-        position_angles=orbit.position_angle_deg(solve_trig, times, Ms_kg=ms, Mp_kg=mp),
-        star_reflex=jnp.stack(
-            orbit.reflex_position_arcsec(
-                solve_trig, times, Ms_kg=ms, Mp_kg=mp, dist_pc=system.dist_pc
-            )
-        )[:, 0],
-        star_radial_velocity=orbit.radial_velocity_m_s(
-            solve_trig, times, Ms_kg=ms, Mp_kg=mp
-        )[0],
+        position_angles=stellar_reference.position_angle_deg,
+        star_reflex=stellar_reference.star_reflex_arcsec[:, 0],
+        star_radial_velocity=stellar_reference.star_radial_velocity_m_per_s[0],
         contrasts=contrast,
         contrast_cube=jnp.stack([contrast, contrast]),
         bin_mean_contrast_cube=jnp.stack([contrast, contrast]),
@@ -658,10 +659,10 @@ def _independent_observables(system, times, index=0):
 
 @pytest.mark.parametrize("e,inc", [(1e-6, 0.7), (0.6, 1.1), (0.2, 2.6)])
 def test_ephemeris_single_planet_conventions(e, inc):
-    """Catch epoch, sky, mass, phase and RV-sign changes against KeplerianOrbit/Markley.
+    """Catch epoch, sky, mass, phase and RV-sign changes against two-body truth.
 
-    Truth is KeplerianOrbit's independent two-body methods using solve_trig (Markley
-    1995). rtol 3e-13 plus 3e-13 absolute allows float64 basis/epoch roundoff;
+    Truth is the independent NumPy Newton/perifocal reference.
+    rtol 3e-13 plus 3e-13 absolute allows float64 basis/epoch roundoff;
     contrast and flux use relative tolerance only to protect tiny signals.
     """
     system = _ephemeris_scene(e, inc, masses=(0.01,))
@@ -726,7 +727,7 @@ def test_ephemeris_jacobi_balance_and_independent_limit(massless):
     Truth: sum(m*r)=sum(m*v)=0 (Jacobi barycentric balance), with atol
     4e-17 Msun AU and 4e-19 Msun AU/day for x64 cancellation. For masses
     .001/.005 Msun at 1/5 AU, the relative maximum stellar-offset change
-    from independent KeplerianOrbit/Markley orbits must be nonzero and below .0033
+    from independent NumPy two-body orbits must be nonzero and below .0033
     (over three times the measured .00106742). Massless values use 3e-13
     relative/absolute float64 tolerance, with relative-only photometry.
     """
