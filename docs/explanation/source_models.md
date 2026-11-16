@@ -294,6 +294,11 @@ Convert absolute dates once on the host with
 `time_d = system.epoch.days(absolute_dates)`; pass only offsets to JAX.
 
 ```python
+import jax.numpy as jnp
+
+from skyscapes.physical_model import LambertianPhysicalModel
+from skyscapes.scene import Planet
+
 # Two planets sharing a Lambertian physical model
 two_planet = Planet(
     Rp_Rearth=jnp.array([1.0, 11.2]),

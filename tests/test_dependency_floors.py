@@ -15,7 +15,7 @@ PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 
 # First release of each sibling that uses the (east, north, away) sky chart.
 SKY_FLOORS = {
-    "orbix": Version("4.0.0"),  # orbix system dynamics API
+    "orbix": Version("4.1.0"),  # orbix system dynamics API
     "photomancy": Version("0.4.0"),
     "coronagraphoto": Version("4.2.0"),
     "coronalyze": Version("1.2.0"),
@@ -40,7 +40,7 @@ def _floor(requirement):
 
 
 def test_orbix_floor_is_declared_for_install_and_test():
-    """Both the runtime dependency and the test extra require orbix 4.0.0."""
+    """Both the runtime dependency and the test extra require orbix 4.1.0."""
     groups = {
         group: _floor(req) for group, req in _requirements() if req.name == "orbix"
     }
