@@ -7,9 +7,10 @@ import equinox as eqx
 import interpax
 import jax.numpy as jnp
 import zodi
-from hwoutils.constants import arcsec2rad, nm2um
+from hwoutils.constants import arcsec2rad, nm2um, um2nm
 from hwoutils.conversions import jy_to_photons_per_nm_per_m2, mag_to_flux_jy
 from jaxtyping import Array
+from zodi.tables import TABLE19_WAVELENGTH_UM
 
 
 class AbstractLocalZodi(eqx.Module):
@@ -42,6 +43,11 @@ class AYOZodi(AbstractLocalZodi):
     surface_brightness_mag_arcsec2: float = 22.0
     reference_wavelength_nm: float = 550.0
 
+    @property
+    def quadrature_knots_nm(self):
+        """Table 19 colour breakpoints [nm]; the spectrum is piecewise in them."""
+        return TABLE19_WAVELENGTH_UM * um2nm
+
     def photon_radiance(
         self,
         wavelength_nm: Array,
@@ -68,6 +74,11 @@ class LeinertZodi(AbstractLocalZodi):
     the V-band brightness is approximately 22 AB mag/arcsec^2; AYO's rounded
     22-mag normalization differs slightly from the absolute table value.
     """
+
+    @property
+    def quadrature_knots_nm(self):
+        """Table 19 colour breakpoints [nm]; the spectrum is piecewise in them."""
+        return TABLE19_WAVELENGTH_UM * um2nm
 
     def photon_radiance(
         self,
