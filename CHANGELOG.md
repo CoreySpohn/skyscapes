@@ -46,6 +46,13 @@
   observer on the left at -z, with z labelled away from the observer. The
   scattering diagram labels the illumination angle beta.
 
+## [4.0.1](https://github.com/CoreySpohn/skyscapes/compare/v4.0.0...v4.0.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* the docs example imports its names and the floor test expects orbix 4.1.0 ([8449ac0](https://github.com/CoreySpohn/skyscapes/commit/8449ac0389dfe32ffeaea36376c05e524224abb0))
+
 ## [4.0.0](https://github.com/CoreySpohn/skyscapes/compare/v3.0.0...v4.0.0) (2026-11-16)
 
 
