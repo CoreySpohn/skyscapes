@@ -236,7 +236,7 @@ def test_orientation_and_rotated_grid():
     direct = disk.photon_radiance(550.0, 0.0, star=star, dist_pc=10.0, grid=rotated)
     np.testing.assert_allclose(
         direct.data,
-        resample(ref, rotated, order=3).data,
+        resample(ref, rotated, reconstruction="cubic").data,
         rtol=0,
         atol=0.004 * direct.data.max(),
     )
