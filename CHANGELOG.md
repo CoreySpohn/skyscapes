@@ -46,6 +46,22 @@
   observer on the left at -z, with z labelled away from the observer. The
   scattering diagram labels the illumination angle beta.
 
+## [4.0.0](https://github.com/CoreySpohn/skyscapes/compare/v3.0.0...v4.0.0) (2026-11-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **scene:** times are days from the scene epoch
+* **scene:** the scene holds an orbix system; stars and planets are photometric only
+
+### Features
+
+* **io:** the ExoVista loader accepts a shared scene epoch ([d6137c0](https://github.com/CoreySpohn/skyscapes/commit/d6137c0fce24487be64596eec4da6c6d0727f012))
+* position angles, stellar reflex and radial velocity on System, and a Bandpass with band contrasts ([9fa7a56](https://github.com/CoreySpohn/skyscapes/commit/9fa7a56d666a5f7c21e728f049c9541eb21e2be6))
+* scene methods read one solved Jacobi ephemeris from an orbix system and accept a shared ephemeris ([883dabe](https://github.com/CoreySpohn/skyscapes/commit/883dabe6f16eeac915ec713d60df292c41edf355))
+* **scene:** the scene holds an orbix system; stars and planets are photometric only ([bdcaf5c](https://github.com/CoreySpohn/skyscapes/commit/bdcaf5cdc79c3878abd7ac7b0a8553b0cadaf417))
+* **scene:** times are days from the scene epoch ([5ecb6b5](https://github.com/CoreySpohn/skyscapes/commit/5ecb6b53820ed06c4c9a14ffc7cb3727a58d2891))
+
 ## [3.0.0](https://github.com/CoreySpohn/skyscapes/compare/v2.2.0...v3.0.0) (2026-11-15)
 
 
