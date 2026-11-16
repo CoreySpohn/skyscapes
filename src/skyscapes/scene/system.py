@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import wraps
+from inspect import signature
 from numbers import Integral
 
 import equinox as eqx
@@ -17,6 +19,8 @@ from orbix.system import System as DynamicsSystem
 from .._repr import indent
 from ..disk import AbstractDisk
 from ..spectral import Bandpass, _model_max_knots, bin_mean
+from . import _system_batch
+from ._system_batch import _PAD_ORBIT
 from .planet import Planet
 from .star import AbstractStar
 
@@ -39,6 +43,73 @@ def _known_planet_mass(mass_Msun):
     return jnp.where(jnp.isfinite(mass) & (mass > 0), mass, 0.0)
 
 
+def _batch_method(method):
+    """Apply an unbatched reader over each static leading scene axis."""
+    parameters = signature(method)
+
+    @wraps(method)
+    def dispatch(self, *args, **kwargs):
+        if not self.batch_shape:
+            return method(self, *args, **kwargs)
+        bound = parameters.bind(self, *args, **kwargs)
+        bound.apply_defaults()
+        options = dict(bound.arguments)
+        options.pop("self")
+        time = jnp.asarray(options.pop("time_d"))
+        paired = time.ndim != 1
+        if paired and time.shape[:-1] != self.batch_shape:
+            raise ValueError("time_d must have shape (T,) or B + (T,)")
+        has_ephemeris = "ephemeris" in options
+        ephemeris = options.pop("ephemeris", None)
+
+        def read(scene, dates, solved):
+            extra = dict(ephemeris=solved) if has_ephemeris else {}
+            return method(scene, time_d=dates, **options, **extra)
+
+        scene_axes = jax.tree.map(
+            lambda x: 0 if eqx.is_array(x) and x.ndim else None, self
+        )
+        for _ in self.batch_shape:
+            read = jax.vmap(
+                read,
+                in_axes=(
+                    scene_axes,
+                    0 if paired else None,
+                    0 if ephemeris is not None else None,
+                ),
+            )
+        return read(self, time, ephemeris)
+
+    dispatch.__doc__ = (
+        method.__doc__
+        + "\n\n    Batch axes B prefix outputs; times are (T,) or B + (T,)."
+    )
+    return dispatch
+
+
+def _mask_dynamics(dynamics, chain_valid):
+    """Replace inactive mass/orbit leaves before any orbital arithmetic."""
+    orbit = jax.tree_util.tree_map_with_path(
+        lambda path, x: jnp.where(
+            chain_valid[:, None] if x.ndim == 2 else chain_valid,
+            x,
+            jnp.asarray(_PAD_ORBIT[path[-1].name], dtype=x.dtype),
+        ),
+        dynamics.orbits,
+    )
+    return eqx.tree_at(
+        lambda d: (d.planets.mass_Msun, d.orbits),
+        dynamics,
+        (jnp.where(chain_valid, dynamics.planets.mass_Msun, 0.0), orbit),
+    )
+
+
+@eqx.filter_jit
+def _masked_solve(dynamics, chain_valid, time_d, solver):
+    """Fuse masking with the solve, including when called eagerly."""
+    return _mask_dynamics(dynamics, chain_valid).solve(time_d, solver=solver)
+
+
 class System(eqx.Module):
     """Astrophysical scene: star + tuple of planets + optional disk.
 
@@ -51,6 +122,9 @@ class System(eqx.Module):
         planets: Variable-length tuple of ``Planet``.
         dynamics: Orbix Jacobi chain, declared inner to outer.
         epoch: Read-only reference to ``dynamics.frame.epoch``.
+        valid: Boolean B + (K,) mask; defaults to all True. Batched scenes
+            contain exactly one stacked Planet group and no disk. Every
+            numeric leaf, including spectral grids, carries the batch axes.
         body_index: Static permutation mapping flattened scene planet indices to
             zero-based chain planet indices. Defaults to the identity.
         disk: Optional extended-source disk (``AbstractDisk | None``).
@@ -69,6 +143,8 @@ class System(eqx.Module):
     star: AbstractStar
     planets: tuple[Planet, ...]
     dynamics: DynamicsSystem
+    valid: Array
+    _source_layout: Array | None = None
     disk: AbstractDisk | None = None
     midplane_inc_deg: float = 0.0
     midplane_pa_deg: float = 0.0
@@ -89,6 +165,7 @@ class System(eqx.Module):
         midplane_pa_deg=0.0,
         *,
         body_index=None,
+        valid=None,
     ):
         """Compose photometry and a fixed Jacobi hierarchy.
 
@@ -96,8 +173,15 @@ class System(eqx.Module):
         planet j. It is structural metadata, never inferred during a solve.
         """
         self.star = star
-        self.planets = tuple(planets)
+        self._source_layout = None
+        self.planets = (planets,) if isinstance(planets, Planet) else tuple(planets)
         self.dynamics = dynamics
+        shape = dynamics.planets.mass_Msun.shape
+        self.valid = (
+            jnp.ones(shape, dtype=bool)
+            if valid is None
+            else jnp.asarray(valid, dtype=bool)
+        )
         self.disk = disk
         self.midplane_inc_deg = midplane_inc_deg
         self.midplane_pa_deg = midplane_pa_deg
@@ -108,8 +192,14 @@ class System(eqx.Module):
     def __check_init__(self):
         """Validate body counts and the static scene-to-chain permutation."""
         count = self.n_planets
-        if self.dynamics.planets.mass_Msun.shape != (count,):
+        if self.dynamics.planets.mass_Msun.shape != (*self.batch_shape, count):
             raise ValueError("Photometric planet count must match dynamics bodies")
+        if self.valid.shape != (*self.batch_shape, count):
+            raise ValueError("valid must have shape B + (K,)")
+        if self.batch_shape and (len(self.planets) != 1 or self.disk is not None):
+            raise ValueError(
+                "Batched scenes require one stacked Planet group and no disk"
+            )
         if (
             len(self.body_index) != count
             or any(
@@ -119,6 +209,63 @@ class System(eqx.Module):
             or sorted(self.body_index) != list(range(count))
         ):
             raise ValueError("body_index must be an integer permutation of the planets")
+
+    @property
+    def batch_shape(self) -> tuple[int, ...]:
+        """Leading scene axes, determined statically from stellar mass shape."""
+        return self.dynamics.star.mass_Msun.shape
+
+    @property
+    def capacity(self) -> int:
+        """Static number of planet slots, including the padded tail."""
+        return self.dynamics.planets.mass_Msun.shape[-1]
+
+    @classmethod
+    def from_systems(cls, systems, *, capacity=None, batch_shape=None):
+        """Pack same-class scenes into NumPy float64 leaves, sorted inner to outer.
+
+        The default batch shape is (len(systems),); capacity defaults to the
+        largest valid count. Disks, mixed epochs and mixed model classes raise.
+        At least one Planet group must supply the physical-model class; an
+        empty group is sufficient. Host layout data restores source group
+        boundaries and scene order when unpacking.
+        """
+        return _system_batch.from_systems(
+            cls, systems, capacity=capacity, batch_shape=batch_shape
+        )
+
+    def to_systems(self):
+        """Return unpadded host scenes in row-major batch order."""
+        return _system_batch.to_systems(self)
+
+    def to_table(self) -> dict[str, np.ndarray]:
+        """Return all leaves by JAX key path, plus scalar K and epoch parts."""
+        return _system_batch.to_table(self)
+
+    @classmethod
+    def from_table(cls, table, *, template):
+        """Restore a table; template supplies model classes and static metadata."""
+        return _system_batch.from_table(cls, table, template=template)
+
+    def take(self, index):
+        """Gather a scalar index along the last batch axis, under jit or vmap."""
+        if not self.batch_shape:
+            raise ValueError("take requires at least one batch axis")
+        axis = len(self.batch_shape) - 1
+        return jax.tree.map(
+            lambda x: (
+                jnp.take(x, index, axis=axis) if eqx.is_array(x) and x.ndim else x
+            ),
+            self,
+        )
+
+    def _chain_valid(self):
+        inverse = tuple(self.body_index.index(i) for i in range(self.capacity))
+        return self.valid[jnp.asarray(inverse, dtype=int)]
+
+    def _masked_dynamics(self):
+        """Remove every padded dynamical derivative before the orbital solve."""
+        return _mask_dynamics(self.dynamics, self._chain_valid())
 
     @classmethod
     def from_classical(
@@ -138,6 +285,7 @@ class System(eqx.Module):
         epoch_d=0.0,
         epoch=_DEFAULT_EPOCH,
         order=None,
+        valid=None,
         disk=None,
         midplane_inc_deg=0.0,
         midplane_pa_deg=0.0,
@@ -153,7 +301,7 @@ class System(eqx.Module):
         convert absolute dates once with ``system.epoch.days(...)`` before
         transferring the resulting offsets to JAX.
         """
-        planets = tuple(planets)
+        planets = (planets,) if isinstance(planets, Planet) else tuple(planets)
         count = sum(p.n_planets for p in planets)
         if order is None:
             if any(isinstance(leaf, jax.core.Tracer) for leaf in jax.tree.leaves(a_AU)):
@@ -198,6 +346,7 @@ class System(eqx.Module):
             midplane_inc_deg,
             midplane_pa_deg,
             body_index=inverse,
+            valid=valid,
         )
 
     @property
@@ -218,8 +367,11 @@ class System(eqx.Module):
     @property
     def planet_mass_Msun(self):
         """Planet masses [solar masses] in flattened scene order."""
-        return self.dynamics.planets.mass_Msun[jnp.asarray(self.body_index, dtype=int)]
+        return self.dynamics.planets.mass_Msun[
+            ..., jnp.asarray(self.body_index, dtype=int)
+        ]
 
+    @_batch_method
     def ephemeris(self, time_d: Array, *, solver=None) -> _SceneEphemeris:
         """Solve once with Markley by default and retain scene-order body indices.
 
@@ -232,8 +384,11 @@ class System(eqx.Module):
         ``solver`` accepts an orbix.kepler strategy. Stored orbit rates follow
         orbix semantics: editing masses changes barycentric weights, not rates.
         """
-        solved = self.dynamics.solve(
-            time_d, solver=Markley() if solver is None else solver
+        solved = _masked_solve(
+            self.dynamics,
+            self._chain_valid(),
+            time_d,
+            Markley() if solver is None else solver,
         )
         return _SceneEphemeris(
             solved.position_AU,
@@ -242,6 +397,7 @@ class System(eqx.Module):
             jnp.asarray(self.body_index, dtype=int) + 1,
         )
 
+    @_batch_method
     def positions(self, time_d: Array, *, ephemeris=None) -> Array:
         """Star-relative on-sky positions, shape ``(2, K_total, T)``.
 
@@ -250,6 +406,7 @@ class System(eqx.Module):
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
         return jnp.stack(eph.offset_arcsec(eph.scene_planet_indices, 0), axis=0)
 
+    @_batch_method
     def position_angles(self, time_d: Array, *, ephemeris=None) -> Array:
         """Position angles east of north in ``[0, 360)``, ``(K_total, T)``.
 
@@ -258,6 +415,7 @@ class System(eqx.Module):
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
         return eph.position_angle_deg(eph.scene_planet_indices, 0)
 
+    @_batch_method
     def star_reflex(self, time_d: Array, *, ephemeris=None) -> Array:
         """Stellar (east, north) barycentric offsets [arcsec], ``(2, T)``.
 
@@ -269,6 +427,7 @@ class System(eqx.Module):
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
         return jnp.stack(eph.offset_arcsec(0, "barycenter"), axis=0)
 
+    @_batch_method
     def star_radial_velocity(self, time_d: Array, *, ephemeris=None) -> Array:
         """Stellar barycentric radial velocity [m/s], positive receding, ``(T,)``.
 
@@ -296,22 +455,36 @@ class System(eqx.Module):
             geometry = dict(
                 phase_angle_rad=phase[start:stop],
                 dist_AU=distance[start:stop],
-                Rp_Rearth=planet.Rp_Rearth,
+                Rp_Rearth=jnp.where(self.valid[start:stop], planet.Rp_Rearth, 0.0),
                 time_d=time_d,
                 star=self.star,
                 dist_pc=self.dynamics.frame.dist_pc,
             )
-            model = planet.physical_model
+            mask = self.valid[start:stop]
+            model = jax.tree_util.tree_map_with_path(
+                lambda path, x, mask=mask, planet=planet: (
+                    jnp.where(
+                        mask.reshape((mask.size,) + (1,) * (jnp.ndim(x) - 1)),
+                        x,
+                        jax.lax.stop_gradient(x),
+                    )
+                    if _system_batch._per_planet(path, x, planet.n_planets)
+                    else x
+                ),
+                planet.physical_model,
+            )
             values.append(
                 model.spec_flux_density(wavelength_nm, **geometry)
                 if flux
                 else model.contrast_at_time(wavelength_nm=wavelength_nm, **geometry)
             )
             start = stop
-        return (
+        result = (
             jnp.concatenate(values, axis=0) if values else jnp.empty((0, time_d.size))
         )
+        return jnp.where(self.valid[:, None], result, 0.0) * self.valid[:, None]
 
+    @_batch_method
     def contrasts(
         self, wavelength_nm: Array, time_d: Array, *, ephemeris=None
     ) -> Array:
@@ -321,6 +494,7 @@ class System(eqx.Module):
         """
         return self._photometry(wavelength_nm, time_d, ephemeris)
 
+    @_batch_method
     def contrast_cube(
         self, wavelengths_nm: Array, time_d: Array, *, ephemeris=None
     ) -> Array:
@@ -336,6 +510,7 @@ class System(eqx.Module):
             jnp.asarray(wavelengths_nm)
         )
 
+    @_batch_method
     def bin_mean_contrast_cube(
         self,
         centers_nm: Array,
@@ -390,6 +565,7 @@ class System(eqx.Module):
             ratio,
         )
 
+    @_batch_method
     def band_contrasts(
         self, bandpass: Bandpass, time_d: Array, *, n_nodes: int = 4, ephemeris=None
     ) -> Array:
@@ -435,6 +611,7 @@ class System(eqx.Module):
         )[0]
         return numerator / denominator[None, :]
 
+    @_batch_method
     def bin_mean_planet_flux_densities(
         self,
         centers_nm: Array,
@@ -467,6 +644,7 @@ class System(eqx.Module):
             max_knots=_model_max_knots(centers_nm, widths_nm, knots),
         )
 
+    @_batch_method
     def planet_flux_densities(
         self, wavelength_nm: Array, time_d: Array, *, ephemeris=None
     ) -> Array:
@@ -476,6 +654,7 @@ class System(eqx.Module):
         """
         return self._photometry(wavelength_nm, time_d, ephemeris, flux=True)
 
+    @_batch_method
     def alpha_dMag(
         self, time_d: Array, *, wavelength_nm: float = 600.0, ephemeris=None
     ) -> tuple[Array, Array]:
@@ -488,11 +667,18 @@ class System(eqx.Module):
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
         alpha = eph.separation_arcsec(eph.scene_planet_indices, 0)
         contrast = self.contrasts(jnp.asarray(wavelength_nm), time_d, ephemeris=eph)
-        dMag = -2.5 * jnp.log10(contrast + jnp.finfo(contrast.dtype).tiny)
+        safe = jnp.where(self.valid[:, None], contrast, 1.0)
+        dMag = -2.5 * jnp.log10(safe + jnp.finfo(contrast.dtype).tiny)
         return alpha, dMag
 
     def __repr__(self) -> str:
         """Tree-shaped summary: star + planets + disk + midplane geometry."""
+        if self.batch_shape:
+            return (
+                f"System(batch_shape={self.batch_shape}, capacity={self.capacity}, "
+                f"star={type(self.star).__name__}, "
+                f"model={type(self.planets[0].physical_model).__name__})"
+            )
         n_modules = len(self.planets)
         n_total = self.n_planets
         lines = [

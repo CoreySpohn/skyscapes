@@ -854,6 +854,7 @@ def test_classical_builder_traced_order_and_ownership():
         ".planets[0].physical_model.Ag",
         ".midplane_inc_deg",
         ".midplane_pa_deg",
+        ".valid",
     }
     assert len(mass_distance_paths) == 3
     assert all(path.startswith(".dynamics.") for path in mass_distance_paths)

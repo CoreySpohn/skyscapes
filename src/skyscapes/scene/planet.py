@@ -12,7 +12,7 @@ class Planet(eqx.Module):
     """Planet radii and their physical model, with no dynamical state.
 
     Attributes:
-        Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
+        Rp_Rearth: Planet radius [Earth radii], shape ``B + (K,)``.
         physical_model: Spectral physics (reflectivity / emission).
     """
 
@@ -22,7 +22,7 @@ class Planet(eqx.Module):
     @property
     def n_planets(self) -> int:
         """Number of planets ``K`` carried by this photometric module."""
-        return int(self.Rp_Rearth.shape[0])
+        return int(self.Rp_Rearth.shape[-1])
 
     def __repr__(self) -> str:
         """Nested summary of radii and the physical model."""
