@@ -186,3 +186,38 @@ def test_occurrence_grid_total_and_mass_radius_inverse(tables):
     assert isinstance(radius_to_mass(radius_jax), jax.Array)
     np.testing.assert_allclose(mass_jax, radius_to_mass(radius), rtol=1e-12)
     np.testing.assert_allclose(jax.jit(mass_to_radius)(mass_jax), radius, rtol=1e-9)
+
+
+def test_mass_radius_traces_and_branch_derivatives():
+    """Fails if tracing enters NumPy or an inactive Jovian power poisons AD.
+
+    Round trips allow 16 float64 eps (power-law rounding); central differences
+    use h=1e-5*x away from kinks and allow 1e-8 relative truncation error.
+    At the two genuine slope discontinuities only finite one-sided AD is
+    defined. Float32 round trips allow 16 eps for the same power operations.
+    """
+    mass = jnp.geomspace(0.01, 131.6, 100)
+    np.testing.assert_allclose(
+        radius_to_mass(mass_to_radius(mass)), mass, rtol=16 * np.finfo(float).eps
+    )
+    for fn, breaks in (
+        (mass_to_radius, [2.04, 131.6]),
+        (radius_to_mass, [float(mass_to_radius(2.04))]),
+    ):
+        points = jnp.asarray([b * factor for b in breaks for factor in (0.99, 1, 1.01)])
+        derivative = jax.jit(jax.vmap(jax.grad(fn)))(points)
+        assert np.isfinite(derivative).all()
+        smooth = np.asarray(points)[np.arange(points.size) % 3 != 1]
+        step = smooth * 1e-5
+        difference = (fn(smooth + step) - fn(smooth - step)) / (2 * step)
+        np.testing.assert_allclose(
+            np.asarray(derivative)[np.arange(points.size) % 3 != 1],
+            difference,
+            rtol=1e-8,
+        )
+    with jax.enable_x64(False):
+        values = jnp.array([0.1, 2.04, 10.0, 131.6], dtype=jnp.float32)
+        result = jax.jit(jax.vmap(lambda x: radius_to_mass(mass_to_radius(x))))(values)
+        assert result.dtype == jnp.float32
+        assert np.isfinite(jax.jit(jax.vmap(jax.grad(radius_to_mass)))(values)).all()
+        np.testing.assert_allclose(result, values, rtol=16 * np.finfo(np.float32).eps)

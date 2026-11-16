@@ -32,11 +32,56 @@ _R_AT_BREAK_2 = _R_AT_BREAK_1 * (_M_BREAK_2 / _M_BREAK_1) ** 0.589
 
 
 def mass_to_radius(mass_Mearth):
+    """Chen and Kipping (2017) mean piecewise power law, in Earth units.
+
+    R = 1.008 M**0.279 below M=2.04; the continuous next branch has
+    exponent 0.589 up to M=131.6; the Jovian exponent is -0.044.
+    Positive masses are supported. The common invertible range with
+    radius_to_mass is 0 < M <= 131.6 (0 < R <= 14.312546...); above it
+    radii overlap the lower-mass branch, so no single-valued inverse exists.
+    The genuine slope jumps have finite one-sided autodiff derivatives
+    (the lower branch at equality), not a classical derivative at the kink.
+    Returns a JAX array, preserving floating input precision under tracing.
+    """
+    m = jnp.asarray(mass_Mearth)
+    # Keep the inactive negative power away from zero (including padded mass).
+    giant = jnp.where(m > _M_BREAK_2, m, _M_BREAK_2)
+    return jnp.where(
+        m <= _M_BREAK_1,
+        1.008 * m**0.279,
+        jnp.where(
+            m <= _M_BREAK_2,
+            _R_AT_BREAK_1 * (m / _M_BREAK_1) ** 0.589,
+            _R_AT_BREAK_2 * (giant / _M_BREAK_2) ** -0.044,
+        ),
+    )
+
+
+def radius_to_mass(radius_Rearth):
+    """Lower-mass inverse of Chen and Kipping (2017), in Earth units.
+
+    Exactly inverts mass_to_radius up to floating-point rounding on
+    0 < R <= R(131.6), with 0 < M <= 131.6. The Jovian branch overlaps
+    this radius interval and cannot be inverted without an extra branch
+    label. Above R(131.6) this function extrapolates the 0.589 branch;
+    that extrapolation is not an inverse. At R(2.04) autodiff returns the
+    finite lower-branch derivative; the physical relation has a slope jump.
+    Pure JAX, including float32 jit/vmap/grad; no inactive negative power.
+    """
+    r = jnp.asarray(radius_Rearth)
+    return jnp.where(
+        r <= _R_AT_BREAK_1,
+        (r / 1.008) ** (1 / 0.279),
+        _M_BREAK_1 * (r / _R_AT_BREAK_1) ** (1 / 0.589),
+    )
+
+
+def _host_mass_to_radius(mass_Mearth):
     """Mean radius in Earth radii of a planet, Chen and Kipping (2017) forecaster.
 
-    Accepts NumPy or JAX input and returns the same kind.
+    Host-only table construction preserves the tabulated extrapolation.
     """
-    xp = jnp if isinstance(mass_Mearth, jax.Array) else np
+    xp = np
     m = xp.asarray(mass_Mearth, float)
     return xp.where(
         m <= _M_BREAK_1,
@@ -49,14 +94,14 @@ def mass_to_radius(mass_Mearth):
     )
 
 
-def radius_to_mass(radius_Rearth):
+def _host_radius_to_mass(radius_Rearth):
     """Mass in Earth masses for a radius, the inverse of `mass_to_radius`.
 
     The Jovian branch is not monotonic; like the generator this returns the
     lower-mass branch, and it is only used for radius bin edges below 10 Earth radii.
-    Accepts NumPy or JAX input and returns the same kind.
+    Host-only table construction preserves the tabulated extrapolation.
     """
-    xp = jnp if isinstance(radius_Rearth, jax.Array) else np
+    xp = np
     r = xp.asarray(radius_Rearth, float)
     mass = (r / 1.008) ** (1.0 / 0.279)
     mass = xp.where(
@@ -132,7 +177,7 @@ def _build_grid():
 
     m_edge_t = np.sort(
         np.concatenate(
-            [_mid_and_edges(m_bins), [_M_SPLIT], radius_to_mass(r_bound[1:-1])]
+            [_mid_and_edges(m_bins), [_M_SPLIT], _host_radius_to_mass(r_bound[1:-1])]
         )
     )
     m_mid_t = np.sqrt(m_edge_t[:-1] * m_edge_t[1:])
@@ -140,8 +185,14 @@ def _build_grid():
         np.concatenate([_mid_and_edges(r_bins), [_R_SPLIT], r_bound[1:-1]])
     )
     r_mid_t = np.sqrt(r_edge_t[:-1] * r_edge_t[1:])
-    r_mid_alt, r_edge_alt = mass_to_radius(m_mid_t), mass_to_radius(m_edge_t)
-    m_mid_alt, m_edge_alt = radius_to_mass(r_mid_t), radius_to_mass(r_edge_t)
+    r_mid_alt, r_edge_alt = (
+        _host_mass_to_radius(m_mid_t),
+        _host_mass_to_radius(m_edge_t),
+    )
+    m_mid_alt, m_edge_alt = (
+        _host_radius_to_mass(r_mid_t),
+        _host_radius_to_mass(r_edge_t),
+    )
     a_edge = np.sort(
         np.concatenate([_mid_and_edges(a_bins), np.unique(a_bound[:, 1:-1].ravel())])
     )
@@ -192,8 +243,8 @@ def _build_grid():
         if m_vec[i] > _M_SPLIT:
             cv_m[:, i] = occ_m_pad[:, i + pad]
 
-    new_r_pad = np.log(mass_to_radius(m_vec_p))
-    new_m_pad = np.log(radius_to_mass(r_vec_p))
+    new_r_pad = np.log(_host_mass_to_radius(m_vec_p))
+    new_m_pad = np.log(_host_radius_to_mass(r_vec_p))
     sig_r = np.where(
         m_vec_p <= np.log(2.04),
         np.log(1.0403),
@@ -252,7 +303,7 @@ def _bin_ids(shape, r_bound, a_bound, m_edge, m_mid, a_mid):
     A bin is one radius bin of ``planetbins.dat`` crossed with one stellar-flux
     sub-bin; a cell belongs to the bin whose edges contain its midpoint.
     """
-    m_bound = radius_to_mass(r_bound)
+    m_bound = _host_radius_to_mass(r_bound)
     m_bound[-1] = m_edge[-1]
     bin_id = np.full(shape, -1, np.int64)
 
@@ -355,10 +406,13 @@ class PlanetTypes(eqx.Module):
 
     def geometric_albedo(self, type_index, wavelength_nm):
         """Geometric albedo of the planets of `type_index` at one wavelength."""
-        spectra = jax.vmap(lambda y: jnp.interp(wavelength_nm, self.wavelength_nm, y))(
-            self.albedo
-        )
-        return spectra[type_index]
+        return _type_albedo(type_index, wavelength_nm, self.wavelength_nm, self.albedo)
+
+
+def _type_albedo(type_index, wavelength_nm, wavelengths_nm, spectrum):
+    """Shared indexed spectrum interpolation for tables and scene reflectors."""
+    spectra = jax.vmap(lambda y: jnp.interp(wavelength_nm, wavelengths_nm, y))(spectrum)
+    return spectra[jnp.asarray(type_index, jnp.int32)]
 
 
 def load_planet_types():

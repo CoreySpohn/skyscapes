@@ -180,6 +180,38 @@ def _uniform_between(key, lo, hi, shape):
     return lo + jax.random.uniform(key, shape) * (hi - lo)
 
 
+def _type_weights(types, config, a_scaled, radius):
+    """Unnormalized eligible-type probabilities shared by both population laws."""
+    r_lo = jnp.where(
+        types.earth_candidate,
+        types.radius_min_Rearth / jnp.sqrt(a_scaled)[..., None],
+        types.radius_min_Rearth,
+    )
+    fits = (
+        (r_lo < radius[..., None])
+        & (radius[..., None] < types.radius_max_Rearth)
+        & (types.a_min_AU < a_scaled[..., None])
+        & (a_scaled[..., None] < types.a_max_AU)
+    )
+    any_candidate = jnp.any(fits & types.earth_candidate, axis=-1, keepdims=True)
+    p_eec = config.earth_candidate_probability
+    scale = jnp.where(types.earth_candidate, p_eec, 1.0 - p_eec)
+    weight = types.weight * fits * jnp.where(any_candidate, scale, 1.0)
+    return weight
+
+
+def _sample_types(key, types, config, a_scaled, radius, present):
+    """Select types with the replica fallback and cumulative tie convention."""
+    weight = _type_weights(types, config, a_scaled, radius)
+    cum = jnp.cumsum(weight, axis=-1)
+    draw = jax.random.uniform(key, radius.shape) * cum[..., -1]
+    type_index = jnp.sum(cum < draw[..., None], axis=-1)
+    fallback = types.names.index("Mars") if "Mars" in types.names else 0
+    type_index = jnp.where(cum[..., -1] > 0.0, type_index, fallback)
+    type_index = jnp.where(present, jnp.minimum(type_index, len(types.names) - 1), 0)
+    return type_index
+
+
 def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=None):
     """Draw one world's planets for the stars with the given luminosities and masses.
 
@@ -363,27 +395,7 @@ def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=N
     key, k_type = jax.random.split(key)
     a_scaled = fields["a_AU"] / sqrt_l[:, None]
     radius = fields["radius_Rearth"]
-    r_lo = jnp.where(
-        types.earth_candidate[None, None, :],
-        types.radius_min_Rearth[None, None, :] / jnp.sqrt(a_scaled)[..., None],
-        types.radius_min_Rearth[None, None, :],
-    )
-    fits = (
-        (r_lo < radius[..., None])
-        & (radius[..., None] < types.radius_max_Rearth[None, None, :])
-        & (types.a_min_AU[None, None, :] < a_scaled[..., None])
-        & (a_scaled[..., None] < types.a_max_AU[None, None, :])
-    )
-    any_candidate = jnp.any(fits & types.earth_candidate, axis=-1, keepdims=True)
-    p_eec = config.earth_candidate_probability
-    scale = jnp.where(types.earth_candidate, p_eec, 1.0 - p_eec)
-    weight = types.weight * fits * jnp.where(any_candidate, scale, 1.0)
-    cum = jnp.cumsum(weight, axis=-1)
-    draw = jax.random.uniform(k_type, radius.shape) * cum[..., -1]
-    type_index = jnp.sum(cum < draw[..., None], axis=-1)
-    fallback = types.names.index("Mars") if "Mars" in types.names else 0
-    type_index = jnp.where(cum[..., -1] > 0.0, type_index, fallback)
-    type_index = jnp.where(present, jnp.minimum(type_index, len(types.names) - 1), 0)
+    type_index = _sample_types(k_type, types, config, a_scaled, radius, present)
 
     def masked(name):
         return jnp.where(present, fields[name], 0.0)

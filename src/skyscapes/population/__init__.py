@@ -2,6 +2,9 @@
 
 Public API:
 
+- :class:`HostStars`, :class:`OccurrencePopulation` -- independent per-star
+  Poisson occurrence, its mark sampler, and its reference-measure density.
+
 - :func:`load_occurrence_table`, :class:`OccurrenceTable` -- the Dulz et al. (2020)
   nominal occurrence grid in (scaled semi-major axis, mass) cells.
 - :func:`load_planet_types`, :class:`PlanetTypes` -- planet types and their
@@ -22,6 +25,7 @@ from ._draw import (
     earth_like,
     sky_elements,
 )
+from ._process import HostStars, OccurrencePopulation
 from ._tables import (
     OccurrenceTable,
     PlanetTypes,
@@ -33,6 +37,8 @@ from ._tables import (
 )
 
 __all__ = [
+    "HostStars",
+    "OccurrencePopulation",
     "OccurrenceTable",
     "PlanetPopulation",
     "PlanetTypes",
