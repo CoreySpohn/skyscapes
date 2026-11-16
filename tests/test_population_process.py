@@ -528,3 +528,51 @@ def test_capacity_keeps_innermost(process):
     np.testing.assert_array_equal(
         b.dynamics.planets.mass_Msun[..., 0], a.dynamics.planets.mass_Msun[..., 0]
     )
+
+
+def test_mark_coordinate_round_trip(process, marks):
+    """Fails if rebuilding loses mass, type, epoch state, or batch axes.
+
+    State and density allow 256 ulps at unit scale (256*eps*(1+abs(x)))
+    for Cartesian/frame transformations; integer labels and masks are exact.
+    Scalar, vector and two-axis batches use the same eight sampled marks.
+    """
+    host, scenes = marks
+    small = jax.tree.map(lambda x: x[:8], scenes)
+
+    @eqx.filter_jit
+    def rebuild(scene):
+        return process.mark_build(host, *process.mark_read(scene))
+
+    for shape in ((), (8,), (2, 4)):
+        scene = (
+            jax.tree.map(lambda x: x[0], small)
+            if not shape
+            else jax.tree.map(
+                lambda x, shape=shape: x.reshape((*shape, *x.shape[1:])), small
+            )
+        )
+        rebuilt = rebuild(scene)
+        assert rebuilt.batch_shape == shape
+        for before, after in zip(
+            jax.tree.leaves(scene), jax.tree.leaves(rebuilt), strict=True
+        ):
+            if jnp.issubdtype(jnp.asarray(before).dtype, jnp.inexact):
+                np.testing.assert_allclose(
+                    before,
+                    after,
+                    rtol=256 * np.finfo(float).eps,
+                    atol=256 * np.finfo(float).eps,
+                )
+            else:
+                np.testing.assert_array_equal(before, after)
+        np.testing.assert_allclose(
+            process.mark_log_density(scene, host),
+            process.mark_log_density(rebuilt, host),
+            rtol=0,
+            atol=256 * np.finfo(float).eps,
+        )
+        padded = eqx.tree_at(lambda s: s.valid, scene, jnp.zeros_like(scene.valid))
+        read = eqx.filter_jit(process.mark_read)(padded)
+        assert all(np.isfinite(x).all() for x in jax.tree.leaves(read))
+        assert read[2].dtype == jnp.int32

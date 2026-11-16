@@ -348,6 +348,76 @@ class OccurrencePopulation(eqx.Module):
             )
         )(marks)
 
+    def mark_read(self, system):
+        """Read a capacity-one scene as (relative orbit, mass_Mearth, label).
+
+        Each returned scalar leaf has the scene batch shape B; the orbit
+        quaternion has shape B + (4,). The state is at scene time zero.
+        Padded entries have finite filler, zero mass and int32 label zero.
+        """
+        if system.capacity != 1:
+            raise ValueError("mark_read requires capacity one")
+
+        def one(scene):
+            r, v, mass = _relative_orbits(scene)
+            orbit = FrameOrbit.from_cartesian(
+                r[0],
+                v[0],
+                mu_AU3_per_d2=GM_SUN_AU3_PER_D2 * (scene.star_mass_Msun + mass[0]),
+            )
+            label = scene.planets[0].physical_model.type_index[0]
+            return (
+                orbit,
+                mass[0] / _MASS_RATIO,
+                jnp.where(scene.valid[0], label, 0).astype(jnp.int32),
+            )
+
+        read = one
+        for _ in system.batch_shape:
+            read = jax.vmap(read)
+        return read(system)
+
+    def mark_build(self, star, orbit, mass_Mearth, label):
+        """Build capacity-one scenes with batch B from star-relative marks.
+
+        star is a HostStars of length one; orbit scalar leaves, mass_Mearth
+        and int32 label have shape B. The supplied orbit epoch is in days
+        from the scene epoch. Stellar and planet masses set the dynamics rate;
+        radius and reflection use the same relations as mark_sample.
+        """
+        if star.star_id.shape != (1,):
+            raise ValueError("mark_build requires HostStars of length one")
+        mass_Mearth, label = jnp.asarray(mass_Mearth), jnp.asarray(label, jnp.int32)
+        if mass_Mearth.shape != orbit.a_AU.shape or label.shape != orbit.a_AU.shape:
+            raise ValueError("orbit, mass_Mearth and label must share batch shape B")
+        host = jax.tree.map(lambda x: x[0], star.star)
+
+        def one(relative, mass, index):
+            marks = dict(relative.to_classical(), mass=mass, type_index=index)
+            scene = self._system(
+                jax.tree.map(lambda x: x[None], marks),
+                jnp.ones(1, bool),
+                host,
+                star.mass_Msun[0],
+                star.dist_pc[0],
+            )
+            # For one planet the relative and Jacobi states coincide. Keeping
+            # the supplied frame avoids an unnecessary inverse-angle round trip.
+            mu = GM_SUN_AU3_PER_D2 * (star.mass_Msun[0] + mass * _MASS_RATIO)
+            relative = eqx.tree_at(
+                lambda o: o.n_rad_per_d, relative, jnp.sqrt(mu / relative.a_AU**3)
+            )
+            return eqx.tree_at(
+                lambda s: s.dynamics.orbits,
+                scene,
+                jax.tree.map(lambda x: x[None], relative),
+            )
+
+        build = one
+        for _ in orbit.a_AU.shape:
+            build = jax.vmap(build)
+        return build(orbit, mass_Mearth, label)
+
     def _density_one(self, system, luminosity):
         r, v, mass_sun = _relative_orbits(system)
         mu = GM_SUN_AU3_PER_D2 * (system.star_mass_Msun + mass_sun)
