@@ -4,13 +4,27 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from astropy.io import fits
-from hwoutils.constants import J2000_JD, G, Mearth2kg, Msun2kg, d2s, yr2s
-from orbix.equations.orbit import AB_matrices, mean_motion
-from orbix.equations.propagation import single_r_v
-from orbix.kepler import solve_trig
+from hwoutils.constants import J2000_JD, Mearth2kg, Msun2kg, d2s, yr2s
+from orbix.system import FrameOrbit, enclosed_mu
 
 from skyscapes.io import from_exovista
 from skyscapes.io.exovista import _exovista_to_orbix
+
+
+def _relative_state(elements, planet_mass_Msun, elapsed_days):
+    """Star-relative (3, T) position [AU] and velocity [AU/day] from elements."""
+    a, e, inc, node, peri, anomaly = (jnp.atleast_1d(x) for x in elements)
+    orbit = FrameOrbit.from_classical(
+        a,
+        e,
+        inc,
+        node,
+        peri,
+        anomaly,
+        mu_AU3_per_d2=enclosed_mu(1.0, jnp.atleast_1d(planet_mass_Msun)),
+    )
+    r, v = orbit.at(elapsed_days)
+    return np.asarray(r[0]).T, np.asarray(v[0]).T
 
 
 @pytest.fixture(params=[(38.0, 63.0, 41.0, 27.0), (127.0, 213.0, 302.0, 231.0)])
@@ -25,10 +39,7 @@ def known_orbit_file(tmp_path, request):
     inc, node, peri, anomaly = np.deg2rad(request.param)
     elapsed_years = np.array([0.0, 0.125, 0.25, 0.5, 0.75], dtype=np.float32)
     elapsed_days = jnp.asarray(elapsed_years.astype(np.float64)) * (yr2s / d2s)
-    n = mean_motion(a, G * Msun2kg)
-    sin_e, cos_e = solve_trig(anomaly + n * elapsed_days, e)
-    A, B = AB_matrices(a, e, inc, node, peri)
-    r, v = single_r_v(A, B, e, sin_e, cos_e, n)
+    r, v = _relative_state((a, e, inc, node, peri, anomaly), 0.0, elapsed_days)
 
     wavelengths = np.array([0.5, 0.6, 0.7], dtype=np.float32)
     primary = fits.PrimaryHDU(wavelengths)
@@ -120,16 +131,12 @@ def test_exovista_recovers_known_elements_with_stellar_reflex(
     Both layouts store float32 barycentric positions and velocities.
     """
     path, expected = known_orbit_file
-    a, e, inc, node, peri, anomaly = expected
     mass_earth = 317.8
     mass_ratio = mass_earth * Mearth2kg / Msun2kg
     with fits.open(path, mode="update") as hdul:
         star, planet = hdul[5].data, hdul[6].data
         elapsed_days = jnp.asarray(planet[:, 0].astype(np.float64)) * (yr2s / d2s)
-        n = mean_motion(a, G * (Msun2kg + mass_earth * Mearth2kg))
-        sin_e, cos_e = solve_trig(anomaly + n * elapsed_days, e)
-        A, B = AB_matrices(a, e, inc, node, peri)
-        r, v = single_r_v(A, B, e, sin_e, cos_e, n)
+        r, v = _relative_state(expected, mass_ratio, elapsed_days)
         # ExoVista's generate_scene.py writes barycentric west/north/toward
         # states for both bodies, including the star's reflex motion.
         relative_r = np.stack([-r[0], r[1], -r[2]], axis=-1)
