@@ -89,17 +89,11 @@ def test_contrast_matches_planck_ratio(temperature, wavelength, x64):
             radiance * np.pi * (15.7 * 6.3781e6 / (dist_pc * 3.085677581491367e16)) ** 2
         )
         np.testing.assert_allclose(flux, expected_flux, rtol=rtol, atol=0)
-        legacy = model._photon_flux_density(wl, rp, dist_pc=dist_pc)
-        if not x64 and temperature == 100.0:
-            # Preserve the legacy method's existing overflow behavior.
-            np.testing.assert_array_equal(legacy, 0.0)
-        else:
-            np.testing.assert_allclose(
-                flux,
-                jnp.broadcast_to(legacy[:, None], (1, 2)),
-                rtol=rtol,
-                atol=0,
-            )
+        direct = model._photon_flux_density(wl, rp, dist_pc=dist_pc)
+        np.testing.assert_allclose(direct, expected_flux, rtol=rtol, atol=0)
+        np.testing.assert_allclose(
+            flux, jnp.broadcast_to(direct[:, None], (1, 2)), rtol=rtol, atol=0
+        )
     assert Rearth2m == pytest.approx(6.3781e6, rel=1e-4)
     assert Rsun2m == pytest.approx(6.957e8, rel=1e-4)
 
@@ -138,18 +132,33 @@ def test_contrast_without_star_raises():
 
 
 def test_system_contrast_cube_stacks_wavelengths():
-    """Fails if flux dispatch changes thermal flux, contrasts, or cube axes."""
+    """Check disk dilution and Planck contrast from SI primitives.
+
+    The 1e-14 relative tolerance permits float64 algebraic rounding.
+    """
     system = _system(BlackbodyPhysicalModel(teff_K=jnp.array([1560.0])))
-    # Recorded from the same fixture before native thermal flux dispatch.
+    wavelength_m = 4400.0e-9
+    x = H * C / (wavelength_m * KB)
+    area = (15.7 * Rearth2m / STAR.radius_m) ** 2
+    expected_contrast = area * np.expm1(x / STAR.teff_K) / np.expm1(x / 1560.0)
+    expected_flux = (
+        2
+        * np.pi
+        * C
+        * 1e-9
+        / wavelength_m**4
+        / np.expm1(x / 1560.0)
+        * (15.7 * Rearth2m / (107.5 * 3.085677581491367e16)) ** 2
+    )
     np.testing.assert_allclose(
         system.contrasts(jnp.asarray(4400.0), jnp.array([0.0, 100.0])),
-        [[0.0004148682341547496, 0.0004148682341547496]],
+        [[expected_contrast, expected_contrast]],
         rtol=1e-14,
         atol=0,
     )
     np.testing.assert_allclose(
         system.planet_flux_densities(jnp.asarray(4400.0), jnp.array([0.0, 100.0])),
-        [[0.641929514134305, 0.641929514134305]],
+        [[expected_flux, expected_flux]],
         rtol=1e-14,
         atol=0,
     )
@@ -198,17 +207,25 @@ def test_temperature_gradient_matches_finite_difference():
 @pytest.mark.parametrize(
     "temperature, wavelength", [(1560.0, 4400.0), (150.0, 10000.0)]
 )
-@pytest.mark.parametrize("quantity", ["log_contrast", "planet_flux", "star_flux"])
+@pytest.mark.parametrize(
+    "quantity", ["log_contrast", "log_contrast_star", "planet_flux", "star_flux"]
+)
 def test_temperature_gradient_is_finite_in_single_precision(
     temperature, wavelength, quantity
 ):
-    """Fails if unbalanced Planck factors corrupt float32 gradients or HVPs."""
+    """Check both temperature derivatives and curvature against SI primitives.
+
+    Float64 arithmetic supplies the reference; float32 rounding permits
+    1e-5 relative value, 1e-4 gradient, and 1e-3 curvature error.
+    """
 
     def reference(teff):
         x = H * C / (wavelength * 1e-9 * KB)
-        if quantity == "log_contrast":
+        if quantity in ("log_contrast", "log_contrast_star"):
             area = (15.7 * 6.3781e6 / STAR.radius_m) ** 2
-            return jnp.log(area * jnp.expm1(x / STAR.teff_K) / jnp.expm1(x / teff[0]))
+            planet_t = temperature if quantity == "log_contrast_star" else teff[0]
+            star_t = teff[0] if quantity == "log_contrast_star" else STAR.teff_K
+            return jnp.log(area * jnp.expm1(x / star_t) / jnp.expm1(x / planet_t))
         radius = STAR.radius_m if quantity == "star_flux" else 15.7 * 6.3781e6
         dilution = (radius / (107.5 * 3.085677581491367e16)) ** 2
         return (
@@ -221,8 +238,11 @@ def test_temperature_gradient_is_finite_in_single_precision(
             / jnp.expm1(x / teff[0])
         )
 
+    variable_temperature = (
+        STAR.teff_K if quantity == "log_contrast_star" else temperature
+    )
     with jax.enable_x64(True):
-        t64 = jnp.array([temperature], jnp.float64)
+        t64 = jnp.array([variable_temperature], jnp.float64)
         expected_value = reference(t64)
         expected_grad, expected_hvp = jax.jvp(
             jax.grad(reference), (t64,), (jnp.ones_like(t64),)
@@ -235,14 +255,23 @@ def test_temperature_gradient_is_finite_in_single_precision(
         rp = jnp.array([15.7], jnp.float32)
 
         def observable(teff):
-            model = BlackbodyPhysicalModel(teff_K=teff)
+            model = BlackbodyPhysicalModel(
+                teff_K=jnp.array([temperature])
+                if quantity == "log_contrast_star"
+                else teff
+            )
             if quantity == "planet_flux":
                 return model._photon_flux_density(wl, rp, dist_pc=107.5)[0]
             if quantity == "star_flux":
                 star = BlackbodyStar(teff[0], STAR.radius_m)
                 return star.photon_flux_density(wl, time_d, dist_pc=107.5)
+            star = (
+                BlackbodyStar(teff[0], STAR.radius_m)
+                if quantity == "log_contrast_star"
+                else STAR
+            )
             out = model.contrast_at_time(
-                *args, wl, rp, time_d=time_d, star=STAR, dist_pc=107.5
+                *args, wl, rp, time_d=time_d, star=star, dist_pc=107.5
             )
             return jnp.log(out)[0, 0]
 
@@ -250,7 +279,7 @@ def test_temperature_gradient_is_finite_in_single_precision(
             grad, hvp = jax.jvp(jax.grad(observable), (teff,), (jnp.ones_like(teff),))
             return observable(teff), grad, hvp
 
-        t0 = jnp.array([temperature], jnp.float32)
+        t0 = jnp.array([variable_temperature], jnp.float32)
         for evaluate in (derivatives, jax.jit(derivatives)):
             value, auto, curvature = evaluate(t0)
             assert auto.dtype == curvature.dtype == jnp.float32

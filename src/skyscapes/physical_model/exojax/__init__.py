@@ -46,7 +46,6 @@ from .components import (
 from .emission import (
     DEFAULT_EMISSION_MOLECULES,
     ExoJaxEmissionModel,
-    brightness_temperature,
     build_exojax_emission_engines,
     log_gravity_cgs_from_mass_radius,
 )
@@ -103,7 +102,6 @@ __all__ = [
     "StratosphericPeakMmr",
     "TroposphericMmr",
     "WavelengthDependentSurface",
-    "brightness_temperature",
     "build_bulk_prebuilt",
     "build_exojax_emission_engines",
     "build_exojax_engines",

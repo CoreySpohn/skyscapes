@@ -28,7 +28,6 @@ from skyscapes.physical_model.exojax import (
     EmittingSurface,
     MolecularSpecies,
     PolynomialTPProfile,
-    brightness_temperature,
     build_exojax_emission_engines,
     log_gravity_cgs_from_mass_radius,
 )
@@ -368,17 +367,6 @@ def test_gray_species_column_opacity_has_independent_cgs_normalization():
     ).dtau_total
     expected = 1.0e-24 * 0.01 * 1.0e6 / (44.0 * ATOMIC_MASS_G * 10**2.99)
     np.testing.assert_allclose(np.sum(dtau, axis=0), expected, rtol=3e-8)
-
-
-@vv.case("planet-thermal-emission", "code-verification")
-def test_brightness_temperature_inverts_planck():
-    """The brightness temperature of a Planck flux is its temperature."""
-    nu = np.linspace(540.0, 2500.0, 50)
-    for temperature in (100.0, 288.0, 1500.0):
-        flux = _blackbody_flux_cgs(nu, temperature)
-        np.testing.assert_allclose(
-            brightness_temperature(nu, flux), temperature, rtol=1e-10
-        )
 
 
 @vv.case("planet-thermal-emission", "code-verification")

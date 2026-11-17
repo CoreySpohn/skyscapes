@@ -20,9 +20,9 @@ import jax
 import jax.numpy as jnp
 from hwoutils.constants import pc2m, rad2arcsec
 from hwoutils.conversions import jy_to_photons_per_nm_per_m2
+from hwoutils.planck import planck_photon_radiance
 from jaxtyping import Array
 
-from .._planck import _planck_photon_flux
 from .spots import StarSpots
 
 
@@ -128,7 +128,11 @@ class BlackbodyStar(AbstractStar):
         The result has wavelength_nm's shape. ``time_d`` is part of
         the AbstractStar interface but ignored here.
         """
-        return _planck_photon_flux(wavelength_nm, self.teff_K, self.radius_m, dist_pc)
+        return (
+            planck_photon_radiance(wavelength_nm, self.teff_K)
+            * jnp.pi
+            * (self.radius_m / (dist_pc * pc2m)) ** 2
+        )
 
     def __repr__(self) -> str:
         """Compact one-line summary of temperature and radius."""

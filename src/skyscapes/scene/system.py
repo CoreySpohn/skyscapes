@@ -605,8 +605,8 @@ class System(eqx.Module):
         photon flux must be nonzero.
         """
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
-        centers = jnp.atleast_1d((bandpass.low_nm + bandpass.high_nm) / 2)
-        widths = jnp.atleast_1d(bandpass.high_nm - bandpass.low_nm)
+        centers = jnp.atleast_1d(bandpass.band.center_nm)
+        widths = jnp.atleast_1d(bandpass.band.width_nm)
         knots = bandpass.wavelength_nm
         if self.star.quadrature_knots_nm is not None:
             knots = jnp.sort(jnp.concatenate((knots, self.star.quadrature_knots_nm)))

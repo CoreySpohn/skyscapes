@@ -3,7 +3,7 @@
 import equinox as eqx
 import jax.numpy as jnp
 import numpy as np
-from hwoutils.spectral import bin_mean
+from hwoutils.spectral import Band, bin_mean
 from jaxtyping import Array
 
 
@@ -18,13 +18,18 @@ class Bandpass(eqx.Module):
     Attributes:
         wavelength_nm: Sorted wavelength knots [nm], shape ``(N,)``, N >= 2.
         transmission: Photon-counting response at each knot, shape ``(N,)``.
+        band: Concrete wavelength-domain geometry in nm.
     """
 
-    wavelength_nm: Array = eqx.field(converter=jnp.asarray)
-    transmission: Array = eqx.field(converter=jnp.asarray)
+    wavelength_nm: Array
+    transmission: Array
 
-    def __check_init__(self):
+    band: Band = eqx.field(static=True, init=False)
+
+    def __post_init__(self):
         """Reject tables without a finite, positive-area interpolation domain."""
+        self.wavelength_nm = jnp.asarray(self.wavelength_nm)
+        self.transmission = jnp.asarray(self.transmission)
         wave, response = self.wavelength_nm, self.transmission
         if wave.ndim != 1 or wave.size < 2 or response.shape != wave.shape:
             raise ValueError("Bandpass tables must share shape (N,) with N >= 2.")
@@ -45,6 +50,8 @@ class Bandpass(eqx.Module):
             raise ValueError(
                 "Bandpass transmission must be finite, nonnegative and nonzero."
             )
+
+        self.band = Band(wave[0], wave[-1])
 
     @classmethod
     def tophat(cls, center_nm: float, width_nm: float) -> "Bandpass":
@@ -80,8 +87,8 @@ class Bandpass(eqx.Module):
         density. Two-node quadrature integrates each linear response
         segment's area and quadratic first moment exactly.
         """
-        centers = jnp.atleast_1d((self.low_nm + self.high_nm) / 2)
-        widths = jnp.atleast_1d(self.high_nm - self.low_nm)
+        centers = jnp.atleast_1d(self.band.center_nm)
+        widths = jnp.atleast_1d(self.band.width_nm)
         return bin_mean(
             lambda w: w,
             centers,

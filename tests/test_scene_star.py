@@ -164,22 +164,6 @@ def test_blackbody_star_repr(blackbody_star):
     assert repr(blackbody_star) == ("BlackbodyStar(Teff=5.77e+03 K, radius=6.96e+08 m)")
 
 
-def test_blackbody_star_matches_exojax(blackbody_star):
-    """The cgs wavenumber energy spectrum converts to the same photon flux."""
-    pytest.importorskip("exojax")
-    from skyscapes.physical_model.exojax.emission import planck_flux_cgs
-
-    wavelength_nm = jnp.geomspace(100.0, 100_000.0, 100)
-    surface_flux_cgs = planck_flux_cgs(1e7 / wavelength_nm, blackbody_star.teff_K)
-    # erg/s/cm^2 to W/m^2, then |d(wavenumber_cm)/d(wavelength_nm)|.
-    surface_flux_per_nm = surface_flux_cgs * 1e-3 * 1e7 / wavelength_nm**2
-    dilution = (blackbody_star.radius_m / (10.0 * pc2m)) ** 2
-    photon_energy = h * c / (wavelength_nm * 1e-9)
-    expected = surface_flux_per_nm * dilution / photon_energy
-    actual = blackbody_star.photon_flux_density(wavelength_nm, 0.0, dist_pc=10.0)
-    assert jnp.allclose(actual, expected, rtol=1e-6, atol=0.0)
-
-
 @pytest.mark.parametrize("dtype", [jnp.float32, jnp.float64])
 def test_blackbody_star_jit_and_vmap(blackbody_star, dtype):
     """Compiled and wavelength-vectorized spectra match eager evaluation."""

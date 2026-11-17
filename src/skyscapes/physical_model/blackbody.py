@@ -1,10 +1,11 @@
 """Blackbody thermal emission: a planet that shines by its own temperature."""
 
+import jax
 import jax.numpy as jnp
-from hwoutils.constants import Rearth2m, c, h, k_B, nm2um, um2m
+from hwoutils.constants import Rearth2m, pc2m
+from hwoutils.planck import planck_photon_radiance
 from jaxtyping import Array
 
-from .._planck import _planck_photon_flux
 from .._repr import fmt_scalar_or_array
 from .base import AbstractPhysicalModel
 
@@ -44,13 +45,10 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
         Returns shape ``(K,)`` directly, or ``(K, T)`` when
         ``phase_angle_rad`` supplies the time axis.
         """
-        flux = _planck_photon_flux(
-            wavelength_nm,
-            self.teff_K,
-            Rp_Rearth,
-            dist_pc,
-            radius_unit_m=Rearth2m,
-            stable_wien=phase_angle_rad is not None,
+        flux = (
+            planck_photon_radiance(wavelength_nm, self.teff_K)
+            * jnp.pi
+            * (Rp_Rearth * Rearth2m / (dist_pc * pc2m)) ** 2
         )
         if phase_angle_rad is None:
             return flux
@@ -101,12 +99,14 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
             raise ValueError("BlackbodyPhysicalModel needs the host star")
         if isinstance(star, BlackbodyStar):
             # Cancel the shared dilution before division to retain numerical range.
-            wavelength_um = jnp.asarray(wavelength_nm) * nm2um
-            c2 = h * c / (k_B * um2m)
-            x_star = c2 / (wavelength_um * star.teff_K)
-            x_planet = c2 / (wavelength_um * self.teff_K)
             area = (Rp_Rearth * Rearth2m / star.radius_m) ** 2
-            ratio = (area * jnp.expm1(x_star) / jnp.expm1(x_planet))[:, None]
+            planet_radiance = planck_photon_radiance(wavelength_nm, self.teff_K)
+            star_radiance = planck_photon_radiance(wavelength_nm, star.teff_K)
+            # A common scale cancels, keeping reciprocal adjoints representable.
+            scale = jax.lax.stop_gradient(star_radiance)
+            ratio = (area * (planet_radiance / scale) / (star_radiance / scale))[
+                :, None
+            ]
             return ratio * jnp.ones_like(phase_angle_rad)
         flux = self._photon_flux_density(
             wavelength_nm,

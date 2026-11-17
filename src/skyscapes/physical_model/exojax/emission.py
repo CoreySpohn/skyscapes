@@ -48,7 +48,17 @@ from exojax.utils.constants import m_u
 from exojax.utils.grids import wavenumber_grid
 from hwoutils import constants as const
 from hwoutils.constants import G_si, Mearth2kg, Rearth2AU, Rearth2m
-from hwoutils.conversions import jy_to_photons_per_nm_per_m2, nm_to_wavenumber_cm
+from hwoutils.conversions import (
+    cgs_per_wavenumber_to_w_per_nm_per_m2,
+    jy_to_photons_per_nm_per_m2,
+    nm_to_wavenumber_cm,
+    photons_per_nm_per_m2_to_jy,
+    photons_per_nm_per_m2_to_w_per_nm_per_m2,
+    w_per_nm_per_m2_to_cgs_per_wavenumber,
+    w_per_nm_per_m2_to_photons_per_nm_per_m2,
+    wavenumber_cm_to_nm,
+)
+from hwoutils.planck import brightness_temperature, planck_photon_radiance
 from jaxtyping import Array
 
 from ..base import AbstractPhysicalModel
@@ -67,11 +77,6 @@ from .physical_model import _species_at_planet
 # Optical depth of the opaque ground layer; exp(-tau / mu) underflows to
 # exactly zero for every quadrature angle.
 _GROUND_OPTICAL_DEPTH = 1.0e3
-
-# ExoJAX works in cgs; hwoutils is SI.
-_M_TO_CM = 100.0
-_J_S_TO_ERG_S = 1.0e7  # J and J/K to erg and erg/K
-_ERG_PER_S_CM2_PER_HZ_TO_JY = 1.0e-3 / const.Jy
 
 DEFAULT_EMISSION_MOLECULES: tuple[str, ...] = ("H2O", "CO2", "O3", "CH4", "N2O")
 
@@ -100,33 +105,7 @@ def _top_of_atmosphere_flux(
 def log_gravity_cgs_from_mass_radius(mass_Mearth: Array, radius_Rearth: Array) -> Array:
     """Log10 surface gravity [cm/s^2] from mass and radius in Earth units."""
     g_si = G_si * mass_Mearth * Mearth2kg / (radius_Rearth * Rearth2m) ** 2
-    return jnp.log10(g_si * _M_TO_CM)
-
-
-def planck_flux_cgs(nu_cm: Array, temperature_K: Array) -> Array:
-    """``pi B_nu(T)`` [erg/s/cm^2/cm^-1] at wavenumber ``nu_cm`` [cm^-1].
-
-    Uses hwoutils constants. ``temperature_K`` of shape ``S`` gives an
-    output of shape ``S + nu_cm.shape``.
-    """
-    h_cgs = const.h * _J_S_TO_ERG_S
-    c_cgs = const.c * _M_TO_CM
-    k_cgs = const.k_B * _J_S_TO_ERG_S
-    x = h_cgs * c_cgs * nu_cm / (k_cgs * jnp.asarray(temperature_K)[..., None])
-    return 2.0 * jnp.pi * h_cgs * c_cgs**2 * nu_cm**3 / jnp.expm1(x)
-
-
-def brightness_temperature(nu_cm: Array, flux_cgs: Array) -> Array:
-    """Brightness temperature [K] of a flux ``pi B_nu`` [erg/s/cm^2/cm^-1].
-
-    Inverts the Planck function; ``flux_cgs`` and ``nu_cm`` broadcast.
-    """
-    h_cgs = const.h * _J_S_TO_ERG_S
-    c_cgs = const.c * _M_TO_CM
-    k_cgs = const.k_B * _J_S_TO_ERG_S
-    intensity = flux_cgs / jnp.pi
-    x = 2.0 * h_cgs * c_cgs**2 * nu_cm**3 / intensity
-    return h_cgs * c_cgs * nu_cm / k_cgs / jnp.log1p(x)
+    return jnp.log10(g_si * (const.nm2cm / const.nm2m))
 
 
 def build_exojax_emission_engines(
@@ -469,7 +448,7 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         pressure = jnp.asarray(self.rt_engine.pressure)
         temperature = self.layer_temperature(k)
         gravity = 10.0 ** self.log_gravity_cgs[k]
-        k_cgs = const.k_B * _J_S_TO_ERG_S
+        k_cgs = const.k_B * const.J2erg
         density = pressure * 1.0e6 / (k_cgs * temperature)
         dz = (
             k_cgs
@@ -514,14 +493,18 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         if self.cia:
             dtau = dtau + self._cia_optical_depth(k)
 
-        source = planck_flux_cgs(self.nu_grid, temperature)
-        ground = self.surface.compute_emissivity(k) * planck_flux_cgs(
-            self.nu_grid, self.surface.temperature_K[k]
+        wavelength_nm = wavenumber_cm_to_nm(self.nu_grid)
+        # The ground is an extra optically thick emitting bottom layer.
+        temperatures = jnp.concatenate(
+            [temperature, jnp.atleast_1d(self.surface.temperature_K[k])]
         )
-        # The ground is an extra optically thick bottom layer whose source
-        # is the (emissivity-weighted) Planck flux.
+        photons = planck_photon_radiance(wavelength_nm, temperatures[..., None])
+        source = jnp.pi * w_per_nm_per_m2_to_cgs_per_wavenumber(
+            photons_per_nm_per_m2_to_w_per_nm_per_m2(photons, wavelength_nm),
+            wavelength_nm,
+        )
+        source = source.at[-1].multiply(self.surface.compute_emissivity(k))
         dtau = jnp.concatenate([dtau, jnp.full((1, self.n_nu), _GROUND_OPTICAL_DEPTH)])
-        source = jnp.concatenate([source, ground[None, :]])
         return _top_of_atmosphere_flux(
             dtau, source, self.rt_engine.mus, self.rt_engine.weights
         )
@@ -537,7 +520,14 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
 
     def brightness_temperature(self) -> Array:
         """Brightness temperature [K] on ``nu_grid``, shape ``(K, n_nu)``."""
-        return brightness_temperature(self.nu_grid, self.emergent_flux())
+        wavelength_nm = wavenumber_cm_to_nm(self.nu_grid)
+        radiance_w = cgs_per_wavenumber_to_w_per_nm_per_m2(
+            self.emergent_flux() / jnp.pi, wavelength_nm
+        )
+        return brightness_temperature(
+            wavelength_nm,
+            w_per_nm_per_m2_to_photons_per_nm_per_m2(radiance_w, wavelength_nm),
+        )
 
     def flux_density_jy(
         self, wavelength_nm: Array, Rp_Rearth: Array, distance_pc: Array
@@ -568,9 +558,12 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
             ],
             axis=1,
         )  # (W, K)
-        f_nu_cgs = at_wl / (const.c * _M_TO_CM)
+        wavelength = jnp.atleast_1d(wavelength_nm)[:, None]
+        photons = w_per_nm_per_m2_to_photons_per_nm_per_m2(
+            cgs_per_wavenumber_to_w_per_nm_per_m2(at_wl, wavelength), wavelength
+        )
         rp_over_d = (Rp_Rearth * Rearth2AU) / (distance_pc * const.pc2AU)
-        return f_nu_cgs * _ERG_PER_S_CM2_PER_HZ_TO_JY * rp_over_d**2
+        return photons_per_nm_per_m2_to_jy(photons, wavelength) * rp_over_d**2
 
     def _photon_flux_density(
         self,
