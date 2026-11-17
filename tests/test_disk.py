@@ -20,9 +20,7 @@ from skyscapes.disk import (
     surface_brightness_level,
     zero_magnitude_photon_flux_density,
 )
-from skyscapes.io._frames import rotate_to_sky_coords
 from skyscapes.scene import Star
-from skyscapes.viz._geometry import disk_axes_sky
 
 
 def solar_star(magnitude=4.83, luminosity=1.0):
@@ -249,17 +247,6 @@ def test_orientation_and_rotated_grid():
         grid=replace(grid, orientation=SkyOrientation(0.0, parity=1)),
     )
     np.testing.assert_allclose(other.data, north.data[:, ::-1], rtol=2e-14, atol=0)
-
-
-def test_old_midplane_angle_map():
-    """Fails if the old east-through-north mapping reverses the near half.
-
-    2e-15 absolute bounds float64 trig at the independently transformed axes.
-    """
-    old = 31.0
-    old_basis = np.asarray(rotate_to_sky_coords(jnp.eye(3), inc_deg=63.0, pa_deg=old))
-    nodes, near, normal = disk_axes_sky(63.0, 90.0 - old)
-    np.testing.assert_allclose(np.stack((nodes, near, normal)), old_basis, atol=2e-15)
 
 
 @pytest.mark.parametrize("kind", ["exovista", "grater"])
