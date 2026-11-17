@@ -44,8 +44,8 @@ from orbix.equations.orbit import state_vector_to_keplerian
 from orbix.system import FrameOrbit, phase_angle_rad
 
 from ..disk import ExovistaDisk
-from ..habitable_zone import HZ_INNER_EEID, HZ_OUTER_EEID
 from ..physical_model import GridPhysicalModel, TimeSeriesPhysicalModel
+from ..population import earth_like
 from ..scene import Planet, Star, StarSpots, System
 from ..scene.system import _known_planet_mass
 
@@ -472,18 +472,11 @@ def _earth_like_planet_indices_from_hdul(hdul: fits.HDUList) -> list[int]:
     planet_extensions = _body_extensions(hdul, star_ext)
     star_luminosity_Lsun = hdul[star_ext].header.get("LSTAR", 1.0)
 
-    earth_indices: list[int] = []
-    for i, ext in enumerate(planet_extensions):
-        planet_header = hdul[ext].header
-        a_AU = planet_header.get("A", 1.0)
-        radius_Rearth = planet_header.get("R", 1.0)
-        a_scaled = a_AU / np.sqrt(star_luminosity_Lsun)
-        lower_r = 0.8 / np.sqrt(a_scaled)
-        if (HZ_INNER_EEID <= a_scaled < HZ_OUTER_EEID) and (
-            lower_r <= radius_Rearth < 1.4
-        ):
-            earth_indices.append(i)
-    return earth_indices
+    headers = [hdul[ext].header for ext in planet_extensions]
+    a_AU = np.array([h.get("A", 1.0) for h in headers], dtype=float)
+    radius_Rearth = np.array([h.get("R", 1.0) for h in headers], dtype=float)
+    mask = np.asarray(earth_like(a_AU, radius_Rearth, star_luminosity_Lsun))
+    return [int(i) for i in np.flatnonzero(mask)]
 
 
 def get_earth_like_planet_indices(fits_file: str) -> list[int]:
