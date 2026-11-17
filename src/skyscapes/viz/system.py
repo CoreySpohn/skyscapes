@@ -44,7 +44,7 @@ def _planet_style(styles, label):
             entry = None
         if entry is not None:
             return entry["color"], entry.get("marker", "o")
-    return eyepiece().role("planet"), "o"
+    return eyepiece().style.role("planet"), "o"
 
 
 def _star_color(styles):
@@ -54,7 +54,7 @@ def _star_color(styles):
             return styles["star"]["color"]
         except KeyError:
             pass
-    return eyepiece().role("star")
+    return eyepiece().style.role("star")
 
 
 def _positions_xyz_AU(system, time_d):
@@ -111,7 +111,7 @@ def plot_system(
             epoch. Required when the system has planets.
         view: ``"sky"`` or ``"side"``.
         ax: Axes to draw into. None creates a new figure and axes.
-        styles: Optional ``eyepiece.SourceStyles`` declaring ``"star"``
+        styles: Optional ``eyepiece.style.SourceStyles`` declaring ``"star"``
             and the planet labels, so this view matches every other figure
             of the document. Names it does not declare take the brand
             roles (star yellow, planet cyan).
@@ -173,8 +173,8 @@ def plot_system(
 
     scatters, lines, texts = [], [], []
     extent = [0.0]
-    scenery = eyepiece().neutral(0.5)
-    disk_color = eyepiece().role("disk")
+    scenery = eyepiece().style.neutral(0.5)
+    disk_color = eyepiece().style.role("disk")
 
     if view == "sky":
         to_2d = _sky_projector(dist_pc)
@@ -304,7 +304,7 @@ def _side_projector(minor):
 
 def _side_furniture(ax, half, lines, labels):
     """The sky plane and the observer arrow of a side view."""
-    scenery = eyepiece().neutral(0.45)
+    scenery = eyepiece().style.neutral(0.45)
     (plane,) = ax.plot([0.0, 0.0], [-half, half], color=scenery, lw=0.8, ls=":")
     plane.set_gid("sky_plane")
     lines.append(plane)
@@ -312,7 +312,7 @@ def _side_furniture(ax, half, lines, labels):
         ax,
         (-0.95 * half, 0.85 * half),
         (-1.25 * half, 0.85 * half),
-        color=eyepiece().neutral(0.75),
+        color=eyepiece().style.neutral(0.75),
         gid="observer",
     )
     texts = [arrow.artist]
@@ -321,7 +321,7 @@ def _side_furniture(ax, half, lines, labels):
             -1.1 * half,
             0.93 * half,
             "to observer",
-            color=eyepiece().neutral(0.75),
+            color=eyepiece().style.neutral(0.75),
             ha="center",
             va="bottom",
             fontsize="small",

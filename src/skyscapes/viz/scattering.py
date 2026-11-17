@@ -126,7 +126,7 @@ def plot_scattering_angle(
     k_in_2d, k_out_2d = _plane(k_in, k_out)
     if ax is None:
         _, ax = plt.subplots(layout="constrained")
-    color = eyepiece().role("disk") if grain_color is None else grain_color
+    color = eyepiece().style.role("disk") if grain_color is None else grain_color
     drawing = ScatteringAngle(
         ax,
         grain_color=color,

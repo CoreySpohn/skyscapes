@@ -1,7 +1,7 @@
 """Disk views: the projected surface-brightness map and the geometry behind it.
 
 ``plot_disk_radiance`` evaluates a disk's ``photon_radiance`` once and draws
-it with ``eyepiece.imshow_log`` on an arcsec grid, RA offset increasing to
+it with ``eyepiece.plot.imshow_log`` on an arcsec grid, RA offset increasing to
 the left. ``plot_disk_geometry`` draws the same disk edge-on to the reader:
 its midplane at the inclination, the observer's direction, one sightline
 through one grain, and the scattering angle at that grain. The two are
@@ -132,7 +132,7 @@ def plot_disk_radiance(
             hole) render at the floor color.
         vmax: Top of the colormap. None takes the image peak; pin it to
             the brightest frame when the result will be updated.
-        colorbar: Forwarded to ``eyepiece.imshow_log``.
+        colorbar: Forwarded to ``eyepiece.plot.imshow_log``.
         show: The overlays to draw over the image, as in the geometry
             views; None draws every one the inputs allow. Part names:
             ``"star"``, ``"outline"`` (the truncation rings) and
@@ -227,7 +227,7 @@ def plot_disk_radiance(
     half_y = 0.5 * ny * float(pixel_scale_arcsec)
     peak = float(np.nanmax(image)) if vmax is None else float(vmax)
     floor = peak / float(dynamic_range) if peak > 0.0 else 1e-30
-    base = ep.imshow_log(
+    base = ep.plot.imshow_log(
         image,
         ax=ax,
         extent=extent if extent is not None else (half_x, -half_x, -half_y, half_y),
@@ -246,7 +246,7 @@ def plot_disk_radiance(
 
     artists = dict(base.artists)
     star = ax.scatter(
-        [0.0], [0.0], s=90, marker="*", color=eyepiece().role("star"), zorder=5
+        [0.0], [0.0], s=90, marker="*", color=eyepiece().style.role("star"), zorder=5
     )
     star.set_gid("star")
     scatters = [star]
@@ -260,7 +260,7 @@ def plot_disk_radiance(
     if can_outline:
         for name in ("inner", "outer"):
             (line,) = ax.plot(
-                [], [], color=eyepiece().role("disk"), lw=0.9, ls="--", alpha=0.9
+                [], [], color=eyepiece().style.role("disk"), lw=0.9, ls="--", alpha=0.9
             )
             line.set_gid(f"disk/{name}")
             rings.append(line)
@@ -273,7 +273,7 @@ def plot_disk_radiance(
             [0.0],
             s=70,
             facecolors="none",
-            edgecolors=eyepiece().neutral(0.6),
+            edgecolors=eyepiece().style.neutral(0.6),
             linewidths=1.4,
             zorder=6,
         )
@@ -353,8 +353,8 @@ class _GeometryPanel:
         self.grain_radius = grain_radius
         self.thickness = thickness
         self.big = radii[1]
-        disk_color = eyepiece().role("disk")
-        scenery = eyepiece().neutral(0.45)
+        disk_color = eyepiece().style.role("disk")
+        scenery = eyepiece().style.neutral(0.45)
         R = self.big
 
         (self.plane,) = ax.plot([0.0, 0.0], [-1.2 * R, 1.2 * R], color=scenery)
@@ -369,7 +369,7 @@ class _GeometryPanel:
         self.near.set_gid("disk/near")
         (self.far,) = ax.plot([], [], color=disk_color, lw=2.4)
         self.far.set_gid("disk/far")
-        (self.sightline,) = ax.plot([], [], color=eyepiece().neutral(0.6), lw=0.9)
+        (self.sightline,) = ax.plot([], [], color=eyepiece().style.neutral(0.6), lw=0.9)
         self.sightline.set_gid("sightline")
         self.path = None
         if thickness is not None:
@@ -378,7 +378,12 @@ class _GeometryPanel:
         (self.forward,) = ax.plot([], [], color=scenery, lw=0.9, ls="--")
         self.forward.set_gid("forward")
         self.star = ax.scatter(
-            [0.0], [0.0], s=170, marker="*", color=eyepiece().role("star"), zorder=5
+            [0.0],
+            [0.0],
+            s=170,
+            marker="*",
+            color=eyepiece().style.role("star"),
+            zorder=5,
         )
         self.star.set_gid("star")
         self.grain = ax.scatter(
@@ -386,18 +391,22 @@ class _GeometryPanel:
         )
         self.grain.set_gid("grain")
         self.incident = Arrow(
-            ax, (0, 0), (0, 0), color=eyepiece().role("star"), gid="incident"
+            ax, (0, 0), (0, 0), color=eyepiece().style.role("star"), gid="incident"
         )
         self.scattered = Arrow(ax, (0, 0), (0, 0), color=disk_color, gid="scattered")
         self.observer = Arrow(
             ax,
             (-1.05 * R, 0.95 * R),
             (-1.4 * R, 0.95 * R),
-            color=eyepiece().neutral(0.75),
+            color=eyepiece().style.neutral(0.75),
             gid="observer",
         )
-        self.theta = AngleArc(ax, color=eyepiece().role("text"), gid="scattering_angle")
-        self.incl_arc = AngleArc(ax, color=eyepiece().neutral(0.75), gid="inclination")
+        self.theta = AngleArc(
+            ax, color=eyepiece().style.role("text"), gid="scattering_angle"
+        )
+        self.incl_arc = AngleArc(
+            ax, color=eyepiece().style.neutral(0.75), gid="inclination"
+        )
         self.texts = [self.observer.artist, self.incident.artist]
         self.texts += [self.scattered.artist, self.theta.text, self.incl_arc.text]
         self.near_label = self.far_label = None
@@ -412,7 +421,7 @@ class _GeometryPanel:
                 -1.22 * R,
                 1.0 * R,
                 observer_text,
-                color=eyepiece().neutral(0.75),
+                color=eyepiece().style.neutral(0.75),
                 fontsize="small",
                 ha="center",
                 va="bottom",

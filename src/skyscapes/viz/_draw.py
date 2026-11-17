@@ -256,12 +256,12 @@ class ScatteringAngle:
         def gid(name):
             return f"{gid_prefix}/{name}" if gid_prefix else name
 
-        scenery = eyepiece().neutral(0.55)
+        scenery = eyepiece().style.neutral(0.55)
         self.incident = Arrow(
             ax,
             (-1.0, 0.0),
             (0.0, 0.0),
-            color=eyepiece().role("star"),
+            color=eyepiece().style.role("star"),
             gid=gid("incident"),
         )
         self.outgoing = Arrow(
@@ -270,7 +270,7 @@ class ScatteringAngle:
         (self.forward,) = ax.plot([], [], color=scenery, lw=0.9, ls="--")
         self.forward.set_gid(gid("forward"))
         self.theta = AngleArc(
-            ax, color=eyepiece().role("text"), gid=gid("scattering_angle")
+            ax, color=eyepiece().style.role("text"), gid=gid("scattering_angle")
         )
         self.alpha = AngleArc(ax, color=scenery, gid=gid("illumination_angle"))
         self.grain = ax.scatter(
@@ -279,7 +279,7 @@ class ScatteringAngle:
         self.grain.set_gid(gid("grain"))
         small = {"fontsize": value_size, "transform": ax.transAxes, "ha": "left"}
         self.theta_value = ax.text(
-            0.04, 0.96, "", color=eyepiece().role("text"), va="top", **small
+            0.04, 0.96, "", color=eyepiece().style.role("text"), va="top", **small
         )
         self.theta_value.set_gid(gid("scattering_angle/value"))
         self.alpha_value = ax.text(0.04, 0.04, "", color=scenery, va="bottom", **small)
@@ -288,18 +288,28 @@ class ScatteringAngle:
         self.star = self.observer = None
         if star:
             self.star = ax.scatter(
-                [0.0], [0.0], s=190, marker="*", color=eyepiece().role("star"), zorder=5
+                [0.0],
+                [0.0],
+                s=190,
+                marker="*",
+                color=eyepiece().style.role("star"),
+                zorder=5,
             )
             self.star.set_gid(gid("star"))
         if observer:
             self.observer = ax.scatter(
-                [0.0], [0.0], s=45, marker="s", color=eyepiece().neutral(0.8), zorder=6
+                [0.0],
+                [0.0],
+                s=45,
+                marker="s",
+                color=eyepiece().style.neutral(0.8),
+                zorder=6,
             )
             self.observer.set_gid(gid("observer"))
         self.labels = {}
         if labels:
             for name, text, color in (
-                ("incident", "starlight", eyepiece().role("star")),
+                ("incident", "starlight", eyepiece().style.role("star")),
                 ("scattered", "to observer", grain_color),
                 ("forward", "forward", scenery),
             ):
@@ -395,7 +405,7 @@ class GrainInset:
         inset.set_xticks([])
         inset.set_yticks([])
         for spine in inset.spines.values():
-            spine.set_color(eyepiece().neutral(0.35))
+            spine.set_color(eyepiece().style.neutral(0.35))
             spine.set_linewidth(0.8)
         self.drawing = ScatteringAngle(
             inset, grain_color=grain_color, gid_prefix=gid_prefix, values=values

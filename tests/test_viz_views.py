@@ -236,7 +236,7 @@ def test_view_returns_plot_result_on_the_supplied_axes(name):
 
     assert isinstance(result, eyepiece.PlotResult)
     assert result.ax is ax
-    assert set(result.artists) <= eyepiece.ARTIST_KEYS
+    assert set(result.artists) <= eyepiece.plot.ARTIST_KEYS
     for artist in flat(result.artists):
         # A colorbar is not an artist: its own axes is the thing to place.
         owner = artist.ax if hasattr(artist, "mappable") else artist.axes
@@ -287,7 +287,7 @@ def test_colors_follow_the_active_mode_at_call_time():
 
 def test_source_styles_color_the_planets():
     """A declared cast colors the planets it names; others take the role."""
-    styles = eyepiece.SourceStyles(["star", "b", "c"])
+    styles = eyepiece.style.SourceStyles(["star", "b", "c"])
     gids = by_gid(viz.plot_system(make_system(), 0.0, styles=styles))
     from matplotlib.colors import to_rgba
 
