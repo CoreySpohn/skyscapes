@@ -8,7 +8,6 @@ Public API:
 - :mod:`skyscapes.disk` -- extended-source surface brightness maps.
 - :mod:`skyscapes.physical_model` -- planet photon flux and planet-to-star
   contrast (reflective, emissive, and additive models).
-- :mod:`skyscapes.background` -- field-of-view background sources (zodi, ...).
 - :mod:`skyscapes.io` -- data loaders (e.g. ExoVista FITS).
 - :mod:`skyscapes.habitable_zone` -- habitable-zone edges for a host star.
 - :mod:`skyscapes.population` -- planet occurrence tables and population draws.
@@ -20,7 +19,7 @@ the top level, so common flows can write
 ``from skyscapes import Scene, System, from_exovista``.
 Mix-and-match construction goes through the submodules
 (``skyscapes.disk.ExovistaDisk``, ``skyscapes.physical_model.GridPhysicalModel``,
-``skyscapes.background.AYOZodi``, ...).
+``zodi.jax.AYOZodi``, ...).
 """
 
 from __future__ import annotations
@@ -31,7 +30,6 @@ except ImportError:
     __version__ = "unknown"
 
 from . import (
-    background,
     datasets,
     disk,
     habitable_zone,
@@ -51,7 +49,6 @@ __all__ = [
     "Scene",
     "System",
     "__version__",
-    "background",
     "datasets",
     "disk",
     "from_exovista",

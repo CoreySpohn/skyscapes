@@ -1,6 +1,6 @@
 """Shared formatting helpers for hierarchical ``__repr__`` methods.
 
-Each leaf class in skyscapes (atmospheres, disks, stars, zodi) defines
+Each leaf class in skyscapes (atmospheres, disks, stars) defines
 its own multi-line ``__repr__``; aggregator classes (Planet, System,
 Scene) use :func:`indent` to nest the children one level deeper. The
 result is a tree-shaped summary that lets you call ``repr(scene)`` in

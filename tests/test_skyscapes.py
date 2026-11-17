@@ -17,7 +17,6 @@ def test_submodules_importable():
         "scene",
         "disk",
         "physical_model",
-        "background",
         "io",
         "habitable_zone",
     ):

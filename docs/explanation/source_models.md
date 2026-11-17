@@ -18,12 +18,12 @@ elements; the header midplane maps to astronomical `(90 + PA) % 360`.
 
 ```mermaid
 flowchart TB
-    Scene["<b>Scene</b><br/>= System + optional Zodi"]
+    Scene["<b>Scene</b><br/>= System + optional local zodi"]
     System["<b>System</b><br/>= Star + Planets + dynamics + optional Disk"]
     Star["<b>Star</b><br/>(AbstractStar)"]
     Planet["<b>Planet</b><br/>Rp + physical_model"]
     Disk["<b>AbstractDisk</b><br/>circumstellar dust"]
-    Zodi["<b>Zodi</b><br/>(union of background variants)"]
+    Zodi["<b>zodi.jax.AbstractLocalZodi</b><br/>(local-zodi models)"]
     PM["<b>AbstractPhysicalModel</b><br/>photon flux / contrast"]
 
     Scene --> System
@@ -41,7 +41,7 @@ Interface sketch; the concrete classes are defined in the package.
 ```python notest
 class Scene(eqx.Module):
     system: System  # required
-    zodi: Zodi | None = None  # optional
+    zodi: AbstractLocalZodi | None = None  # optional
 
 
 class System(eqx.Module):
@@ -381,9 +381,8 @@ loop.
 ## Zodi (backgrounds)
 
 Backgrounds are anything in the field of view that is not part of the
-planetary system itself. Currently zodiacal light is the only kind
-modeled; the `skyscapes.background` submodule will grow to host
-extragalactic background, scattered starlight, etc. as needed.
+planetary system itself. Local zodiacal-light models are supplied by
+`zodi.jax` and attached to the skyscapes `Scene`.
 
 Three variants implement `AbstractLocalZodi.photon_radiance(wavelength_nm, *,
 ecliptic_latitude_deg, solar_longitude_deg)`, returning ph/s/m^2/nm/sr:
@@ -397,7 +396,7 @@ ecliptic_latitude_deg, solar_longitude_deg)`, returning ph/s/m^2/nm/sr:
 Requires user-supplied zodiacal flux arrays and a configured system.
 
 ```python notest
-from skyscapes.background import AYOZodi, LeinertZodi, PrecomputedZodi
+from zodi.jax import AYOZodi, LeinertZodi, PrecomputedZodi
 import jax.numpy as jnp
 
 # Sandbox / AYO-compatible
@@ -417,14 +416,14 @@ zodi = PrecomputedZodi(
 scene = Scene(system=system, zodi=zodi)
 ```
 
-The `Zodi` union type covers all three:
+The `AbstractLocalZodi` base class covers all three:
 
 ```python
-from skyscapes.background import Zodi
+from zodi.jax import AbstractLocalZodi
 
 
-def my_function(zodi: Zodi):
-    # accepts any concrete Zodi variant
+def my_function(zodi: AbstractLocalZodi):
+    # accepts any local-zodi model
     ...
 ```
 

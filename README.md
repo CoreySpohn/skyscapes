@@ -64,7 +64,7 @@ science products.
 ```mermaid
 flowchart LR
     src["External sources<br/>ExoVista · spectra · catalogues"]
-    sky(["<b>skyscapes</b><br/>Scene · System · Star · Planet · Disk · Zodi · PhysicalModel"])
+    sky(["<b>skyscapes</b><br/>Scene · System · Star · Planet · Disk · PhysicalModel"])
     opt["<b>optixstuff</b><br/>OpticalPath"]
     cor["<b>coronagraphoto</b><br/>2D image simulation"]
     jet["<b>jaxedith</b><br/>Scalar count rates"]
@@ -79,7 +79,7 @@ flowchart LR
 ## Architecture
 
 A `Scene` composes a `System` (star + planets + optional disk) with an
-optional `Zodi` background:
+optional `zodi.jax.AbstractLocalZodi` background:
 
 - **Stars** — `Star` (wavelength- and time-dependent spectrum, ExoVista-
   backed) and `FlatStar` (constant-flux sandbox). Imported stars retain
@@ -96,7 +96,7 @@ optional `Zodi` background:
   and `SumPhysicalModel` (additive radiative contributions).
 - **Disks** — `ExovistaDisk`, `ExovistaParametricDisk`, `GraterDisk`,
   `CompositeDisk`.
-- **Backgrounds** — `AYOZodi` (AYO-convention defaults), `LeinertZodi`
+- **Backgrounds** (from `zodi.jax`) — `AYOZodi` (AYO-convention defaults), `LeinertZodi`
   (full position-dependent Leinert+1998), `PrecomputedZodi` (cached
   flux array).
 
@@ -168,7 +168,7 @@ from hwoutils.constants import Mearth2kg, Msun2kg
 from skyscapes import Scene, System
 from skyscapes.scene import FlatStar, Planet
 from skyscapes.physical_model import LambertianPhysicalModel
-from skyscapes.background import AYOZodi
+from zodi.jax import AYOZodi
 
 star = FlatStar(
     flux_phot_per_nm_m2=1e9,

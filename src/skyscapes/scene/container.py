@@ -21,9 +21,9 @@ the corresponding source types are implemented.
 from __future__ import annotations
 
 import equinox as eqx
+from zodi.jax import AbstractLocalZodi
 
 from .._repr import indent
-from ..background import AbstractLocalZodi
 from .system import System
 
 
@@ -33,7 +33,7 @@ class Scene(eqx.Module):
     Attributes:
         system: The planetary system (star + planets + disk).
         zodi: Optional zodiacal-light background (any
-            :mod:`skyscapes.background` zodi variant).
+            :mod:`zodi.jax` zodi variant).
     """
 
     system: System

@@ -31,7 +31,7 @@ products.
 ```mermaid
 flowchart LR
     src["External sources<br/>ExoVista · spectra · catalogues"]
-    sky(["<b>skyscapes</b><br/>Scene · System · Star · Planet · Disk · Zodi · PhysicalModel"])
+    sky(["<b>skyscapes</b><br/>Scene · System · Star · Planet · Disk · PhysicalModel"])
     opt["<b>optixstuff</b><br/>OpticalPath"]
     cor["<b>coronagraphoto</b><br/>2D image simulation"]
     jet["<b>jaxedith</b><br/>Scalar count rates"]
@@ -62,7 +62,7 @@ scene = Scene(system=system)
 
 Building one from scratch is a little more involved -- a `Scene`
 composes a `System` (star + planets + optional disk) with an optional
-`Zodi`. `Planet` owns its radii and physical model, while
+`zodi.jax.AbstractLocalZodi`. `Planet` owns its radii and physical model, while
 `System.dynamics` owns masses, orbital state, and observer distance:
 
 ```python
@@ -72,7 +72,7 @@ from hwoutils.constants import Mearth2kg, Msun2kg
 from skyscapes import Scene, System
 from skyscapes.scene import FlatStar, Planet
 from skyscapes.physical_model import LambertianPhysicalModel
-from skyscapes.background import AYOZodi
+from zodi.jax import AYOZodi
 
 star = FlatStar(
     flux_phot_per_nm_m2=1e9,
@@ -125,8 +125,8 @@ pip install skyscapes
   `ExoJaxEmissionModel` ([how-to](how-to/thermal_emission)),
   `GridPhysicalModel`, `BlackbodyPhysicalModel`, `SumPhysicalModel`, ...;
   all expose observer photon flux through `photon_flux_density`.
-- [`skyscapes.background`](explanation/source_models) -- `Zodi`
-  (union), `AYOZodi`, `LeinertZodi`, `PrecomputedZodi`
+- [`zodi.jax`](explanation/source_models) -- `AbstractLocalZodi`
+  (base class), `AYOZodi`, `LeinertZodi`, `PrecomputedZodi`
 
 **Views** (the `viz` extra, `pip install 'skyscapes[viz]'`):
 - [`skyscapes.viz`](explanation/scene_geometry) -- `plot_system`,

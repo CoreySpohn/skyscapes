@@ -1,6 +1,6 @@
 """The local zodiacal-light geometry: an observer inside the Solar-system cloud.
 
-``LeinertZodi`` reads its brightness off two angles of the look direction,
+``zodi.jax.LeinertZodi`` reads its brightness off two angles of the look direction,
 its ecliptic latitude and its helio-ecliptic longitude difference from the
 Sun. This view draws what those two inputs mean: the Sun, the observer
 inside the cloud, the half-ray the brightness integrates along, and, for

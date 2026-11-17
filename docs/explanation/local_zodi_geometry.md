@@ -17,7 +17,7 @@ is constant in any straightforward way, and the two are easy to confuse
 because they coincide along the ecliptic plane but diverge elsewhere on
 the sky. This page walks through the computation of those two angles
 using `orbix.observatory.ObservatoryL2Halo`, the common ways the geometry
-goes wrong, and the conventions `skyscapes.background.LeinertZodi`
+goes wrong, and the conventions `zodi.jax.LeinertZodi`
 expects.
 
 ## The two Leinert inputs
@@ -43,7 +43,7 @@ Requires user-supplied target coordinates, epochs, and wavelengths.
 
 ```python notest
 from orbix.observatory import ObservatoryL2Halo
-from skyscapes.background import LeinertZodi
+from zodi.jax import LeinertZodi
 
 obs = ObservatoryL2Halo.from_default()
 zodi = LeinertZodi()
