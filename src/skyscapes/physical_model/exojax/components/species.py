@@ -54,7 +54,7 @@ class MolecularSpecies(eqx.Module):
         molmass: Molar mass [g/mol].
         opa: Opacity engine. Either an ExoJAX ``OpaPremodit`` (for
             HITRAN-backed line-list molecules) or
-            :class:`~skyscapes.physical_model.exojax.o3_chappuis.O3ChappuisOpacity`
+            :class:`~skyscapes.physical_model.exojax.psg_xs.PsgCrossSectionOpacity`
             (for visible cross-section absorbers like O3). May be
             ``None`` if the species contributes only Rayleigh scattering.
         rayleigh_xs: Pre-computed Rayleigh cross-section

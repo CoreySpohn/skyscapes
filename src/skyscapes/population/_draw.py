@@ -29,8 +29,10 @@ import math
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from hwoutils.constants import AU2m, G_si, Mearth2kg, Msun2kg, d2s
+from hwoutils.constants import AU2m, G, G_si, Mearth2kg, Msun2kg, d2s, deg2rad
 from orbix.equations.orbit import state_vector_to_keplerian
+from orbix.system import FrameOrbit
+from orbix.system.rotation import from_axis_angle, rotate
 
 from ..habitable_zone import HZ_INNER_EEID, HZ_OUTER_EEID
 from ._tables import mass_to_radius
@@ -443,58 +445,26 @@ class SkyElements(eqx.Module):
     period_d: jnp.ndarray
 
 
-def _rotate_x(v, angle):
-    c, s = jnp.cos(angle), jnp.sin(angle)
-    return jnp.stack([v[0], v[1] * c - v[2] * s, v[1] * s + v[2] * c])
-
-
-def _rotate_z(v, angle):
-    c, s = jnp.cos(angle), jnp.sin(angle)
-    return jnp.stack([v[0] * c - v[1] * s, v[0] * s + v[1] * c, v[2]])
-
-
-def _kepler_e(mean_anomaly, e):
-    """Eccentric anomaly by Newton iteration (the draw's eccentricities are small)."""
-    ecc_anomaly = mean_anomaly + e * jnp.sin(mean_anomaly)
-    for _ in range(12):
-        ecc_anomaly = ecc_anomaly - (
-            ecc_anomaly - e * jnp.sin(ecc_anomaly) - mean_anomaly
-        ) / (1.0 - e * jnp.cos(ecc_anomaly))
-    return ecc_anomaly
-
-
 def _sky_elements_one(
     a_AU, e, inc, node, peri, anom, mass_Mearth, star_mass_Msun, mid_inc, mid_pa
 ):
-    mu = G_si * (star_mass_Msun * Msun2kg + mass_Mearth * Mearth2kg)
-    a_m = a_AU * AU2m
-    n = jnp.sqrt(mu / a_m**3)
-    ecc_anomaly = _kepler_e(anom, e)
-    root = jnp.sqrt(1.0 - e * e)
-    denom = 1.0 - e * jnp.cos(ecc_anomaly)
-    r = jnp.stack(
-        [a_m * (jnp.cos(ecc_anomaly) - e), a_m * root * jnp.sin(ecc_anomaly), 0.0]
+    total_mass = star_mass_Msun * Msun2kg + mass_Mearth * Mearth2kg
+    orbit = FrameOrbit.from_classical(
+        a_AU, e, inc, node, peri, anom, mu_AU3_per_d2=G * total_mass
     )
-    v = jnp.stack(
-        [
-            -a_m * n * jnp.sin(ecc_anomaly) / denom,
-            root * a_m * n * jnp.cos(ecc_anomaly) / denom,
-            0.0,
-        ]
+    r, v = orbit.to_cartesian()
+    tilt = from_axis_angle(jnp.array([1.0, 0.0, 0.0]), mid_inc)
+    turn = from_axis_angle(jnp.array([0.0, 0.0, 1.0]), mid_pa)
+
+    def to_sky(vector):
+        # The generator's midplane uses conventional Cartesian x/y ordering.
+        vector = rotate(turn, rotate(tilt, vector[jnp.array([1, 0, 2])]))
+        return vector * jnp.array([-1.0, 1.0, -1.0])
+
+    _, e_sky, i, big_w, w, m = state_vector_to_keplerian(
+        to_sky(r) * AU2m, to_sky(v) * (AU2m / d2s), G_si * total_mass
     )
-
-    def to_sky(x):
-        x = _rotate_z(x, peri)
-        x = _rotate_x(x, inc)
-        x = _rotate_z(x, node)
-        x = _rotate_x(x, mid_inc)
-        x = _rotate_z(x, mid_pa)
-        return jnp.stack(
-            [-x[0], x[1], -x[2]]
-        )  # (west, north, toward) to (east, north, away)
-
-    _, e_sky, i, big_w, w, m = state_vector_to_keplerian(to_sky(r), to_sky(v), mu)
-    return e_sky, i, big_w, w, m, 2.0 * jnp.pi / n / d2s
+    return e_sky, i, big_w, w, m, orbit.period_d
 
 
 def sky_elements(population, star_mass_Msun):
@@ -510,7 +480,6 @@ def sky_elements(population, star_mass_Msun):
         population: One world's `PlanetPopulation`.
         star_mass_Msun: ``[n_stars]`` host masses in solar masses.
     """
-    rad = jnp.pi / 180.0
     present = population.present
     safe = lambda x, fill: jnp.where(present, x, fill)  # noqa: E731
     one = jax.vmap(
@@ -520,14 +489,14 @@ def sky_elements(population, star_mass_Msun):
     e, i, big_w, w, m, period = one(
         safe(population.a_AU, 1.0),
         population.e,
-        population.inc_deg * rad,
-        population.node_deg * rad,
-        population.argperi_deg * rad,
-        population.mean_anomaly_deg * rad,
+        population.inc_deg * deg2rad,
+        population.node_deg * deg2rad,
+        population.argperi_deg * deg2rad,
+        population.mean_anomaly_deg * deg2rad,
         population.mass_Mearth,
         jnp.asarray(star_mass_Msun, float),
-        population.midplane_inc_deg * rad,
-        (population.midplane_position_angle_deg - 90.0) * rad,
+        population.midplane_inc_deg * deg2rad,
+        (population.midplane_position_angle_deg - 90.0) * deg2rad,
     )
     return SkyElements(
         a_AU=population.a_AU,

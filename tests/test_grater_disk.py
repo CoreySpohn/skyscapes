@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 from functools import partial
-from itertools import pairwise
 
 import equinox as eqx
 import jax
@@ -175,7 +174,7 @@ def test_jit_round_trip():
 
     sb_jit = f(d)
     sb_eager = _render(d, inclination_deg=60.0)
-    # jit and eager fuse the log-spaced LOS trapezoid reduction differently, so the
+    # jit and eager fuse the LOS quadrature reduction differently, so the
     # near-zero outer-disk pixels agree only to the field scale, not to 1e-12.
     atol = 1e-6 * float(jnp.max(sb_eager))
     assert jnp.allclose(sb_jit, sb_eager, rtol=1e-5, atol=atol)
@@ -218,7 +217,7 @@ def test_wavelength_dependent_g_HG():
 def test_high_inclination_is_finite(incl):
     """A highly inclined (but not edge-on) disk renders finite and nonnegative.
 
-    The LOS quadrature is log-spaced and concentrated at the midplane crossing
+    The LOS quadrature covers the flared layer around the midplane crossing
     (matching the GRaTeR-JAX reference), so the model stays accurate well past
     the old arctan(rmax/zmax) guard (~83 deg for this disk). 88 and 92 deg
     (|cos| = 0.035) are highly inclined on either side of 90 but far from the
@@ -237,8 +236,10 @@ def test_high_inclination_is_finite(incl):
 def test_edge_on_render_gradient_and_convergence(incl, cutoff_width):
     """Fails if the edge-on window diverges or loses gradients and convergence.
 
-    Smooth radial cutoffs remove node-crossing jumps. Max image residuals
-    are normalized by peak brightness, not by vanishing off-disk pixels.
+    Smooth radial cutoffs remove node-crossing jumps. Tolerance basis:
+    the 0.5 percent image-accuracy bound against a 513-node reference,
+    normalized by the peak. Gauss-Legendre errors need not be monotonic
+    with node count. Inclination derivatives use central differences.
     """
     grid = sky_grid(17, 9, 0.04)
     disk = replace(
@@ -253,10 +254,11 @@ def test_edge_on_render_gradient_and_convergence(incl, cutoff_width):
         for n in (129, 257, 513)
     ]
     peak = images[-1].max()
-    residuals = [float(jnp.max(jnp.abs(a - b)) / peak) for a, b in pairwise(images)]
+    residuals = [
+        float(jnp.max(jnp.abs(image - images[-1])) / peak) for image in images[:-1]
+    ]
     print(f"LOS ladder {incl}, cutoff {cutoff_width}: {residuals}")
-    assert residuals[1] < residuals[0]
-    assert residuals[1] < 0.005
+    assert max(residuals) < 0.005
     point = jnp.asarray(incl)
     derivative = jax.jacfwd(lambda i: render(disk, i))(point)
     step = 1e-4
@@ -268,19 +270,18 @@ def test_edge_on_render_gradient_and_convergence(incl, cutoff_width):
     assert jnp.max(jnp.abs(derivative)) > 1e-4 * peak
 
 
-@pytest.mark.parametrize("quadrature", ["trapezoid", "legendre"])
-def test_edge_on_continuity_and_smooth_cutoff_gradients(quadrature):
+def test_edge_on_continuity_and_smooth_cutoff_gradients():
     """Fails if a rule has a seam near edge-on or taper parameters detach.
 
-    Includes the requested inclination sequence and the trapezoid's chart
-    boundary. The hard-cutoff default retains sample-crossing jumps; the
+    Includes inclinations on both sides of edge-on. The hard-cutoff default
+    retains sample-crossing jumps; the
     positive-width fit uses a C2 taper so both the geometry and density are
     continuous. The Gauss-Legendre window has no threshold in inclination and
     must pass the same probes.
     """
     grid = sky_grid(17, 9, 0.04)
     disk = replace(
-        _belt(257, quadrature=quadrature),
+        _belt(257),
         cutoff_width_AU=jnp.asarray(0.2),
     )
     render = eqx.filter_jit(
@@ -324,176 +325,6 @@ def test_edge_on_continuity_and_smooth_cutoff_gradients(quadrature):
 # must sit inside that step.
 _DISPLAY_PRECISION = 10.0 ** (np.log10(300.0) / 256.0) - 1.0
 _BELT_PX_AU = 0.085
-
-
-def _belt(
-    n_slices_los: int, n_scale_heights: float = 6.0, quadrature: str = "trapezoid"
-) -> GraterDisk:
-    """Narrow belt; the ladders below are statements about the trapezoid rule."""
-    return GraterDisk(
-        sma_AU=jnp.array(3.0),
-        alpha_in=jnp.array(5.0),
-        alpha_out=jnp.array(-3.0),
-        ksi0_AU=jnp.array(0.1),
-        gamma=jnp.array(2.0),
-        beta=jnp.array(1.0),
-        rmin_AU=jnp.array(1.5),
-        rmax_AU=jnp.array(5.0),
-        wavelengths_nm=jnp.array([400.0, 1000.0]),
-        g_HG_grid=jnp.array([0.4, 0.4]),
-        Ag_grid=jnp.array([0.3, 0.3]),
-        n_slices_los=n_slices_los,
-        n_scale_heights=n_scale_heights,
-        quadrature=quadrature,
-        amplitude=DensityDust(
-            level=1.0, profile_id="grater-1999", calibration_id="unit-profile"
-        ),
-    )
-
-
-def _belt_responses(img: np.ndarray, incl: float) -> dict[str, float]:
-    """Total flux and three aperture fluxes of a belt image at ``pa = 0``.
-
-    Apertures: 4-pixel radius on the near-side minor axis of the 3 AU ring
-    (the near half is along +y below 90 deg and along -y above), 4-pixel
-    radius on the 3 AU ansa, and 2-pixel radius at 4.6 AU on the major axis,
-    where the flared layer is thickest relative to the LOS support.
-    """
-    c = img.shape[0] // 2
-    yy, xx = np.mgrid[: img.shape[0], : img.shape[1]] - c
-    cos_i = np.cos(np.radians(incl))
-    near_row = np.sign(cos_i) * round(3.0 * abs(cos_i) / _BELT_PX_AU)
-    ansa_col = round(3.0 / _BELT_PX_AU)
-    outer_col = round(4.6 / _BELT_PX_AU)
-    near = xx**2 + (yy - near_row) ** 2 <= 16
-    ansa = (xx - ansa_col) ** 2 + yy**2 <= 16
-    outer = (xx - outer_col) ** 2 + yy**2 <= 4
-    return {
-        "total": float(img.sum()),
-        "near": float(img[near].sum()),
-        "ansa": float(img[ansa].sum()),
-        "outer": float(img[outer].sum()),
-    }
-
-
-@pytest.mark.parametrize("incl", [0.0, 60.0, 80.0, 120.0])
-def test_los_node_ladder_converges_at_second_order(incl):
-    """Three-level LOS node ladder (21, 41, 81 nodes) on the belt disk.
-
-    The nodes are uniform in a mapped variable whose spacing halves at each
-    level, and the trapezoid rule is second order in it; the integrated
-    responses (total and aperture fluxes) must show an observed order in
-    [1.5, 3] (higher than 2 is cancellation, not failure), and the Richardson
-    error estimate at 41 nodes must sit inside the display precision. The
-    image is a pixel-wise response with truncation edges in radius, so no
-    order is claimed for it: its max-norm change must shrink by more than
-    half per level and stay inside the display precision. Tolerance basis:
-    spike (measured orders 2.0-2.5 and 41-node errors 0.7-1.0 percent at 0,
-    60, 80 and 120 deg).
-    """
-    imgs = {
-        n: np.asarray(
-            _render(
-                _belt(n),
-                wavelength_nm=550.0,
-                inclination_deg=incl,
-                grid=sky_grid(121, 121, 0.0085),
-            )
-        )
-        for n in (21, 41, 81)
-    }
-    for img in imgs.values():
-        assert np.all(np.isfinite(img)) and np.all(img >= 0.0)
-    resp = {n: _belt_responses(img, incl) for n, img in imgs.items()}
-    for key in resp[81]:
-        d_coarse = abs(resp[21][key] - resp[41][key])
-        d_fine = abs(resp[41][key] - resp[81][key])
-        order = np.log2(d_coarse / d_fine)
-        assert 1.5 <= order <= 3.0, f"{key}: observed order {order:.2f}"
-        err_41 = d_fine * 2.0**order / (2.0**order - 1.0) / abs(resp[81][key])
-        assert err_41 < _DISPLAY_PRECISION, f"{key}: 41-node error {err_41:.2e}"
-    peak = imgs[81].max()
-    e_coarse = np.abs(imgs[21] - imgs[41]).max() / peak
-    e_fine = np.abs(imgs[41] - imgs[81]).max() / peak
-    assert e_fine < 0.5 * e_coarse
-    assert e_fine < _DISPLAY_PRECISION
-
-
-@pytest.mark.parametrize("incl", [0.0, 60.0, 120.0])
-def test_vertical_support_ladder_converges_at_the_outer_radius(incl):
-    """Three-level support ladder (1, 2, 4 scale heights) and the default 6.
-
-    ``GraterDisk`` sizes the LOS window from the flared scale height at
-    ``rmax_AU``, so the window covers at least ``n_scale_heights`` local
-    heights at every radius. For the Gaussian layer the truncation error
-    falls faster than any power of the support; the ladder must shrink at
-    each level, and the default must agree with a doubled support (12) to a
-    tenth of the display precision in every integrated response, including
-    the outer aperture, where the support is tightest. At 161 nodes the node
-    error of those responses is ~6e-4 and moves by less than 1e-4 across the
-    ladder. Pixels on the truncation edges carry a node error that moves with
-    the window (0.25 percent of the peak), so the image is held to the
-    display precision itself. Tolerance basis: spike (default-to-doubled
-    changes below 3e-4 in the integrated responses).
-    """
-    imgs = {
-        k: np.asarray(
-            _render(
-                _belt(161, k),
-                wavelength_nm=550.0,
-                inclination_deg=incl,
-                grid=sky_grid(121, 121, 0.0085),
-            )
-        )
-        for k in (1.0, 2.0, 4.0, 6.0, 12.0)
-    }
-    resp = {k: _belt_responses(img, incl) for k, img in imgs.items()}
-    for key in resp[12.0]:
-        ref = resp[12.0][key]
-        d12 = abs(resp[1.0][key] - resp[2.0][key])
-        d24 = abs(resp[2.0][key] - resp[4.0][key])
-        assert d24 < d12, f"{key}: support ladder does not shrink"
-        rel = abs(resp[6.0][key] - ref) / abs(ref)
-        assert rel < 0.1 * _DISPLAY_PRECISION, f"{key}: support error {rel:.2e}"
-    peak = imgs[12.0].max()
-    assert np.abs(imgs[6.0] - imgs[12.0]).max() / peak < _DISPLAY_PRECISION
-
-
-def test_support_window_is_sized_at_the_outer_radius():
-    """One scale height of support captures ``erf(rmax / r)`` of the column.
-
-    Pole-on, each pixel's LOS runs along the disk normal at fixed radius
-    ``r``, so truncating it at ``k`` scale heights evaluated at ``rmax_AU``
-    keeps the fraction ``erf(k * h(rmax) / h(r))`` of a Gaussian layer; with
-    linear flaring (``beta = 1``) that is ``erf(k * rmax / r)``. A window
-    sized at the reference radius would keep ``erf(k * sma / r)`` instead
-    (0.64 rather than 0.88 at 4.6 AU), so this pins which radius sets the
-    support. Tolerance basis: spike (measured departures of 5e-4, from the
-    1/d^2 and phase factors across the window and the 161-node error).
-    """
-    from math import erf
-
-    cut = np.asarray(
-        _render(
-            _belt(161, 1.0),
-            wavelength_nm=550.0,
-            inclination_deg=0.0,
-            grid=sky_grid(121, 121, 0.0085),
-        )
-    )
-    full = np.asarray(
-        _render(
-            _belt(161, 12.0),
-            wavelength_nm=550.0,
-            inclination_deg=0.0,
-            grid=sky_grid(121, 121, 0.0085),
-        )
-    )
-    c = full.shape[0] // 2
-    for col in (c + 40, c + 47, c + 54):
-        r_AU = (col - c) * _BELT_PX_AU
-        kept = cut[c, col] / full[c, col]
-        assert kept == pytest.approx(erf(5.0 / r_AU), abs=5e-3), f"r={r_AU:.2f} AU"
 
 
 def test_wavelength_out_of_range_returns_nan():
@@ -554,20 +385,22 @@ def test_ring_major_axis_has_fits_sky_pa():
     assert difference < 0.5, f"sky PA {measured:.3f} deg, expected {sky_pa} deg"
 
 
-def test_legacy_window_values():
-    """Fails if the trapezoid rule changes outside the edge-on extension."""
-    grid = sky_grid(9, 7, 1.0)
-    d = make_disk(n_slices_los=65, quadrature="trapezoid")
-    values = []
-    for incl in (0.0, 60.0, 88.0, 89.3, 90.7, 120.0):
-        img = _render(d, inclination_deg=incl, grid=grid)
-        values.append([float(img.sum()), float(img.max()), float(img[3, 6])])
-    expected = [
-        [0.00033461184740070203, 1.601973253891392e-05, 5.807893853785125e-07],
-        [0.0011629071373011552, 6.524151937072618e-05, 1.1640691338873824e-06],
-        [0.0016548897060709312, 0.00041568363670442684, 0.00010526344093093486],
-        [0.006455398700343054, 0.000799933358185768, 0.0006904846218028235],
-        [0.00645539870034303, 0.0007999333581857665, 0.00069048462180282],
-        [0.0011629071373011567, 6.524151937072622e-05, 1.1640691338873832e-06],
-    ]
-    np.testing.assert_allclose(values, expected, rtol=1e-13, atol=0)
+def _belt(n_slices_los: int) -> GraterDisk:
+    """Narrow belt for edge-on convergence and gradient checks."""
+    return GraterDisk(
+        sma_AU=jnp.array(3.0),
+        alpha_in=jnp.array(5.0),
+        alpha_out=jnp.array(-3.0),
+        ksi0_AU=jnp.array(0.1),
+        gamma=jnp.array(2.0),
+        beta=jnp.array(1.0),
+        rmin_AU=jnp.array(1.5),
+        rmax_AU=jnp.array(5.0),
+        wavelengths_nm=jnp.array([400.0, 1000.0]),
+        g_HG_grid=jnp.array([0.4, 0.4]),
+        Ag_grid=jnp.array([0.3, 0.3]),
+        n_slices_los=n_slices_los,
+        amplitude=DensityDust(
+            level=1.0, profile_id="grater-1999", calibration_id="unit-profile"
+        ),
+    )

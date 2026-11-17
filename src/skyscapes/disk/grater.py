@@ -13,8 +13,7 @@ References:
       (Kondapalli, Lewis, Ashcraft, Millar-Blanchaer).
 
 Notes on quadrature:
-    The line-of-sight rule is a static choice (``quadrature``). The default
-    Gauss-Legendre rule integrates over the exact extent of the flared layer
+    Gauss-Legendre integrates over the exact extent of the flared layer
     along each line of sight and is smooth through edge-on, so exactly
     edge-on images and inclination derivatives are supported. Smooth radial
     tapers remove hard sample-crossing jumps.
@@ -35,8 +34,6 @@ from jaxtyping import Array
 from zodi import AbstractDustAmplitude
 
 from ._los import (
-    check_quadrature,
-    layer_expansion_parameter,
     los_integrate_scattered,
 )
 from ._parametric import AbstractParametricDisk
@@ -126,20 +123,9 @@ class GraterDisk(AbstractParametricDisk):
     error over the image peak for a narrow ring (``alpha = 5``,
     ``h / r = 0.05``) with tapered edges.
 
-    - ``"legendre"`` (default) is accurate at every inclination. Use 24 to
-      48 nodes up to 70 degrees (below 1e-4; 48 nodes reach 1e-5 at 60
-      degrees and 6e-5 at 70) and 96 from 80 to 90 degrees (4e-4 to 2e-3).
-      A broader or thicker disk needs fewer.
-    - ``"gauss"`` needs only 7 nodes (2e-5 at 45 degrees, 2e-4 at 60) but
-      holds only while :meth:`gauss_rule_eps` stays below about 0.45 over
-      the whole prior (up to about 60 degrees for the ring above). Past
-      that its error grows without bound whatever the node count, and no
-      error is raised. Use ``"gauss_half"`` instead when ``gamma`` is, or
-      may be fitted, away from 2 (``n_slices_los`` is then per side; 4 to
-      6).
-    - ``"trapezoid"`` is the rule of earlier releases, kept bit for bit. It
-      is second order: 2e-2 at 31 nodes and 2e-3 at 101, mostly a uniform
-      scale error of the image.
+    Use 24 to 48 Gauss-Legendre nodes up to 70 degrees (below 1e-4;
+    48 nodes reach 1e-5 at 60 degrees and 6e-5 at 70) and 96 from 80
+    to 90 degrees (4e-4 to 2e-3). A broader or thicker disk needs fewer.
 
     **Fitting.** Set ``cutoff_width_AU > 0``. The hard ``rmin_AU`` /
     ``rmax_AU`` masks of the default make the image piecewise smooth in the
@@ -170,18 +156,11 @@ class GraterDisk(AbstractParametricDisk):
         amplitude: Typed density or calibrated surface-brightness amplitude.
         inclination_deg: Inclination, zero face-on.
         position_angle_deg: Major axis north through east.
-        n_slices_los: Number of LOS nodes (per side of the midplane for
-            ``"gauss_half"``).
-        n_scale_heights: ``"trapezoid"`` only: LOS half-extent in units of
-            the scale height at ``rmax_AU`` (default 6.0). The other rules
-            size their window from the local scale height and ``gamma``.
-        quadrature: Line-of-sight rule (static): ``"legendre"`` (default),
-            ``"gauss"``, ``"gauss_half"`` or ``"trapezoid"``.
+        n_slices_los: Number of Gauss-Legendre LOS nodes.
         fixed_vertical_profile: Static. True declares ``gamma = 2`` and
             ``beta = 1`` fixed: the density is evaluated without general
-            powers (1.5 to 1.8 times faster, same numbers to rounding) and
-            the Gauss rules are built at trace time, so they also work with
-            32-bit floats. ``gamma`` and ``beta`` must hold 2 and 1 and are
+            powers (1.5 to 1.8 times faster, same numbers to rounding).
+            ``gamma`` and ``beta`` must hold 2 and 1 and are
             no longer fittable. Leave False (default) to fit either.
     """
 
@@ -202,15 +181,14 @@ class GraterDisk(AbstractParametricDisk):
     n_slices_los: int = eqx.field(static=True)
     inclination_deg: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
     position_angle_deg: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
-    n_scale_heights: float = eqx.field(static=True, default=6.0)
 
     cutoff_width_AU: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
-    quadrature: str = eqx.field(static=True, default="legendre")
     fixed_vertical_profile: bool = eqx.field(static=True, default=False)
 
     def __check_init__(self):
         """Validate the static LOS settings and the fixed-profile promise."""
-        check_quadrature(self.quadrature, self.n_slices_los)
+        if self.n_slices_los < 1:
+            raise ValueError("n_slices_los must be positive.")
         if not self.fixed_vertical_profile:
             return
         try:
@@ -222,34 +200,6 @@ class GraterDisk(AbstractParametricDisk):
                 "fixed_vertical_profile=True needs gamma = 2 and beta = 1, got "
                 f"gamma={self.gamma}, beta={self.beta}."
             )
-
-    def gauss_rule_eps(self, incl_deg: Array) -> Array:
-        """Expansion parameter of the ``"gauss"`` rules at ``incl_deg``.
-
-        ``eps = max(|alpha_in|, |alpha_out|) (ksi0_AU / sma_AU) |tan(i)|``:
-        the change in the logarithm of the radial power law across one
-        scale height of the layer along the line of sight. ``"gauss"`` and
-        ``"gauss_half"`` hold about 1e-3 of the peak or better while this
-        stays below about 0.45; evaluate it at the corners of a prior before
-        choosing them. Nothing checks it at render time.
-        """
-        log_slope = jnp.maximum(jnp.abs(self.alpha_in), jnp.abs(self.alpha_out))
-        return layer_expansion_parameter(
-            log_slope, self.ksi0_AU / self.sma_AU, incl_deg
-        )
-
-    def _zmax_AU(self) -> Array:
-        """LOS half-extent in disk-frame z, evaluated at ``rmax_AU``.
-
-        For a flared disk, the scale height grows with radius, so the
-        LOS depth that captures the vertical tails at the outer edge
-        is larger than ``n_scale_heights * ksi0_AU`` at ``sma_AU``.
-        """
-        return (
-            self.n_scale_heights
-            * self.ksi0_AU
-            * (self.rmax_AU / self.sma_AU) ** self.beta
-        )
 
     def _scattered_integral(
         self, wavelength_nm, east_AU, north_AU, inclination_deg, position_angle_deg
@@ -320,9 +270,7 @@ class GraterDisk(AbstractParametricDisk):
             east_AU=east_AU,
             north_AU=north_AU,
             n_slices_los=self.n_slices_los,
-            quadrature=self.quadrature,
             scale_height_fn=scale_height_fn,
             vertical_exponent=2.0 if fixed else self.gamma,
-            zmax_AU=self._zmax_AU() if self.quadrature == "trapezoid" else None,
         )
         return Ag * integral

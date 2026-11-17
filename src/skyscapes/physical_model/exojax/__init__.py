@@ -50,7 +50,6 @@ from .emission import (
     build_exojax_emission_engines,
     log_gravity_cgs_from_mass_radius,
 )
-from .o3_chappuis import O3_MOLMASS, O3ChappuisOpacity
 from .physical_model import (
     DEFAULT_MOLECULES,
     ExoJaxPhysicalModel,
@@ -76,7 +75,6 @@ __all__ = [
     "EARTH_LATE_PROTEROZOIC_VMRS",
     "EARTH_MODERN_VMRS",
     "MOLECULE_RECIPES",
-    "O3_MOLMASS",
     "Absorption",
     "AbstractAbsorption",
     "AbstractClouds",
@@ -98,7 +96,6 @@ __all__ = [
     "MoleculeRecipe",
     "NoCloud",
     "NullScattering",
-    "O3ChappuisOpacity",
     "PolynomialTPProfile",
     "PowerLawTPProfile",
     "PsgCrossSectionOpacity",

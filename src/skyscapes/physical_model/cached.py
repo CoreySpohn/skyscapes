@@ -28,7 +28,6 @@ import interpax
 import jax
 import jax.numpy as jnp
 import numpy as np
-from hwoutils.constants import Rearth2AU
 from hwoutils.conversions import (
     nm_to_wavenumber_cm,
     spherical_to_geometric_albedo,
@@ -37,7 +36,7 @@ from jaxtyping import Array
 
 from .._repr import indent
 from .base import AbstractPhysicalModel
-from .lambertian import _lambert_phase
+from .lambertian import reflected_contrast
 
 # Bump when the cache file layout changes in a way that invalidates
 # previously-saved caches.
@@ -172,10 +171,12 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
             )
 
         R_at_wl = jax.vmap(interp_one)(self.reflectivity)  # (K,)
-        Rp_AU = (Rp_Rearth * Rearth2AU)[:, None]
-        Ag = spherical_to_geometric_albedo(R_at_wl)[:, None]
-        phase = _lambert_phase(phase_angle_rad)
-        return Ag * phase * (Rp_AU / dist_AU) ** 2
+        return reflected_contrast(
+            phase_angle_rad,
+            dist_AU,
+            spherical_to_geometric_albedo(R_at_wl)[:, None],
+            Rp_Rearth[:, None],
+        )
 
     def contrast_cube(
         self,
@@ -208,10 +209,12 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
         R_at_wls = spherical_to_geometric_albedo(
             jax.vmap(interp_one_planet)(self.reflectivity)
         )  # (K, W)
-        Rp_AU = (Rp_Rearth * Rearth2AU)[:, None]
-        phase = _lambert_phase(phase_angle_rad)
-        geom = phase * (Rp_AU / dist_AU) ** 2  # (K, T)
-        return jnp.einsum("kw,kt->wkt", R_at_wls, geom)
+        return reflected_contrast(
+            phase_angle_rad[None, :, :],
+            dist_AU[None, :, :],
+            R_at_wls.T[:, :, None],
+            Rp_Rearth[None, :, None],
+        )
 
     def __repr__(self) -> str:
         """Compact summary of the cached spectrum."""

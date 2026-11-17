@@ -94,7 +94,7 @@ def test_composite_jit_round_trip():
     sb_eager = radiance(
         composite, _WL, _T, _INCL, 90.0 - (_PA), dist_pc=10.0, grid=_GRID
     )
-    # jit and eager fuse the log-spaced LOS trapezoid reduction differently, so the
+    # jit and eager fuse the LOS quadrature reduction differently, so the
     # near-zero outer-disk pixels agree only to the field scale, not to 1e-12.
     atol = 1e-6 * float(jnp.max(sb_eager))
     assert jnp.allclose(sb_jit, sb_eager, rtol=1e-5, atol=atol)

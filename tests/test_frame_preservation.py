@@ -3,128 +3,12 @@
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from hwoutils.constants import deg2rad
+from scipy.integrate import quad
 
 from skyscapes.disk._los import los_integrate_scattered
 from skyscapes.io import from_exovista
 
-# Captured from skyscapes 51c19bc with orbix c8890bb, CPU float64.
-# These are complete 5x5 images, with forward scattering and both tilt signs.
-LOS_IMAGES = [
-    [
-        [
-            0.005901539845819418,
-            0.014003996723827346,
-            0.014604248097375783,
-            0.007743103851252473,
-            0.0014786317096044934,
-        ],
-        [
-            0.029673394058523345,
-            0.04394652869221852,
-            0.03542064589536184,
-            0.031401754474588775,
-            0.01311497076368116,
-        ],
-        [
-            0.05807114874781169,
-            0.09293530901214446,
-            7.900181400463259e-08,
-            0.04938505042705297,
-            0.03131161527027989,
-        ],
-        [
-            0.04570035969871473,
-            0.14539339396592627,
-            0.174411075915994,
-            0.09462078559263547,
-            0.03654507636588042,
-        ],
-        [
-            0.006655069316704764,
-            0.03962984459843626,
-            0.06978137519968405,
-            0.04597430701616469,
-            0.0124871308386568,
-        ],
-    ],
-    [
-        [
-            3.5228815608378613e-15,
-            0.0008776497964583124,
-            0.06026618222595367,
-            0.07378508662688307,
-            0.013881770191259229,
-        ],
-        [
-            0.00020119309487552292,
-            0.16287516676596886,
-            0.4762272973737917,
-            0.0873509173894697,
-            0.013321886567472472,
-        ],
-        [
-            0.031077664359012474,
-            0.5451908388021246,
-            0.05100301527140083,
-            0.04095019269244589,
-            0.0025097242776169937,
-        ],
-        [
-            0.0641122232398493,
-            0.12977268157736452,
-            0.046181989766337216,
-            0.00876361971817007,
-            1.336207637174197e-05,
-        ],
-        [
-            0.020165220964221492,
-            0.027684306928022213,
-            0.006308324784235689,
-            5.978317948960136e-05,
-            3.8181976728451653e-16,
-        ],
-    ],
-    [
-        [
-            2.3867044261225546e-09,
-            0.004620539996738293,
-            0.055040757959668535,
-            0.0627040663807771,
-            0.017472860687240858,
-        ],
-        [
-            0.007621473403467968,
-            0.22129532410508526,
-            0.41137695847151906,
-            0.10800476969914954,
-            0.02776670633834092,
-        ],
-        [
-            0.07794456657366981,
-            0.347576554445451,
-            0.013867658057832983,
-            0.04444419430046226,
-            0.01059461383436695,
-        ],
-        [
-            0.06350748024999214,
-            0.07781032712953634,
-            0.040644446480077645,
-            0.015298612376041477,
-            0.000617786602977209,
-        ],
-        [
-            0.012776601307484207,
-            0.016243110939192323,
-            0.005776992272812416,
-            0.0003470285012099818,
-            2.6915983237661764e-10,
-        ],
-    ],
-]
-
-# All eight planets in the canonical demo FITS, in file order, from the same
-# versions: a_AU, e, i_rad, W_rad, w_rad, M0_rad. Angles/elements must not change.
 DEMO_ELEMENTS = [
     [
         0.387099,
@@ -193,27 +77,69 @@ DEMO_ELEMENTS = [
 ]
 
 
-@pytest.mark.parametrize(
-    ("index", "inc", "pa"), [(0, 35.0, 20.0), (1, 60.0, 130.0), (2, 125.0, -40.0)]
-)
-def test_disk_image_mirrors_stored_columns(index, inc, pa):
-    """The FITS column convention mirrors stored images, preserving the near half."""
+@pytest.mark.parametrize(("inc", "pa"), [(35.0, 20.0), (60.0, 130.0), (125.0, -40.0)])
+def test_disk_image_mirrors_stored_columns(inc, pa):
+    """Fails if FITS columns or the near half reverse the physical disk image.
+
+    Primitive reference: rotate each ray into the disk, integrate the Gaussian
+    ring density times the HG phase divided by distance squared with adaptive
+    quadrature on the outer cylinder chord. A quintic inner taper makes this
+    a smooth orientation fixture; hard edges are covered by the GRaTeR tests.
+    Allow 1e-4 of the peak for quadrature and exp(-16) vertical-tail truncation.
+    """
+
+    def density(r, z, valid):
+        u = jnp.clip((r - 0.5) / 0.5, 0.0, 1.0)
+        taper = u**3 * (10.0 + u * (-15.0 + 6.0 * u))
+        return taper * jnp.exp(-((r - 2.0) ** 2 + (z / 0.2) ** 2))
+
     image = los_integrate_scattered(
-        lambda r, z, valid: jnp.exp(-((r - 2.0) ** 2 + (z / 0.2) ** 2)),
+        density,
         lambda cos_phi: (1.0 - 0.6**2) / (1.0 + 0.6**2 - 1.2 * cos_phi) ** 1.5,
         incl_deg=jnp.array(inc),
         position_angle_deg=jnp.array(90.0 - pa),
         rmin_AU=jnp.array(0.5),
         rmax_AU=jnp.array(4.0),
-        zmax_AU=jnp.array(1.0),
+        scale_height_fn=lambda r: jnp.full_like(r, 0.2),
         east_AU=-jnp.broadcast_to(jnp.arange(5) - 2, (5, 5)),
         north_AU=jnp.broadcast_to((jnp.arange(5) - 2)[:, None], (5, 5)),
         n_slices_los=101,
-        quadrature="trapezoid",
     )
-    # Mirror the stored arrays for +column west; do not recapture snapshots.
-    expected = np.asarray(LOS_IMAGES[index])[:, ::-1]
-    np.testing.assert_allclose(image, expected, rtol=1e-12, atol=0)
+    ci, si = np.cos(inc * deg2rad), np.sin(inc * deg2rad)
+    cp, sp = np.cos(pa * deg2rad), np.sin(pa * deg2rad)
+    expected = np.zeros((5, 5))
+    for row, column in np.ndindex(5, 5):
+        east, north = 2.0 - column, row - 2.0
+        u, v = east * cp + north * sp, -east * sp + north * cp
+        chord = np.sqrt(4.0**2 - u**2)
+        low, high = sorted(((-chord - v * ci) / si, (chord - v * ci) / si))
+        points = [v * si / ci]
+        if abs(u) < 0.5:
+            inner = np.sqrt(0.5**2 - u**2)
+            points.extend(((-inner - v * ci) / si, (inner - v * ci) / si))
+
+        def integrand(depth, u=u, v=v):
+            yd, zd = v * ci + depth * si, -v * si + depth * ci
+            radius = np.hypot(u, yd)
+            if radius < 0.5:
+                return 0.0
+            distance2 = u * u + v * v + depth * depth
+            cosine = depth / np.sqrt(distance2)
+            t = np.clip((radius - 0.5) / 0.5, 0.0, 1.0)
+            taper = t**3 * (10.0 + t * (-15.0 + 6.0 * t))
+            density = taper * np.exp(-((radius - 2.0) ** 2 + (zd / 0.2) ** 2))
+            phase = (1.0 - 0.6**2) / (1.0 + 0.6**2 - 1.2 * cosine) ** 1.5
+            return density * phase / distance2
+
+        expected[row, column] = quad(
+            integrand,
+            low,
+            high,
+            points=[x for x in points if low < x < high],
+            epsabs=1e-14,
+            epsrel=1e-12,
+        )[0]
+    np.testing.assert_allclose(image, expected, rtol=0, atol=1e-4 * expected.max())
     y, col = np.indices(image.shape) - 2
     x = -col  # Sky east is minus the FITS column offset.
     minor = -x * np.sin(np.radians(pa)) + y * np.cos(np.radians(pa))

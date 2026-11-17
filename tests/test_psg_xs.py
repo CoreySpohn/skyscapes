@@ -1,4 +1,4 @@
-"""Tests for :mod:`skyscapes.physical_model.exojax.o3_chappuis`.
+"""Tests for :mod:`skyscapes.physical_model.exojax.psg_xs`.
 
 Avoids network access by writing a small synthetic PSG-format file to
 a tmp path and pointing the adapter at it. The real Serdyuchenko table
@@ -11,9 +11,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from skyscapes.physical_model.exojax.o3_chappuis import (
-    O3_MOLMASS,
-    O3ChappuisOpacity,
+from skyscapes.physical_model.exojax.components.species import MOLECULE_RECIPES
+from skyscapes.physical_model.exojax.psg_xs import (
+    PsgCrossSectionOpacity,
     _load_psg_xs_table,
 )
 
@@ -63,7 +63,14 @@ def test_xsmatrix_shape_and_dtype(tmp_path):
     # nu_grid covering 400--800 nm = 12500--25000 cm^-1.
     n_nu = 50
     nu_grid = jnp.linspace(12500.0, 25000.0, n_nu)
-    adapter = O3ChappuisOpacity(nu_grid, xs_table_path=path)
+    recipe = MOLECULE_RECIPES["O3"]
+    adapter = PsgCrossSectionOpacity(
+        name=recipe.name,
+        url=recipe.psg_xs_url,
+        molmass=recipe.psg_xs_molmass,
+        nu_grid=nu_grid,
+        xs_table_path=path,
+    )
 
     Tarr = jnp.array([220.0, 250.0, 280.0])
     pressure = jnp.array([0.1, 0.5, 1.0])  # unused, but contract requires
@@ -85,7 +92,14 @@ def test_xsmatrix_peaks_in_chappuis_range(tmp_path):
     _write_fake_psg_file(path)
 
     nu_grid = jnp.linspace(12500.0, 25000.0, 200)  # 400--800 nm
-    adapter = O3ChappuisOpacity(nu_grid, xs_table_path=path)
+    recipe = MOLECULE_RECIPES["O3"]
+    adapter = PsgCrossSectionOpacity(
+        name=recipe.name,
+        url=recipe.psg_xs_url,
+        molmass=recipe.psg_xs_molmass,
+        nu_grid=nu_grid,
+        xs_table_path=path,
+    )
 
     Tarr = jnp.array([250.0])
     pressure = jnp.array([1.0])
@@ -107,7 +121,14 @@ def test_xsmatrix_T_clamping(tmp_path):
     _write_fake_psg_file(path)
 
     nu_grid = jnp.linspace(12500.0, 25000.0, 100)
-    adapter = O3ChappuisOpacity(nu_grid, xs_table_path=path)
+    recipe = MOLECULE_RECIPES["O3"]
+    adapter = PsgCrossSectionOpacity(
+        name=recipe.name,
+        url=recipe.psg_xs_url,
+        molmass=recipe.psg_xs_molmass,
+        nu_grid=nu_grid,
+        xs_table_path=path,
+    )
     pressure = jnp.array([1.0])
 
     xs_cold = adapter.xsmatrix(jnp.array([100.0]), pressure)
@@ -125,7 +146,14 @@ def test_xsmatrix_jit_stable(tmp_path):
     _write_fake_psg_file(path)
 
     nu_grid = jnp.linspace(12500.0, 25000.0, 64)
-    adapter = O3ChappuisOpacity(nu_grid, xs_table_path=path)
+    recipe = MOLECULE_RECIPES["O3"]
+    adapter = PsgCrossSectionOpacity(
+        name=recipe.name,
+        url=recipe.psg_xs_url,
+        molmass=recipe.psg_xs_molmass,
+        nu_grid=nu_grid,
+        xs_table_path=path,
+    )
     Tarr = jnp.linspace(210.0, 290.0, 8)
     pressure = jnp.linspace(1.0e-3, 1.0, 8)
 
@@ -136,11 +164,17 @@ def test_xsmatrix_jit_stable(tmp_path):
 
 def test_molmass_attribute_matches_hitran_value(tmp_path):
     """``molmass`` is the standard HITRAN value for principal O3 isotope."""
-    assert O3_MOLMASS == 47.9982
-    # After refactor to the generic PsgCrossSectionOpacity base class
-    # ``molmass`` is an instance attribute, not class-level.
+    assert MOLECULE_RECIPES["O3"].psg_xs_molmass == 47.9982
+    # The opacity stores the recipe molar mass as an instance attribute.
     path = tmp_path / "fake_o3.txt"
     _write_fake_psg_file(path)
     nu_grid = jnp.linspace(12500.0, 25000.0, 50)
-    adapter = O3ChappuisOpacity(nu_grid, xs_table_path=path)
-    assert adapter.molmass == O3_MOLMASS
+    recipe = MOLECULE_RECIPES["O3"]
+    adapter = PsgCrossSectionOpacity(
+        name=recipe.name,
+        url=recipe.psg_xs_url,
+        molmass=recipe.psg_xs_molmass,
+        nu_grid=nu_grid,
+        xs_table_path=path,
+    )
+    assert adapter.molmass == recipe.psg_xs_molmass

@@ -9,9 +9,8 @@ import numpy as np
 import pytest
 from hwoutils.constants import G, Mearth2kg, Msun2kg, Rearth2AU, pc2AU, rad2arcsec
 from orbix.equations.orbit import mean_motion, period_n
-from orbix.equations.phase import lambert_phase_exact
 
-from skyscapes.physical_model import LambertianPhysicalModel
+from skyscapes.physical_model import LambertianPhysicalModel, lambert_phase
 from skyscapes.scene import FlatStar, Planet, System
 
 from .conftest import two_body_reference
@@ -95,7 +94,7 @@ def test_planet_alpha_dMag_matches_orbix():
     r_AU, dist_AU = reference.position_AU, reference.distance_AU
     # Raw orbix z points away: cos(beta) = z / r.
     cos_a = r_AU[:, 2, :] / dist_AU
-    phase = lambert_phase_exact(cos_a, jnp.sqrt(1.0 - cos_a**2))
+    phase = lambert_phase(jnp.arccos(cos_a))
     log_arg = Ag[:, None] * (Rp_AU[:, None] / dist_AU) ** 2 * phase
     dMag_ref = -2.5 * jnp.log10(log_arg + jnp.finfo(log_arg.dtype).tiny)
     alpha_ref = reference.separation_arcsec

@@ -1,4 +1,4 @@
-"""LambertianPhysicalModel -- analytic Lambert phase reproduces orbix dMag."""
+"""LambertianPhysicalModel -- analytic Lambert phase and contrast."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from hwoutils.constants import Rearth2AU
 from skyscapes.physical_model import (
     AbstractPhysicalModel,
     LambertianPhysicalModel,
+    lambert_phase,
 )
 
 from .conftest import two_body_reference
@@ -34,7 +35,14 @@ def test_lambertian_phase_zero_angle():
 
 
 def test_lambertian_phase_pi_is_dark():
-    """At beta=pi (back-lit), Lambert phase = 0 -> contrast = 0."""
+    """Fails if endpoint roundoff creates negative reflected light.
+
+    Exact-algebra basis: Phi(0)=1 and Phi(pi)=0. Float32 pi makes the sine
+    slightly negative, so the public phase function must clip that endpoint.
+    The float64 contrast permits the sine's absolute roundoff at pi.
+    """
+    endpoints = lambert_phase(jnp.array([0.0, jnp.pi], dtype=jnp.float32))
+    assert bool(jnp.all(endpoints == jnp.array([1.0, 0.0])))
     lamb = LambertianPhysicalModel(Ag=jnp.array([0.3]))
     contrast = lamb.contrast(
         phase_angle_rad=jnp.array([[jnp.pi]]),
@@ -64,7 +72,7 @@ def test_lambertian_inverse_square():
 
 
 def test_lambertian_wavelength_independent():
-    """Grey Lambertian -- contrast should not depend on wavelength."""
+    """Gray Lambertian -- contrast should not depend on wavelength."""
     lamb = LambertianPhysicalModel(Ag=jnp.array([0.3]))
     c_blue = lamb.contrast(
         phase_angle_rad=jnp.array([[jnp.pi / 4]]),
@@ -81,10 +89,8 @@ def test_lambertian_wavelength_independent():
     assert jnp.allclose(c_blue, c_red, rtol=1e-6)
 
 
-def test_lambertian_matches_orbix_alpha_dmag():
+def test_lambertian_matches_closed_form_dmag():
     """Hand-built LambertianPhysicalModel reproduces the exact Lambert dMag."""
-    from orbix.equations.phase import lambert_phase_exact
-
     elements = dict(
         a_AU=jnp.array([1.0]),
         e=jnp.array([0.0]),
@@ -104,7 +110,9 @@ def test_lambertian_matches_orbix_alpha_dmag():
     reference = two_body_reference(time_d, **elements, star_mass_kg=star_mass_kg)
     phase_angle_rad, dist_AU = reference.phase_angle_rad, reference.distance_AU
 
-    phase = lambert_phase_exact(jnp.cos(phase_angle_rad), jnp.sin(phase_angle_rad))
+    phase = (
+        jnp.sin(phase_angle_rad) + (jnp.pi - phase_angle_rad) * jnp.cos(phase_angle_rad)
+    ) / jnp.pi
     log_arg = Ag[:, None] * (Rp_AU[:, None] / dist_AU) ** 2 * phase
     dMag_ref = -2.5 * jnp.log10(log_arg + jnp.finfo(log_arg.dtype).tiny)
 

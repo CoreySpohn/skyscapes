@@ -56,8 +56,6 @@ from jaxtyping import Array
 from zodi import AbstractDustAmplitude
 
 from ._los import (
-    check_quadrature,
-    layer_expansion_parameter,
     los_integrate_scattered,
 )
 from ._parametric import AbstractParametricDisk
@@ -171,18 +169,10 @@ class ExovistaParametricDisk(AbstractParametricDisk):
 
     The vertical profile ``exp(-0.5 (z / (hor r))^2)`` is the form
     ``exp(-(|z| / h)^gamma)`` with ``gamma = 2`` and ``h = sqrt(2) hor r``,
-    which is what the line-of-sight rules use (``quadrature``):
-
-    - ``"legendre"`` (default) covers 4 local scale heights ``h`` at every
-      radius, bounded by the ``rmax_AU`` cylinder, so it also captures the
-      outer halo that the ``"trapezoid"`` window truncates. The radial
-      profile has slope breaks at ``r0 -+ dr`` and ``rinner_AU``, so
-      convergence is algebraic, not spectral.
-    - ``"gauss"`` and ``"gauss_half"`` hold while :meth:`gauss_rule_eps`
-      stays below about 0.45. The profile is Gaussian, so ``"gauss_half"``
-      has no advantage here.
-    - ``"trapezoid"`` is the rule of earlier releases, kept bit for bit,
-      with its window sized by ``n_scale_heights`` at the ring center.
+    which sets the Gauss-Legendre window. It covers 4 local scale heights
+    at every radius, bounded by the ``rmax_AU`` cylinder, including the
+    outer halo. Radial slope breaks at ``r0 -+ dr`` and ``rinner_AU`` make
+    convergence algebraic rather than spectral.
 
     Attributes:
         r0_AU: Ring center radius [AU].
@@ -204,13 +194,7 @@ class ExovistaParametricDisk(AbstractParametricDisk):
         amplitude: Typed density or calibrated surface-brightness amplitude.
         inclination_deg: Inclination, zero face-on.
         position_angle_deg: Major axis north through east.
-        n_slices_los: Number of LOS nodes (per side of the midplane for
-            ``"gauss_half"``).
-        n_scale_heights: ``"trapezoid"`` only: LOS half-extent in units of
-            the 1-sigma scale ``hor r0_AU`` at the ring center (default
-            6.0).
-        quadrature: Line-of-sight rule (static): ``"legendre"`` (default),
-            ``"gauss"``, ``"gauss_half"`` or ``"trapezoid"``.
+        n_slices_los: Number of Gauss-Legendre LOS nodes.
     """
 
     r0_AU: Array
@@ -234,49 +218,11 @@ class ExovistaParametricDisk(AbstractParametricDisk):
     n_slices_los: int = eqx.field(static=True)
     inclination_deg: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
     position_angle_deg: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
-    n_scale_heights: float = eqx.field(static=True, default=6.0)
-    quadrature: str = eqx.field(static=True, default="legendre")
 
     def __check_init__(self):
         """Validate the static LOS settings."""
-        check_quadrature(self.quadrature, self.n_slices_los)
-
-    def gauss_rule_eps(self, incl_deg: Array) -> Array:
-        """Expansion parameter of the ``"gauss"`` rules at ``incl_deg``.
-
-        ``eps = (1 / dror) sqrt(2) hor |tan(i)|``: the change in the
-        logarithm of the radial profile across one scale height
-        ``h = sqrt(2) hor r`` of the layer along the line of sight, with
-        the logarithmic slope ``r0 / dr`` of the Gaussian ring at its edge
-        ``|r - r0| = dr`` (its steepest value). ``"gauss"`` and
-        ``"gauss_half"`` need this below about 0.45; evaluate it at the
-        corners of a prior before choosing them. Nothing checks it at
-        render time.
-        """
-        return layer_expansion_parameter(
-            1.0 / self.dror, jnp.sqrt(2.0) * self.hor, incl_deg
-        )
-
-    def _zmax_AU(self) -> Array:
-        """LOS half-extent in disk-frame z, evaluated at the ring center.
-
-        For ExoVista-style disks the mass is concentrated near ``r0_AU``
-        (ring + nearby halo + inward profile), and the radial profile
-        decays as ``r^-1.5`` outside. Using ``r0_AU`` rather than the
-        LOS-bound ``rmax_AU`` gives an LOS extent matched to where the
-        density actually lives, so per-slice dz scales with the scale
-        height at the ring rather than with the (much larger) LOS-bound.
-
-        The cost is the outer halo: at radius ``r`` the window spans
-        ``n_scale_heights * r0_AU / r`` local scale heights, so it keeps
-        the fraction ``erf(n_scale_heights * r0_AU / (sqrt(2) * r))`` of the
-        Gaussian column. With the default 6 that is complete on the ring
-        but 0.95 at ``3 * r0_AU`` and 0.87 at ``4 * r0_AU``; raise
-        ``n_scale_heights`` (and ``n_slices_los`` with it) when the halo
-        brightness matters. ``GraterDisk`` sizes its window at ``rmax_AU``
-        instead.
-        """
-        return self.n_scale_heights * self.r0_AU * self.hor
+        if self.n_slices_los < 1:
+            raise ValueError("n_slices_los must be positive.")
 
     def _scattered_integral(
         self, wavelength_nm, east_AU, north_AU, inclination_deg, position_angle_deg
@@ -331,9 +277,7 @@ class ExovistaParametricDisk(AbstractParametricDisk):
             east_AU=east_AU,
             north_AU=north_AU,
             n_slices_los=self.n_slices_los,
-            quadrature=self.quadrature,
             scale_height_fn=scale_height_fn,
             vertical_exponent=2.0,
-            zmax_AU=self._zmax_AU() if self.quadrature == "trapezoid" else None,
         )
         return Ag * integral

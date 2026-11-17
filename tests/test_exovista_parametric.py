@@ -8,9 +8,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from scipy.special import erfcx
 from zodi import DensityDust
 
 from skyscapes.disk import AbstractDisk, ExovistaParametricDisk
+from skyscapes.disk._los import los_integrate_scattered
 from skyscapes.disk.exovista_parametric import exovista_density
 from tests.conftest import radiance, sky_grid
 
@@ -238,7 +240,7 @@ def test_jit_round_trip():
         )
 
     sb_eager = _render(d)
-    # jit and eager fuse the log-spaced LOS trapezoid reduction differently, so the
+    # jit and eager fuse the LOS quadrature reduction differently, so the
     # near-zero outer-disk pixels agree only to the field scale, not to 1e-12.
     atol = 1e-6 * float(jnp.max(sb_eager))
     assert jnp.allclose(f(d), sb_eager, rtol=1e-5, atol=atol)
@@ -254,165 +256,36 @@ def test_edge_on_has_supplementary_symmetry(incl):
     assert jnp.all(jnp.isfinite(image)) and image.max() > 0
 
 
-def _apertures(img: np.ndarray, incl: float, px_AU: float) -> dict[str, float]:
-    """Total flux, near-side minor-axis and ansa aperture fluxes of the ring.
-
-    Apertures have a 3-pixel radius and sit on the 20 AU ring at ``pa = 0``;
-    the near half is along +y below 90 deg and along -y above.
-    """
-    c = img.shape[0] // 2
-    yy, xx = np.mgrid[: img.shape[0], : img.shape[1]] - c
-    cos_i = np.cos(np.radians(incl))
-    near_row = np.sign(cos_i) * round(20.0 * abs(cos_i) / px_AU)
-    ansa_col = round(20.0 / px_AU)
-    near = xx**2 + (yy - near_row) ** 2 <= 9
-    ansa = (xx - ansa_col) ** 2 + yy**2 <= 9
-    return {
-        "total": float(img.sum()),
-        "near": float(img[near].sum()),
-        "ansa": float(img[ansa].sum()),
-    }
-
-
-@pytest.mark.parametrize("incl", [0.0, 60.0, 80.0, 120.0])
-def test_los_node_ladder_converges_at_second_order(incl):
-    """Three-level LOS node ladder (21, 41, 81 nodes) on the default ring.
-
-    The node spacing halves in a mapped variable at each level and the
-    trapezoid rule is second order in it: total and aperture fluxes must show
-    an observed order in [1.5, 3] (above 2 is cancellation), with a
-    Richardson error estimate at 41 nodes below 1.5 percent. No order is
-    claimed for the pixel-wise image (truncation edges); its max-norm change
-    must more than halve per level and stay below 1.5 percent of the peak at
-    the finest step. Tolerance basis: spike (orders 2.0-2.8; 41-node errors
-    0.7-1.0 percent, matching the 641-node reference).
-    """
-    imgs = {
-        n: np.asarray(
-            _render(
-                make_disk(n_slices_los=n, quadrature="trapezoid"), inclination_deg=incl
-            )
-        )
-        for n in (21, 41, 81)
-    }
-    for img in imgs.values():
-        assert np.all(np.isfinite(img)) and np.all(img >= 0.0)
-    resp = {n: _apertures(img, incl, px_AU=1.0) for n, img in imgs.items()}
-    for key in resp[81]:
-        d_coarse = abs(resp[21][key] - resp[41][key])
-        d_fine = abs(resp[41][key] - resp[81][key])
-        order = np.log2(d_coarse / d_fine)
-        assert 1.5 <= order <= 3.0, f"{key}: observed order {order:.2f}"
-        err_41 = d_fine * 2.0**order / (2.0**order - 1.0) / abs(resp[81][key])
-        assert err_41 < 0.015, f"{key}: 41-node error {err_41:.2e}"
-    peak = imgs[81].max()
-    e_coarse = np.abs(imgs[21] - imgs[41]).max() / peak
-    e_fine = np.abs(imgs[41] - imgs[81]).max() / peak
-    assert e_fine < 0.5 * e_coarse
-    assert e_fine < 0.015
-
-
-def _halo_view(n_scale_heights: float, **overrides) -> ExovistaParametricDisk:
-    """The default ring on an image that reaches ``rmax_AU`` (2 AU/pixel).
-
-    Trapezoid rule: the support tests below are about its window.
-    """
-    settings = dict(
-        n_slices_los=161, n_scale_heights=n_scale_heights, quadrature="trapezoid"
-    )
-    settings.update(overrides)
-    return make_disk(**settings)
-
-
-def _radial_band(img: np.ndarray, lo_AU: float, hi_AU: float) -> float:
-    """Pole-on flux between two disk radii on the 2 AU/pixel image."""
-    c = img.shape[0] // 2
-    yy, xx = np.mgrid[: img.shape[0], : img.shape[1]] - c
-    r_AU = 2.0 * np.hypot(xx, yy)
-    return float(img[(r_AU >= lo_AU) & (r_AU <= hi_AU)].sum())
-
-
-def test_vertical_support_ladder_converges_on_the_ring():
-    """Support ladder (1.5, 3, 6 ring scale heights) against 24, on the ring.
-
-    ``ExovistaParametricDisk`` sizes the LOS window from the scale height at
-    the ring center ``r0_AU``. On the ring (18-22 AU) the ladder must shrink
-    at each level and the default (6) must agree with 24 to 1e-3, pole-on
-    and at 60 deg. Tolerance basis: spike (default-to-24 changes of 8e-5
-    pole-on and 2.6e-4 at 60 deg, at 161 nodes).
-    """
-    for incl in (0.0, 60.0):
-        ring = {}
-        for k in (1.5, 3.0, 6.0, 24.0):
-            img = np.asarray(
-                _render(_halo_view(k), inclination_deg=incl, grid=sky_grid(81, 81, 0.2))
-            )
-            assert np.all(img >= 0.0)
-            if incl == 0.0:
-                ring[k] = _radial_band(img, 18.0, 22.0)
-            else:
-                ring[k] = _apertures(img, incl, px_AU=2.0)["ansa"]
-        assert abs(ring[3.0] - ring[6.0]) < abs(ring[1.5] - ring[3.0])
-        assert abs(ring[6.0] / ring[24.0] - 1.0) < 1e-3, f"incl={incl}"
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "The trapezoid window is sized from the scale height at the ring center, so "
-        "at radius r it spans only n_scale_heights * r0 / r local scale "
-        "heights and keeps erf(n_scale_heights * r0 / (sqrt(2) r)) of the "
-        "halo column (0.95 at 3 r0 and 0.87 at 4 r0 for the default 6)."
-    ),
-)
-def test_vertical_support_converges_in_the_outer_halo():
-    """The default support must capture the halo column (55-75 AU) to 1e-3.
-
-    Pole-on, the halo band's flux at the default support is compared with a
-    support four times larger. Known limitation: the band loses ~6 percent.
-    """
-    default = _radial_band(
-        np.asarray(
-            _render(_halo_view(6.0), inclination_deg=0.0, grid=sky_grid(81, 81, 0.2))
-        ),
-        55.0,
-        75.0,
-    )
-    wide = _radial_band(
-        np.asarray(
-            _render(_halo_view(24.0), inclination_deg=0.0, grid=sky_grid(81, 81, 0.2))
-        ),
-        55.0,
-        75.0,
-    )
-    assert abs(default / wide - 1.0) < 1e-3
-
-
 def test_legendre_window_captures_the_outer_halo():
-    """Fails if the Gauss-Legendre window is not sized from the local scale height.
+    """Fails if the local Gaussian column is truncated in the outer halo.
 
-    Pole-on, the halo band (55-75 AU) that the trapezoid window truncates by
-    about 6 percent must match a trapezoid render with four times the support
-    and 1281 nodes to 1e-3, at 48 nodes. Tolerance basis: measured 3e-5.
+    Exact-algebra basis: integral exp(-z^2/(2 sigma^2))/(r^2+z^2) dz
+    is pi/r * erfcx(r/(sqrt(2)*sigma)). Allow 3e-7 relative for omitted
+    exp(-16) tails at four local sqrt(2)*sigma heights and quadrature error.
     """
-    wide = _radial_band(
-        np.asarray(
-            _render(
-                _halo_view(24.0, n_slices_los=1281),
-                inclination_deg=0.0,
-                grid=sky_grid(81, 81, 0.2),
-            )
-        ),
-        55.0,
-        75.0,
+    radii = jnp.array([[55.0, 65.0, 75.0]])
+    hor = 0.05
+
+    def density(r, z, valid):
+        return jnp.where(
+            valid, (r / 20.0) ** -1.5 * jnp.exp(-0.5 * (z / (hor * r)) ** 2), 0.0
+        )
+
+    image = los_integrate_scattered(
+        density,
+        lambda cosine: jnp.ones_like(cosine),
+        incl_deg=0.0,
+        position_angle_deg=0.0,
+        rmin_AU=0.5,
+        rmax_AU=80.0,
+        east_AU=radii,
+        north_AU=jnp.zeros_like(radii),
+        n_slices_los=48,
+        scale_height_fn=lambda r: jnp.sqrt(2.0) * hor * r,
     )
-    local = _halo_view(6.0, n_slices_los=48, quadrature="legendre")
-    band = _radial_band(
-        np.asarray(_render(local, inclination_deg=0.0, grid=sky_grid(81, 81, 0.2))),
-        55.0,
-        75.0,
-    )
-    assert abs(band / wide - 1.0) < 1e-3
+    expected = (np.asarray(radii) / 20.0) ** -1.5 * np.pi / np.asarray(radii)
+    expected *= erfcx(1.0 / (np.sqrt(2.0) * hor))
+    np.testing.assert_allclose(image, expected, rtol=3e-7, atol=0.0)
 
 
 def test_wavelength_vmap_returns_cube():

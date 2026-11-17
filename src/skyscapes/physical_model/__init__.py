@@ -7,7 +7,7 @@ from .blackbody import BlackbodyPhysicalModel
 from .cached import PrecomputedPhysicalModel
 from .exojax import ExoJaxEmissionModel, ExoJaxPhysicalModel
 from .grid import GridPhysicalModel
-from .lambertian import LambertianPhysicalModel
+from .lambertian import LambertianPhysicalModel, lambert_phase, reflected_contrast
 from .sum import SumPhysicalModel
 from .time_series import TimeSeriesPhysicalModel
 
@@ -21,4 +21,6 @@ __all__ = [
     "PrecomputedPhysicalModel",
     "SumPhysicalModel",
     "TimeSeriesPhysicalModel",
+    "lambert_phase",
+    "reflected_contrast",
 ]
