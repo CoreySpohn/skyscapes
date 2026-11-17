@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from skyscapes.viz import _geometry, _style
+from skyscapes.viz import _geometry
 from skyscapes.viz._draw import (
     DEGREE,
     AngleArc,
@@ -88,10 +88,10 @@ class _ZodiPanel:
         self.ray_length = ray_length
         self.grain_distances = grain_distances
         n_grains = len(grain_distances)
-        zodi = _style.local_zodi()
-        star = _style.role("star")
-        scenery = _style.neutral(0.45)
-        observer_color = _style.neutral(0.8)
+        zodi = eyepiece().role("zodi")
+        star = eyepiece().role("star")
+        scenery = eyepiece().neutral(0.45)
+        observer_color = eyepiece().neutral(0.8)
 
         self.lines, self.texts, self.scatters = [], [], []
         if view == "top":
@@ -152,7 +152,7 @@ class _ZodiPanel:
                 self.scattered.append(
                     Arrow(ax, (0, 0), (0, 0), color=zodi, gid="scattered" + tag)
                 )
-        self.angle = AngleArc(ax, color=_style.neutral(0.8), gid="look_angle")
+        self.angle = AngleArc(ax, color=eyepiece().neutral(0.8), gid="look_angle")
         self.texts.append(self.angle.text)
         self.lines.append(self.angle.line)
         for incident, scattered in zip(self.incident, self.scattered, strict=True):
@@ -172,7 +172,7 @@ class _ZodiPanel:
             transform=ax.transAxes,
             ha="right",
             va="bottom",
-            color=_style.neutral(0.8),
+            color=eyepiece().neutral(0.8),
             fontsize="small",
         )
         self.readout.set_gid("label/angles")

@@ -473,3 +473,17 @@ exposure_time_s = compute_etc(scene, optical_path, target_snr=7.0)
 - [Physical models](physical_models) -- the physical-model hierarchy
 - [Local zodi + telescope geometry](local_zodi_geometry) -- the
   Leinert geometry inputs
+
+## Band-integrated contrasts
+
+Use `hwoutils.spectral.Transmission` for a tabulated photon response:
+
+```python
+from hwoutils.spectral import Transmission
+
+response = Transmission.tophat(550.0, 100.0)
+contrasts = system.band_contrasts(response, time_d)
+```
+
+`skyscapes.io.bandpass_from_table(path)` also returns a `Transmission`.
+Quadrature splits at the response knots and the stellar spectrum knots.

@@ -7,10 +7,10 @@ import numpy as np
 import pytest
 from hwoutils.epoch import Epoch
 from hwoutils.grids import PixelGrid, SkyOrientation
+from hwoutils.spectral import Transmission
 
 from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.scene import FlatStar, Planet, System
-from skyscapes.spectral import Bandpass
 
 
 def _scene(count):
@@ -105,7 +105,7 @@ def _read(system, times, ephemeris=None):
     )
 
 
-_BAND = Bandpass.tophat(600.0, 80.0)
+_BAND = Transmission.tophat(600.0, 80.0)
 _read_jit = jax.jit(_read)
 _ephemeris_jit = jax.jit(System.ephemeris)
 

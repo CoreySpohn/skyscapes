@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from skyscapes.viz import _style
+from skyscapes.viz._require import eyepiece
 
 # The degree sign every view prints after an angle: set tight against the
 # number, as in "135" followed by the sign, not raised after a gap.
@@ -256,16 +256,22 @@ class ScatteringAngle:
         def gid(name):
             return f"{gid_prefix}/{name}" if gid_prefix else name
 
-        scenery = _style.neutral(0.55)
+        scenery = eyepiece().neutral(0.55)
         self.incident = Arrow(
-            ax, (-1.0, 0.0), (0.0, 0.0), color=_style.role("star"), gid=gid("incident")
+            ax,
+            (-1.0, 0.0),
+            (0.0, 0.0),
+            color=eyepiece().role("star"),
+            gid=gid("incident"),
         )
         self.outgoing = Arrow(
             ax, (0.0, 0.0), (1.0, 0.0), color=grain_color, gid=gid("scattered")
         )
         (self.forward,) = ax.plot([], [], color=scenery, lw=0.9, ls="--")
         self.forward.set_gid(gid("forward"))
-        self.theta = AngleArc(ax, color=_style.text(), gid=gid("scattering_angle"))
+        self.theta = AngleArc(
+            ax, color=eyepiece().role("text"), gid=gid("scattering_angle")
+        )
         self.alpha = AngleArc(ax, color=scenery, gid=gid("illumination_angle"))
         self.grain = ax.scatter(
             [0.0], [0.0], s=46, color=grain_color, zorder=5, edgecolors="none"
@@ -273,7 +279,7 @@ class ScatteringAngle:
         self.grain.set_gid(gid("grain"))
         small = {"fontsize": value_size, "transform": ax.transAxes, "ha": "left"}
         self.theta_value = ax.text(
-            0.04, 0.96, "", color=_style.text(), va="top", **small
+            0.04, 0.96, "", color=eyepiece().role("text"), va="top", **small
         )
         self.theta_value.set_gid(gid("scattering_angle/value"))
         self.alpha_value = ax.text(0.04, 0.04, "", color=scenery, va="bottom", **small)
@@ -282,18 +288,18 @@ class ScatteringAngle:
         self.star = self.observer = None
         if star:
             self.star = ax.scatter(
-                [0.0], [0.0], s=190, marker="*", color=_style.role("star"), zorder=5
+                [0.0], [0.0], s=190, marker="*", color=eyepiece().role("star"), zorder=5
             )
             self.star.set_gid(gid("star"))
         if observer:
             self.observer = ax.scatter(
-                [0.0], [0.0], s=45, marker="s", color=_style.neutral(0.8), zorder=6
+                [0.0], [0.0], s=45, marker="s", color=eyepiece().neutral(0.8), zorder=6
             )
             self.observer.set_gid(gid("observer"))
         self.labels = {}
         if labels:
             for name, text, color in (
-                ("incident", "starlight", _style.role("star")),
+                ("incident", "starlight", eyepiece().role("star")),
                 ("scattered", "to observer", grain_color),
                 ("forward", "forward", scenery),
             ):
@@ -389,7 +395,7 @@ class GrainInset:
         inset.set_xticks([])
         inset.set_yticks([])
         for spine in inset.spines.values():
-            spine.set_color(_style.neutral(0.35))
+            spine.set_color(eyepiece().neutral(0.35))
             spine.set_linewidth(0.8)
         self.drawing = ScatteringAngle(
             inset, grain_color=grain_color, gid_prefix=gid_prefix, values=values

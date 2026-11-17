@@ -1,8 +1,7 @@
 """Data management utilities for skyscapes.
 
-Pooch-managed fetchers for test/example FITS fixtures. Mirrors the
-``scenes.zip`` entry from ``coronagraphoto.datasets`` (same file, hash,
-and URL) but caches under its own ``skyscapes`` directory.
+Pooch-managed fetchers for test/example FITS fixtures. Owns the canonical
+``scenes.zip`` example bundle, cached under the ``skyscapes`` directory.
 
 The PHOENIX and ATLAS9 stellar model atmospheres are exceptions to the
 "hosted in the owning repository" rule: the grid is an upstream STScI

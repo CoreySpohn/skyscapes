@@ -4,7 +4,6 @@ Public API:
 
 - :mod:`skyscapes.scene` -- star + planet + system hierarchy, plus the
   top-level ``Scene`` container.
-- :mod:`skyscapes.spectral` -- shared spectral band integration.
 - :mod:`skyscapes.disk` -- extended-source surface brightness maps.
 - :mod:`skyscapes.physical_model` -- planet photon flux and planet-to-star
   contrast (reflective, emissive, and additive models).
@@ -37,15 +36,12 @@ from . import (
     physical_model,
     population,
     scene,
-    spectral,
     viz,
 )
 from .io import from_exovista
 from .scene import Scene, System
-from .spectral import Bandpass
 
 __all__ = [
-    "Bandpass",
     "Scene",
     "System",
     "__version__",
@@ -57,6 +53,5 @@ __all__ = [
     "physical_model",
     "population",
     "scene",
-    "spectral",
     "viz",
 ]

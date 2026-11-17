@@ -18,7 +18,7 @@ from hwoutils.grids import Image, PixelGrid, SkyOrientation, resample
 
 from skyscapes.disk import AbstractDisk
 from skyscapes.disk.composite import orient_disk
-from skyscapes.viz import _geometry, _style
+from skyscapes.viz import _geometry
 from skyscapes.viz._draw import (
     DEGREE,
     VALUE_PLACES,
@@ -246,7 +246,7 @@ def plot_disk_radiance(
 
     artists = dict(base.artists)
     star = ax.scatter(
-        [0.0], [0.0], s=90, marker="*", color=_style.role("star"), zorder=5
+        [0.0], [0.0], s=90, marker="*", color=eyepiece().role("star"), zorder=5
     )
     star.set_gid("star")
     scatters = [star]
@@ -260,7 +260,7 @@ def plot_disk_radiance(
     if can_outline:
         for name in ("inner", "outer"):
             (line,) = ax.plot(
-                [], [], color=_style.role("disk"), lw=0.9, ls="--", alpha=0.9
+                [], [], color=eyepiece().role("disk"), lw=0.9, ls="--", alpha=0.9
             )
             line.set_gid(f"disk/{name}")
             rings.append(line)
@@ -273,7 +273,7 @@ def plot_disk_radiance(
             [0.0],
             s=70,
             facecolors="none",
-            edgecolors=_style.neutral(0.6),
+            edgecolors=eyepiece().neutral(0.6),
             linewidths=1.4,
             zorder=6,
         )
@@ -353,8 +353,8 @@ class _GeometryPanel:
         self.grain_radius = grain_radius
         self.thickness = thickness
         self.big = radii[1]
-        disk_color = _style.role("disk")
-        scenery = _style.neutral(0.45)
+        disk_color = eyepiece().role("disk")
+        scenery = eyepiece().neutral(0.45)
         R = self.big
 
         (self.plane,) = ax.plot([0.0, 0.0], [-1.2 * R, 1.2 * R], color=scenery)
@@ -369,7 +369,7 @@ class _GeometryPanel:
         self.near.set_gid("disk/near")
         (self.far,) = ax.plot([], [], color=disk_color, lw=2.4)
         self.far.set_gid("disk/far")
-        (self.sightline,) = ax.plot([], [], color=_style.neutral(0.6), lw=0.9)
+        (self.sightline,) = ax.plot([], [], color=eyepiece().neutral(0.6), lw=0.9)
         self.sightline.set_gid("sightline")
         self.path = None
         if thickness is not None:
@@ -378,7 +378,7 @@ class _GeometryPanel:
         (self.forward,) = ax.plot([], [], color=scenery, lw=0.9, ls="--")
         self.forward.set_gid("forward")
         self.star = ax.scatter(
-            [0.0], [0.0], s=170, marker="*", color=_style.role("star"), zorder=5
+            [0.0], [0.0], s=170, marker="*", color=eyepiece().role("star"), zorder=5
         )
         self.star.set_gid("star")
         self.grain = ax.scatter(
@@ -386,18 +386,18 @@ class _GeometryPanel:
         )
         self.grain.set_gid("grain")
         self.incident = Arrow(
-            ax, (0, 0), (0, 0), color=_style.role("star"), gid="incident"
+            ax, (0, 0), (0, 0), color=eyepiece().role("star"), gid="incident"
         )
         self.scattered = Arrow(ax, (0, 0), (0, 0), color=disk_color, gid="scattered")
         self.observer = Arrow(
             ax,
             (-1.05 * R, 0.95 * R),
             (-1.4 * R, 0.95 * R),
-            color=_style.neutral(0.75),
+            color=eyepiece().neutral(0.75),
             gid="observer",
         )
-        self.theta = AngleArc(ax, color=_style.text(), gid="scattering_angle")
-        self.incl_arc = AngleArc(ax, color=_style.neutral(0.75), gid="inclination")
+        self.theta = AngleArc(ax, color=eyepiece().role("text"), gid="scattering_angle")
+        self.incl_arc = AngleArc(ax, color=eyepiece().neutral(0.75), gid="inclination")
         self.texts = [self.observer.artist, self.incident.artist]
         self.texts += [self.scattered.artist, self.theta.text, self.incl_arc.text]
         self.near_label = self.far_label = None
@@ -412,7 +412,7 @@ class _GeometryPanel:
                 -1.22 * R,
                 1.0 * R,
                 observer_text,
-                color=_style.neutral(0.75),
+                color=eyepiece().neutral(0.75),
                 fontsize="small",
                 ha="center",
                 va="bottom",

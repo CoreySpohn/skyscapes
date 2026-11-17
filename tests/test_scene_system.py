@@ -23,6 +23,7 @@ from hwoutils.constants import (
 from hwoutils.conversions import photons_per_nm_per_m2_to_jy
 from hwoutils.epoch import Epoch
 from hwoutils.grids import PixelGrid, SkyOrientation
+from hwoutils.spectral import Transmission, bin_mean
 
 from skyscapes.disk import ExovistaDisk
 from skyscapes.physical_model import (
@@ -33,7 +34,6 @@ from skyscapes.physical_model import (
     SumPhysicalModel,
 )
 from skyscapes.scene import BlackbodyStar, FlatStar, Planet, Star, System
-from skyscapes.spectral import Bandpass, bin_mean
 
 from .conftest import two_body_reference
 from .test_io_exovista_versions import scene_file as exovista_scene_file  # noqa: F401
@@ -510,7 +510,7 @@ def test_band_contrast_tophat_and_narrow_limits(tabulated):
     other = eqx.tree_at(lambda p: p.physical_model.teff_K, planet, jnp.array([1100.0]))
     system = _system(star, (planet, other))
     times = jnp.array([0.0, 100.0])
-    band = Bandpass.tophat(5000.0, 1600.0)
+    band = Transmission.tophat(5000.0, 1600.0)
     actual = eqx.filter_jit(lambda: system.band_contrasts(band, times))()
     expected = system.bin_mean_contrast_cube(
         jnp.array([5000.0]), jnp.array([1600.0]), times
@@ -525,7 +525,7 @@ def test_band_contrast_tophat_and_narrow_limits(tabulated):
         batched.band_contrasts(band, times), actual, rtol=3e-14, atol=0
     )
     np.testing.assert_allclose(
-        system.band_contrasts(Bandpass.tophat(5000.0, 1e-4), times),
+        system.band_contrasts(Transmission.tophat(5000.0, 1e-4), times),
         system.contrasts(jnp.asarray(5000.0), times),
         rtol=1e-10,
         atol=0,
@@ -547,7 +547,7 @@ def test_band_contrast_triangle_and_temperature_gradient():
         BlackbodyPhysicalModel(jnp.array([800.0])),
     )
     system = _system(star, (planet,))
-    band = Bandpass(jnp.array([4000.0, 4700.0, 6000.0]), jnp.array([0.0, 1.0, 0.0]))
+    band = Transmission(jnp.array([4000.0, 4700.0, 6000.0]), jnp.array([0.0, 1.0, 0.0]))
     times = jnp.zeros(1)
     wave = np.linspace(4000.0, 6000.0, 20001)
     response = np.interp(wave, [4000.0, 4700.0, 6000.0], [0.0, 1.0, 0.0])
@@ -616,7 +616,7 @@ def _scene_observables(system, times, **kwargs):
             waves, widths, times, n_nodes=2, **kwargs
         ),
         band_contrasts=system.band_contrasts(
-            Bandpass.tophat(600.0, 80.0), times, n_nodes=2, **kwargs
+            Transmission.tophat(600.0, 80.0), times, n_nodes=2, **kwargs
         ),
         photon_flux=system.planet_flux_densities(waves[0], times, **kwargs),
         planet_flux_densities=system.planet_flux_densities(waves[0], times, **kwargs),

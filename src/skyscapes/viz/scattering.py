@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from skyscapes.viz import _style
 from skyscapes.viz._draw import (
     ALPHA_RADIUS,
     THETA_RADIUS,
@@ -127,7 +126,7 @@ def plot_scattering_angle(
     k_in_2d, k_out_2d = _plane(k_in, k_out)
     if ax is None:
         _, ax = plt.subplots(layout="constrained")
-    color = _style.role("disk") if grain_color is None else grain_color
+    color = eyepiece().role("disk") if grain_color is None else grain_color
     drawing = ScatteringAngle(
         ax,
         grain_color=color,

@@ -10,7 +10,9 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+from hwoutils.conversions import contrast_to_delta_mag
 from hwoutils.epoch import Epoch
+from hwoutils.spectral import Transmission, bin_mean
 from jaxtyping import Array
 from orbix.kepler import Markley
 from orbix.system import Body, Ephemeris, SkyFrame
@@ -18,7 +20,6 @@ from orbix.system import System as DynamicsSystem
 
 from .._repr import indent
 from ..disk import AbstractDisk
-from ..spectral import Bandpass, bin_mean
 from . import _system_batch
 from ._system_batch import _PAD_ORBIT
 from .planet import Planet
@@ -590,7 +591,7 @@ class System(eqx.Module):
 
     @_batch_method
     def band_contrasts(
-        self, bandpass: Bandpass, time_d: Array, *, n_nodes: int = 4, ephemeris=None
+        self, bandpass: Transmission, time_d: Array, *, n_nodes: int = 4, ephemeris=None
     ) -> Array:
         """Ratio of band-integrated planet and star photons, ``(K_total, T)``.
 
@@ -605,9 +606,9 @@ class System(eqx.Module):
         photon flux must be nonzero.
         """
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
-        centers = jnp.atleast_1d(bandpass.band.center_nm)
-        widths = jnp.atleast_1d(bandpass.band.width_nm)
-        knots = bandpass.wavelength_nm
+        centers = jnp.atleast_1d((bandpass.low_nm + bandpass.high_nm) / 2)
+        widths = jnp.atleast_1d(bandpass.high_nm - bandpass.low_nm)
+        knots = bandpass.quadrature_knots_nm
         if self.star.quadrature_knots_nm is not None:
             knots = jnp.sort(jnp.concatenate((knots, self.star.quadrature_knots_nm)))
         quadrature = dict(
@@ -658,7 +659,7 @@ class System(eqx.Module):
         alpha = eph.separation_arcsec(eph.scene_planet_indices, 0)
         contrast = self.contrasts(jnp.asarray(wavelength_nm), time_d, ephemeris=eph)
         safe = jnp.where(self.valid[:, None], contrast, 1.0)
-        dMag = -2.5 * jnp.log10(safe + jnp.finfo(contrast.dtype).tiny)
+        dMag = contrast_to_delta_mag(safe + jnp.finfo(contrast.dtype).tiny)
         return alpha, dMag
 
     def __repr__(self) -> str:

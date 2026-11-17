@@ -13,7 +13,7 @@ import jax.numpy as jnp
 import numpy as np
 from hwoutils.conversions import au_to_arcsec
 
-from skyscapes.viz import _geometry, _style
+from skyscapes.viz import _geometry
 from skyscapes.viz._draw import Arrow, halo
 from skyscapes.viz._require import eyepiece
 
@@ -44,7 +44,7 @@ def _planet_style(styles, label):
             entry = None
         if entry is not None:
             return entry["color"], entry.get("marker", "o")
-    return _style.role("planet"), "o"
+    return eyepiece().role("planet"), "o"
 
 
 def _star_color(styles):
@@ -54,7 +54,7 @@ def _star_color(styles):
             return styles["star"]["color"]
         except KeyError:
             pass
-    return _style.role("star")
+    return eyepiece().role("star")
 
 
 def _positions_xyz_AU(system, time_d):
@@ -173,8 +173,8 @@ def plot_system(
 
     scatters, lines, texts = [], [], []
     extent = [0.0]
-    scenery = _style.neutral(0.5)
-    disk_color = _style.role("disk")
+    scenery = eyepiece().neutral(0.5)
+    disk_color = eyepiece().role("disk")
 
     if view == "sky":
         to_2d = _sky_projector(dist_pc)
@@ -304,7 +304,7 @@ def _side_projector(minor):
 
 def _side_furniture(ax, half, lines, labels):
     """The sky plane and the observer arrow of a side view."""
-    scenery = _style.neutral(0.45)
+    scenery = eyepiece().neutral(0.45)
     (plane,) = ax.plot([0.0, 0.0], [-half, half], color=scenery, lw=0.8, ls=":")
     plane.set_gid("sky_plane")
     lines.append(plane)
@@ -312,7 +312,7 @@ def _side_furniture(ax, half, lines, labels):
         ax,
         (-0.95 * half, 0.85 * half),
         (-1.25 * half, 0.85 * half),
-        color=_style.neutral(0.75),
+        color=eyepiece().neutral(0.75),
         gid="observer",
     )
     texts = [arrow.artist]
@@ -321,7 +321,7 @@ def _side_furniture(ax, half, lines, labels):
             -1.1 * half,
             0.93 * half,
             "to observer",
-            color=_style.neutral(0.75),
+            color=eyepiece().neutral(0.75),
             ha="center",
             va="bottom",
             fontsize="small",

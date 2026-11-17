@@ -30,12 +30,14 @@ from hwoutils.constants import (
     cm22m2,
     d2s,
     mas2arcsec,
-    pc2m,
-    rad2arcsec,
     um2nm,
     yr2s,
 )
-from hwoutils.conversions import au_per_yr_to_m_per_s, mag_to_flux_jy
+from hwoutils.conversions import (
+    angular_diameter_arcsec,
+    au_per_yr_to_m_per_s,
+    mag_to_flux_jy,
+)
 from hwoutils.epoch import Epoch
 from hwoutils.grids import PixelGrid, SkyOrientation
 from orbix.equations.orbit import state_vector_to_keplerian
@@ -168,7 +170,7 @@ def _angular_diameter_arcsec(header) -> float:
             "system files store the angular radius there, catalog targets the "
             "diameter."
         )
-    return 2 * rstar * R_sun.to_value(u.m) / (dist * pc2m) * rad2arcsec
+    return angular_diameter_arcsec(rstar * R_sun.to_value(u.m), dist)
 
 
 def _simulation_times_d(elapsed_years, epoch: Epoch) -> np.ndarray:

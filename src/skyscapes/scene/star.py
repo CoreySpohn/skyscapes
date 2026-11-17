@@ -18,8 +18,8 @@ import equinox as eqx
 import interpax
 import jax
 import jax.numpy as jnp
-from hwoutils.constants import pc2m, rad2arcsec
-from hwoutils.conversions import jy_to_photons_per_nm_per_m2
+from hwoutils.constants import pc2m
+from hwoutils.conversions import angular_diameter_arcsec, jy_to_photons_per_nm_per_m2
 from hwoutils.planck import planck_photon_radiance
 from jaxtyping import Array
 
@@ -112,7 +112,7 @@ class BlackbodyStar(AbstractStar):
         Uses the small-angle relation from Carroll & Ostlie (2007),
         An Introduction to Modern Astrophysics.
         """
-        return 2.0 * self.radius_m / (dist_pc * pc2m) * rad2arcsec
+        return angular_diameter_arcsec(self.radius_m, dist_pc)
 
     def photon_flux_density(
         self,

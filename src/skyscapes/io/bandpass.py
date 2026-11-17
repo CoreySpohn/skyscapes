@@ -3,11 +3,10 @@
 from pathlib import Path
 
 import numpy as np
+from hwoutils.spectral import Transmission
 
-from ..spectral import Bandpass
 
-
-def bandpass_from_table(path, *, wavelength_unit="nm") -> Bandpass:
+def bandpass_from_table(path, *, wavelength_unit="nm") -> Transmission:
     """Read wavelength and transmission columns from a local text file.
 
     Accept whitespace or comma separators and ``#`` comments. Wavelength
@@ -21,5 +20,5 @@ def bandpass_from_table(path, *, wavelength_unit="nm") -> Bandpass:
     with Path(path).open() as stream:
         table = np.loadtxt((line.replace(",", " ") for line in stream), ndmin=2)
     if table.shape[1] != 2:
-        raise ValueError("Bandpass table must contain exactly two columns.")
-    return Bandpass(table[:, 0] * factors[wavelength_unit], table[:, 1])
+        raise ValueError("Transmission table must contain exactly two columns.")
+    return Transmission(table[:, 0] * factors[wavelength_unit], table[:, 1])

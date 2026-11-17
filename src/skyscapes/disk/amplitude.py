@@ -4,9 +4,11 @@ from dataclasses import replace
 
 import equinox as eqx
 import jax.numpy as jnp
-from hwoutils.constants import arcsec2rad, pc2AU
+from hwoutils.constants import JOHNSON_V_VEGA_ZERO_POINT_JY, arcsec2rad, pc2AU
 from hwoutils.conversions import jy_to_photons_per_nm_per_m2, mag_to_flux_jy
 from zodi import DensityDust, SurfaceBrightnessDust
+
+from skyscapes.habitable_zone import eeid_AU
 
 
 def zero_magnitude_photon_flux_density(passband, *, zero_point_jy=None):
@@ -22,7 +24,7 @@ def zero_magnitude_photon_flux_density(passband, *, zero_point_jy=None):
         if passband.magnitude_system == "ab":
             zero_point_jy = mag_to_flux_jy(0.0)
         elif passband.name == "V" and passband.center_nm == 550.0:
-            zero_point_jy = 3636.0
+            zero_point_jy = JOHNSON_V_VEGA_ZERO_POINT_JY
         else:
             raise ValueError("a non-V Vega calibration requires zero_point_jy")
     return jy_to_photons_per_nm_per_m2(zero_point_jy, passband.center_nm)
@@ -88,7 +90,7 @@ def density_level(amplitude, profile, *, star, dist_pc, time_d=0.0):
     )
     radius = amplitude.reference_radius_au
     if radius == "eeid":
-        radius = amplitude.reference_star.luminosity_lsun**0.5
+        radius = eeid_AU(amplitude.reference_star.luminosity_lsun)
     integral = profile._scattered_integral(
         wave, jnp.full((1, 1), radius), jnp.zeros((1, 1)), 0.0, 0.0
     )[0, 0]
