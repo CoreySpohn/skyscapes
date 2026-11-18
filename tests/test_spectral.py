@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from hwoutils.spectral import Transmission
+from optixstuff.spectral import Transmission
 
 from skyscapes.io import bandpass_from_table
 

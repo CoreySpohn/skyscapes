@@ -22,8 +22,8 @@ from hwoutils.constants import (
 )
 from hwoutils.conversions import photons_per_nm_per_m2_to_jy
 from hwoutils.epoch import Epoch
-from hwoutils.grids import PixelGrid, SkyOrientation
-from hwoutils.spectral import Band, Quadrature, Transmission
+from optixstuff.grids import PixelGrid, SkyOrientation
+from optixstuff.spectral import Band, Quadrature, Transmission
 
 from skyscapes.disk import ExovistaDisk
 from skyscapes.physical_model import (

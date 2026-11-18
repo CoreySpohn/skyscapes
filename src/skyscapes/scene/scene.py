@@ -13,8 +13,8 @@ import jax.numpy as jnp
 import numpy as np
 from hwoutils.conversions import contrast_to_delta_mag
 from hwoutils.epoch import Epoch
-from hwoutils.spectral import Quadrature, spectral_breaks
 from jaxtyping import Array
+from optixstuff.spectral import Quadrature, spectral_breaks
 from orbix.kepler import Markley
 from orbix.system import Body, Ephemeris, SkyFrame
 from orbix.system import System as DynamicsSystem

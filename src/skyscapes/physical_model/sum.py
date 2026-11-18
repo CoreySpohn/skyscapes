@@ -1,8 +1,8 @@
 """Additive radiative components sharing one planet's geometry and radius."""
 
 import numpy as np
-from hwoutils.spectral import spectral_breaks
 from jaxtyping import Array
+from optixstuff.spectral import spectral_breaks
 
 from .base import AbstractPhysicalModel
 

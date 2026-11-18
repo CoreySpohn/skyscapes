@@ -2,7 +2,7 @@
 
 import equinox as eqx
 import numpy as np
-from hwoutils.spectral import spectral_breaks
+from optixstuff.spectral import spectral_breaks
 
 from .base import AbstractDisk
 

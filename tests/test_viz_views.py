@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from hwoutils.constants import G, Mearth2kg, Msun2kg
-from hwoutils.grids import PixelGrid, SkyOrientation
+from optixstuff.grids import PixelGrid, SkyOrientation
 from zodi import DensityDust
 
 import skyscapes.viz as viz

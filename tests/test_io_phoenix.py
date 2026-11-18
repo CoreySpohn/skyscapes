@@ -20,7 +20,7 @@ from astropy import units as u
 from astropy.io import fits
 from hwoutils.constants import Rsun2m, h, k_B, nm2m, pc2m, sigma_SB
 from hwoutils.constants import c as c_si
-from hwoutils.spectral import Band, Quadrature
+from optixstuff.spectral import Band, Quadrature
 
 from skyscapes.datasets import fetch_castelli_kurucz, fetch_phoenix
 from skyscapes.io import (

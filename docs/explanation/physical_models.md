@@ -42,7 +42,7 @@ star's flux. Blackbody contrast against a `BlackbodyStar` retains the
 equivalent analytic ratio to avoid losing numerical range. Thermal flux
 needs the observer distance but does not require a nonzero or defined
 stellar spectrum; a contrast ratio still needs a valid denominator.
-Consumers integrate photon densities with `hwoutils.spectral.Quadrature`;
+Consumers integrate photon densities with `optixstuff.spectral.Quadrature`;
 source methods accept wavelength arrays and have no band or bin-width input.
 The model photon result has shape `(K, T) + wavelength_nm.shape`.
 

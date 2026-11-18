@@ -39,7 +39,7 @@ from hwoutils.conversions import (
     mag_to_flux_jy,
 )
 from hwoutils.epoch import Epoch
-from hwoutils.grids import PixelGrid, SkyOrientation
+from optixstuff.grids import PixelGrid, SkyOrientation
 from orbix.equations.orbit import state_vector_to_keplerian
 from orbix.system import FrameOrbit, phase_angle_rad
 from zodi.jax import AYOZodi

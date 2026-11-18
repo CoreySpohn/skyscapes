@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import numpy as np
-from hwoutils.spectral import Transmission
+from optixstuff.spectral import Transmission
 
 
 def bandpass_from_table(path, *, wavelength_unit="nm") -> Transmission:

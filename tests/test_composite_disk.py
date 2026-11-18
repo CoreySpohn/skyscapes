@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from hwoutils.grids import PixelGrid, SkyOrientation
+from optixstuff.grids import PixelGrid, SkyOrientation
 from zodi import DensityDust
 
 from skyscapes.disk import AbstractDisk, CompositeDisk, ExovistaDisk, GraterDisk

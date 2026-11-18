@@ -14,7 +14,7 @@ from hwoutils.constants import c, h, k_B, pc2m, sigma_SB
 from hwoutils.conversions import (
     jy_to_photons_per_nm_per_m2,
 )
-from hwoutils.spectral import Band, Quadrature
+from optixstuff.spectral import Band, Quadrature
 
 from skyscapes.scene import AbstractStar, BlackbodyStar, FlatStar, Star
 

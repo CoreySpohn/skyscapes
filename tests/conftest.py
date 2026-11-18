@@ -18,7 +18,7 @@ config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp  # noqa: E402
 import pytest  # noqa: E402
-from hwoutils.grids import PixelGrid, SkyOrientation  # noqa: E402
+from optixstuff.grids import PixelGrid, SkyOrientation  # noqa: E402
 
 from skyscapes.datasets import fetch_scene  # noqa: E402
 from skyscapes.disk.composite import orient_disk  # noqa: E402

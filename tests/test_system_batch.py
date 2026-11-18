@@ -6,8 +6,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from hwoutils.epoch import Epoch
-from hwoutils.grids import PixelGrid, SkyOrientation
-from hwoutils.spectral import Band, Quadrature
+from optixstuff.grids import PixelGrid, SkyOrientation
+from optixstuff.spectral import Band, Quadrature
 
 from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.scene import FlatStar, Planet, Scene

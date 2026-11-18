@@ -5,9 +5,9 @@ import interpax
 import jax
 import jax.numpy as jnp
 import numpy as np
-from hwoutils.grids import PixelGrid
 from hwoutils.map_coordinates import map_coordinates
 from jaxtyping import Array
+from optixstuff.grids import PixelGrid
 
 from .base import AbstractDisk, check_sky_grid
 

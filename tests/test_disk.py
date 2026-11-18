@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from hwoutils.constants import arcsec2rad, h
-from hwoutils.grids import Measure, PixelGrid, SkyOrientation, resample
+from optixstuff.grids import Measure, PixelGrid, SkyOrientation, resample
 from zodi import DensityDust, SurfaceBrightnessDust
 
 from skyscapes.disk import (
@@ -416,7 +416,7 @@ def test_system_point_radiance_matches_grid(kind):
     if kind == "cube":
         # The input is affine in wavelength, so interpax reproduces linear
         # interpolation. Resample the independent native radiance as before.
-        from hwoutils.grids import Image
+        from optixstuff.grids import Image
 
         contrast = cube[0] + (query - wave[0])[..., None, None] * (
             (cube[-1] - cube[0]) / (wave[-1] - wave[0])

@@ -14,7 +14,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 from hwoutils.conversions import au_to_arcsec
-from hwoutils.grids import Image, PixelGrid, SkyOrientation, resample
+from optixstuff.grids import Image, PixelGrid, SkyOrientation, resample
 
 from skyscapes.disk import AbstractDisk
 from skyscapes.disk.composite import orient_disk

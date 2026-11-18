@@ -336,7 +336,7 @@ cubes retain their native sky geometry. No detector handedness is implicit.
 
 ```python
 from zodi import SurfaceBrightnessDust
-from hwoutils.grids import PixelGrid, SkyOrientation
+from optixstuff.grids import PixelGrid, SkyOrientation
 from skyscapes.disk import GraterDisk
 
 disk = GraterDisk(
@@ -478,7 +478,7 @@ For a system observed through a triangular photon response, build the quadrature
 from the system and response before evaluating the contrast.
 
 ```python
-from hwoutils.spectral import Band, Quadrature, Transmission
+from optixstuff.spectral import Band, Quadrature, Transmission
 
 
 def green_band_contrasts(system, time_d):

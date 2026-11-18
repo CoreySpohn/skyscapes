@@ -4,8 +4,8 @@ from abc import abstractmethod
 
 import equinox as eqx
 import numpy as np
-from hwoutils.grids import Image, Measure, PixelGrid
 from jaxtyping import Array
+from optixstuff.grids import Image, Measure, PixelGrid
 
 
 def check_sky_grid(grid):

@@ -30,7 +30,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 from hwoutils.constants import Mearth2kg, Msun2kg
-from hwoutils.grids import PixelGrid, SkyOrientation
+from optixstuff.grids import PixelGrid, SkyOrientation
 from zodi import SurfaceBrightnessDust
 import equinox as eqx
 
