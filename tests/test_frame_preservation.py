@@ -148,7 +148,7 @@ def test_disk_image_mirrors_stored_columns(inc, pa):
 
 def test_demo_elements_unchanged(fits_fixture):
     """Changing vector components preserves the demo's recovered orbital elements."""
-    system = from_exovista(fits_fixture, load_disk=False).system
+    system = from_exovista(fits_fixture, load_disk=False)
     classical = system.dynamics.orbits.to_classical()
     actual = [
         [

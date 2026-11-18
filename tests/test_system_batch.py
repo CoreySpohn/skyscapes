@@ -10,11 +10,11 @@ from hwoutils.grids import PixelGrid, SkyOrientation
 from hwoutils.spectral import Band, Quadrature
 
 from skyscapes.physical_model import LambertianPhysicalModel
-from skyscapes.scene import FlatStar, Planet, System
+from skyscapes.scene import FlatStar, Planet, Scene
 
 
 def _scene(count):
-    return System.from_classical(
+    return Scene.from_classical(
         FlatStar(1e9),
         (Planet(jnp.ones(count), LambertianPhysicalModel(jnp.full(count, 0.3))),),
         star_mass_Msun=1.0,
@@ -37,7 +37,7 @@ def _equal(a, b):
 def test_round_trips():
     """Fails if host packing loses leaves; exact storage has zero rounding budget."""
     scenes = [_scene(k) for k in (0, 1, 3, 6)]
-    split = System.from_classical(
+    split = Scene.from_classical(
         FlatStar(1e9),
         (
             Planet(jnp.array([2.0]), LambertianPhysicalModel(jnp.array([0.1]))),
@@ -55,16 +55,16 @@ def test_round_trips():
         w_rad=0.2,
         M0_rad=0.7,
     )
-    empty = System(scenes[0].star, (), scenes[0].dynamics)
+    empty = Scene(scenes[0].star, (), scenes[0].dynamics)
     scenes.extend((split, empty))
-    batch = System.from_systems(scenes)
+    batch = Scene.from_systems(scenes)
     for actual, expected in zip(batch.to_systems(), scenes, strict=True):
         _equal(actual, expected)
         assert actual.body_index == expected.body_index
-        restored = System.from_table(expected.to_table(), template=expected)
+        restored = Scene.from_table(expected.to_table(), template=expected)
         _equal(restored, expected)
         assert restored.body_index == expected.body_index
-    single = System(
+    single = Scene(
         split.star,
         (
             Planet(
@@ -80,7 +80,7 @@ def test_round_trips():
     _equal(restored, single)
     assert restored.body_index == single.body_index
     table = batch.to_table()
-    _equal(System.from_table(table, template=scenes[3]), batch)
+    _equal(Scene.from_table(table, template=scenes[3]), batch)
     assert all(isinstance(x, np.ndarray) for x in jax.tree.leaves(batch))
 
 
@@ -106,7 +106,7 @@ def _read(system, times, ephemeris=None):
 
 _RULE = Quadrature.build([Band(560.0, 640.0)], order=2)
 _read_jit = jax.jit(_read)
-_ephemeris_jit = jax.jit(System.ephemeris)
+_ephemeris_jit = jax.jit(Scene.ephemeris)
 
 
 @pytest.mark.parametrize("count", [0, 1, 3, 6])
@@ -118,8 +118,8 @@ def test_parity_and_padding(count):
     """
     scene = _scene(count)
     times = jnp.array([17.0, 230.0])
-    small = System.from_systems([scene], capacity=6)
-    large = System.from_systems([scene], capacity=11)
+    small = Scene.from_systems([scene], capacity=6)
+    large = Scene.from_systems([scene], capacity=11)
     truth = _read_jit(scene, times)
     a, b = _read_jit(small, times), _read_jit(large, times)
     for name, expected in truth.items():
@@ -132,7 +132,7 @@ def test_parity_and_padding(count):
             np.asarray(extended).view(np.uint64),
             err_msg=name,
         )
-    solve = System.ephemeris if count == 3 else _ephemeris_jit
+    solve = Scene.ephemeris if count == 3 else _ephemeris_jit
     eph = solve(small, times)
     unpadded = solve(scene, times)
     extended_eph = solve(large, times)
@@ -160,7 +160,7 @@ def test_masked_gradients():
     Zero derivatives follow exact mask algebra; finite real derivatives must
     survive at circular, face-on padding, including geometry and dMag.
     """
-    batch = System.from_systems([_scene(1)], capacity=3)
+    batch = Scene.from_systems([_scene(1)], capacity=3)
     times = jnp.array([17.0, 230.0])
 
     def loss(s):
@@ -189,11 +189,11 @@ def test_take_vmap_times_and_compile():
     2 ULP for CPU vector math at the float64 rounding floor.
     """
     scenes = [_scene(k) for k in (0, 1, 3, 6, 1, 3)]
-    batch = System.from_systems(scenes, batch_shape=(2, 3))
+    batch = Scene.from_systems(scenes, batch_shape=(2, 3))
     times = jnp.array([17.0, 230.0])
-    direct = System(FlatStar(1e9), batch.planets[0], batch.dynamics, valid=batch.valid)
+    direct = Scene(FlatStar(1e9), batch.planets[0], batch.dynamics, valid=batch.valid)
     np.testing.assert_array_equal(
-        jax.jit(System.positions)(direct, times), _read_jit(batch, times)["positions"]
+        jax.jit(Scene.positions)(direct, times), _read_jit(batch, times)["positions"]
     )
     taken = jax.jit(lambda s, i: s.take(i))(batch, jnp.asarray(1))
     _equal(taken, jax.tree.map(lambda x: x[:, 1], batch))
@@ -212,14 +212,14 @@ def test_take_vmap_times_and_compile():
 def test_shared_times_and_one_compile():
     """Fails if equal time rows differ or valid counts retrace; exact mask algebra."""
     scenes = [_scene(k) for k in (0, 1, 3, 6, 1, 3)]
-    batch = System.from_systems(scenes, batch_shape=(2, 3))
+    batch = Scene.from_systems(scenes, batch_shape=(2, 3))
     times = jnp.array([17.0, 230.0])
     _equal(
         _read_jit(batch, times), _read_jit(batch, jnp.broadcast_to(times, (2, 3, 2)))
     )
     compiled = jax.jit(lambda s: s.positions(times))
     compiled(batch).block_until_ready()
-    changed = System.from_systems(list(reversed(scenes)), batch_shape=(2, 3))
+    changed = Scene.from_systems(list(reversed(scenes)), batch_shape=(2, 3))
     compiled(changed).block_until_ready()
     assert compiled._cache_size() == 1
 
@@ -230,7 +230,7 @@ def test_precision():
     Float32 uses 1e-5 relative tolerance for accumulated orbital-phase roundoff;
     float64 output dtype and host packing preservation are exact requirements.
     """
-    batch = System.from_systems([_scene(3)], capacity=6)
+    batch = Scene.from_systems([_scene(3)], capacity=6)
     times = jnp.array([123.0, 777.0, 1500.0, 1826.25])
     truth = _read_jit(batch, times)
     assert all(x.dtype == np.float64 for x in jax.tree.leaves(truth))
@@ -239,7 +239,7 @@ def test_precision():
             lambda x: x.astype(np.float32) if x.dtype != bool else x, batch
         )
         actual = _read_jit(single, times.astype(jnp.float32))
-        rebuilt = System.from_systems(batch.to_systems(), capacity=6)
+        rebuilt = Scene.from_systems(batch.to_systems(), capacity=6)
     _equal(rebuilt, batch)
     # A sky coordinate crosses zero; compare relative vector error there.
     delta = np.linalg.norm(actual["positions"] - truth["positions"], axis=-3)
@@ -292,7 +292,7 @@ def test_invalid_batches(kind):
             is_leaf=lambda x: x is None,
         )
     with pytest.raises(ValueError):
-        System.from_systems([a, b], **options)
+        Scene.from_systems([a, b], **options)
 
 
 @pytest.mark.parametrize("kind", ["grid", "cached", "thermal", "time"])
@@ -326,9 +326,9 @@ def test_other_model_padding(kind):
             waves, jnp.array([0.0]), jnp.full((3, 3, 1), 1e-9)
         )
     source = eqx.tree_at(lambda s: s.planets[0].physical_model, source, model)
-    batch = System.from_systems([source], capacity=6)
+    batch = Scene.from_systems([source], capacity=6)
     _equal(batch.to_systems()[0], source)
-    _equal(System.from_table(batch.to_table(), template=batch), batch)
+    _equal(Scene.from_table(batch.to_table(), template=batch), batch)
     times = jnp.array([17.0, 230.0])
     values = _read_jit(batch, times)
     for name in ("contrasts", "band_contrasts", "planet_flux_densities"):
@@ -359,7 +359,7 @@ def test_atmosphere_shared_axes():
     )
     model = eqx.tree_at(lambda m: m.absorption, model, absorption)
     source = eqx.tree_at(lambda s: s.planets[0].physical_model, _scene(3), model)
-    batch = System.from_systems([source], capacity=6)
+    batch = Scene.from_systems([source], capacity=6)
     packed = batch.planets[0].physical_model
     assert packed.surface.spectrum.shape == (1, 3)
     assert packed.species[0].rayleigh_xs.shape == (1, 3)

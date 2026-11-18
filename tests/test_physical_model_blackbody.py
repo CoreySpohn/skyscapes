@@ -9,7 +9,7 @@ import pytest
 from hwoutils.constants import Mearth2kg, Msun2kg, Rearth2m, Rsun2m
 
 from skyscapes.physical_model import BlackbodyPhysicalModel, LambertianPhysicalModel
-from skyscapes.scene import BlackbodyStar, FlatStar, Planet, System
+from skyscapes.scene import BlackbodyStar, FlatStar, Planet, Scene
 
 # CODATA 2018 exact values, typed here so the expectation is independent.
 H, C, KB = 6.62607015e-34, 299792458.0, 1.380649e-23
@@ -20,7 +20,7 @@ T_D = jnp.array([0.0, 1.0])
 
 def _system(model, star=STAR, rp=15.7):
     planet = Planet(jnp.array([rp]), model)
-    return System.from_classical(
+    return Scene.from_classical(
         star=star,
         planets=(planet,),
         star_mass_Msun=1.96,

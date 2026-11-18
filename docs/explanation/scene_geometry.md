@@ -34,7 +34,7 @@ from hwoutils.grids import PixelGrid, SkyOrientation
 from zodi import SurfaceBrightnessDust
 import equinox as eqx
 
-from skyscapes import System, viz
+from skyscapes import Scene, viz
 from skyscapes.disk import GraterDisk
 from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.scene import FlatStar, Planet
@@ -63,7 +63,7 @@ disk = GraterDisk(
     n_slices_los=41,
 )
 grid = PixelGrid.regular((121, 121), 0.0085, "arcsec", orientation=SkyOrientation(0.0))
-system = System.from_classical(
+system = Scene.from_classical(
     star=star,
     planets=(planets,),
     star_mass_Msun=1.0,
@@ -86,9 +86,9 @@ system = System.from_classical(
 
 | Quantity | Convention |
 |---|---|
-| Sky frame | `(x, y, z)`, star-centered. `x` is the east offset (Delta alpha* = Delta RA cos Dec), `y` the north (Dec) offset, and `+z` points away from the observer. This (east, north, away) frame is right-handed, with dz/dt positive receding. `System.ephemeris` holds barycentric states; `System.positions` returns star-relative `(x, y)` in arcsec. The phase angle is the standard star-planet-observer angle, 0 at full phase (planet behind the star) and pi at new phase, as orbix returns it, so `cos(beta) = z / r` in this frame. |
+| Sky frame | `(x, y, z)`, star-centered. `x` is the east offset (Delta alpha* = Delta RA cos Dec), `y` the north (Dec) offset, and `+z` points away from the observer. This (east, north, away) frame is right-handed, with dz/dt positive receding. `Scene.ephemeris` holds barycentric states; `Scene.positions` returns star-relative `(x, y)` in arcsec. The phase angle is the standard star-planet-observer angle, 0 at full phase (planet behind the star) and pi at new phase, as orbix returns it, so `cos(beta) = z / r` in this frame. |
 | Sky images | Pixel centers and orientation come from the caller's `PixelGrid`. The standard north-up grid has `SkyOrientation(0, parity=-1)`, east to the left. Other rotations, parity and pixel bases are explicit. |
-| Disk orientation | `System.midplane_inc_deg` and `System.midplane_position_angle_deg` override parametric disk orientations. Loaded cubes retain their native geometry. |
+| Disk orientation | `Scene.midplane_inc_deg` and `Scene.midplane_position_angle_deg` override parametric disk orientations. Loaded cubes retain their native geometry. |
 | Inclination | Zero face-on; the projected axis ratio is `abs(cos(i))`. The representations `(i, PA)` and `(180-i, PA+180)` describe the same plane and near half. |
 | Position angle | Astronomical, north through east: PA=0 places the major axis north-south, PA=90 east-west. |
 | Near side | For inclination below 90, the near minor direction is `(-cos(PA), sin(PA))` in east/north; it reverses above 90. Grains toward the observer scatter forward. |

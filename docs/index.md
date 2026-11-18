@@ -11,8 +11,8 @@ through loaders ({func}`~skyscapes.from_exovista`); skyscapes does not
 try to replace them.
 
 - A `Scene` is "everything on the sky that the telescope sees" --
-  one `System` (a star with planets and optionally a disk) plus
-  optional background sources (zodiacal light, background galaxies, etc.).
+  a star with planets, an optional disk (the exozodi) and optional local
+  zodiacal light, held by one `Scene`.
 - Source models (`Star`, `Planet`, `Disk`, physical models,
   backgrounds) are composable `eqx.Module`s -- swap any one without
   touching the rest, or swap the whole class for a higher-fidelity
@@ -31,7 +31,7 @@ products.
 ```mermaid
 flowchart LR
     src["External sources<br/>ExoVista · spectra · catalogues"]
-    sky(["<b>skyscapes</b><br/>Scene · System · Star · Planet · Disk · PhysicalModel"])
+    sky(["<b>skyscapes</b><br/>Scene · Star · Planet · Disk · PhysicalModel"])
     opt["<b>optixstuff</b><br/>Instrument"]
     cor["<b>coronagraphoto</b><br/>2D image simulation"]
     jet["<b>jaxedith</b><br/>Scalar count rates"]
@@ -60,15 +60,15 @@ scene = from_exovista("path/to/exovista_system.fits")  # with a default AYOZodi
 ```
 
 Building one from scratch is a little more involved -- a `Scene`
-composes a `System` (star + planets + optional disk) with an optional
+holds a star, planets, an optional disk and an optional
 `zodi.jax.AbstractLocalZodi`. `Planet` owns its radii and physical model, while
-`System.dynamics` owns masses, orbital state, and observer distance:
+`Scene.dynamics` owns masses, orbital state, and observer distance:
 
 ```python
 import jax.numpy as jnp
 from hwoutils.constants import Mearth2kg, Msun2kg
 
-from skyscapes import Scene, System
+from skyscapes import Scene
 from skyscapes.scene import FlatStar, Planet
 from skyscapes.physical_model import LambertianPhysicalModel
 from zodi.jax import AYOZodi
@@ -87,7 +87,7 @@ zodi = AYOZodi(
     surface_brightness_mag_arcsec2=22.0,
 )
 
-system = System.from_classical(
+scene = Scene.from_classical(
     star=star,
     planets=(planet,),
     star_mass_Msun=1.0,
@@ -99,9 +99,6 @@ system = System.from_classical(
     i_rad=jnp.array([jnp.pi / 3]),
     w_rad=jnp.array([0.0]),
     M0_rad=jnp.array([0.0]),
-)
-scene = Scene(
-    system=system,
     zodi=zodi,
 )
 ```
@@ -116,7 +113,7 @@ pip install skyscapes
 
 **Scene primitives**:
 - [`skyscapes.scene`](explanation/source_models) -- `Star`, `Planet`,
-  `System`, `Scene`
+  `Scene`
 - [`skyscapes.disk`](explanation/source_models) -- `AbstractDisk`,
   `ExovistaDisk`, `GraterDisk`, `CompositeDisk`, ...
 - [`skyscapes.physical_model`](explanation/physical_models) --

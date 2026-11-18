@@ -53,9 +53,7 @@ def _write_scene(path, star_header):
 def test_system_file_star_has_full_angular_diameter(tmp_path, rstar, dist):
     """A system-file ANGDIAM is a radius; the Star still gets the diameter."""
     header = {"RSTAR": rstar, "DIST": dist, "ANGDIAM": 0.465 * rstar / (dist / 10.0)}
-    scene = from_exovista(
-        _write_scene(tmp_path / "s.fits", header), load_disk=False
-    ).system
+    scene = from_exovista(_write_scene(tmp_path / "s.fits", header), load_disk=False)
     expected = _expected_diameter_arcsec(rstar, dist)
     np.testing.assert_allclose(
         scene.star.angular_diameter_arcsec(scene.dist_pc), expected, rtol=1e-6
@@ -71,9 +69,7 @@ def test_system_file_star_has_full_angular_diameter(tmp_path, rstar, dist):
 def test_sun_at_ten_parsecs_spans_0p93_mas(tmp_path):
     """The Sun at 10 pc from a system file, whose ANGDIAM card reads 0.465."""
     header = {"RSTAR": 1.0, "DIST": 10.0, "ANGDIAM": 0.465}
-    scene = from_exovista(
-        _write_scene(tmp_path / "s.fits", header), load_disk=False
-    ).system
+    scene = from_exovista(_write_scene(tmp_path / "s.fits", header), load_disk=False)
     assert float(scene.star.angular_diameter_arcsec(scene.dist_pc)) == pytest.approx(
         9.3009e-4, rel=1e-4
     )
@@ -82,9 +78,7 @@ def test_sun_at_ten_parsecs_spans_0p93_mas(tmp_path):
 def test_system_file_star_without_a_radius_is_a_point(tmp_path):
     """ExoVista's default system-file RSTAR is 0, with ANGDIAM 0 to match."""
     header = {"RSTAR": 0.0, "DIST": 10.0, "ANGDIAM": 0.0}
-    scene = from_exovista(
-        _write_scene(tmp_path / "p.fits", header), load_disk=False
-    ).system
+    scene = from_exovista(_write_scene(tmp_path / "p.fits", header), load_disk=False)
     assert float(scene.star.angular_diameter_arcsec(scene.dist_pc)) == 0.0
 
 
@@ -97,9 +91,7 @@ def test_catalog_star_keeps_its_angular_diameter(tmp_path, theta_mas, dist):
     """
     rstar = dist * theta_mas / 1000.0 / _EXOVISTA_RSUN_AU / 2.0
     header = {"RSTAR": rstar, "DIST": dist, "ANGDIAM": theta_mas}
-    scene = from_exovista(
-        _write_scene(tmp_path / "c.fits", header), load_disk=False
-    ).system
+    scene = from_exovista(_write_scene(tmp_path / "c.fits", header), load_disk=False)
     expected = _expected_diameter_arcsec(rstar, dist)
     np.testing.assert_allclose(
         scene.star.angular_diameter_arcsec(scene.dist_pc), expected, rtol=1e-6

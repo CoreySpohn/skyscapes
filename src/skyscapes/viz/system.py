@@ -1,8 +1,8 @@
 """The system view: star, planets and disk extent in one physical frame.
 
 skyscapes supplies what eyepiece cannot know: where each planet is at an
-epoch (``System.positions`` and ``System.ephemeris``), where the disk's
-midplane sits (``System.midplane_inc_deg`` / ``midplane_position_angle_deg`` through
+epoch (``Scene.positions`` and ``Scene.ephemeris``), where the disk's
+midplane sits (``Scene.midplane_inc_deg`` / ``midplane_position_angle_deg`` through
 the library's sky rotation), which way the observer is (``-z``), and that
 RA offsets are drawn increasing to the left.
 """
@@ -23,11 +23,6 @@ _SIDE_LABELS = (
     r"$z$, away from the observer [AU]",
     "offset along the projected minor axis [AU]",
 )
-
-
-def _unpack(system_or_scene):
-    """The ``System`` inside a ``Scene``, or the ``System`` itself."""
-    return getattr(system_or_scene, "system", system_or_scene)
 
 
 def _default_labels(n):
@@ -86,7 +81,7 @@ def plot_system(
 
     ``view="sky"`` is the sky-projected scene in arcsec, RA offset
     increasing to the left: planet positions at ``time_d`` from
-    ``System.positions``, optional orbit tracks over ``track_time_d``, and the
+    ``Scene.positions``, optional orbit tracks over ``track_time_d``, and the
     disk's inner and outer truncation rings projected at the system's
     midplane inclination and position angle, with the line of nodes. The
     observer looks along ``+z``, into the page.
@@ -99,14 +94,14 @@ def plot_system(
     and each planet sits at its true distance toward or away from the
     observer.
 
-    The disk's orientation comes only from ``System.midplane_inc_deg``
+    The disk's orientation comes only from ``Scene.midplane_inc_deg``
     (in ``[0, 180]``) and ``midplane_position_angle_deg``; the planets' orbits carry
     their own elements and are not assumed coplanar with it. The major-axis
     position angle is north through east. Within about 6 degrees of face-on
     the near-side label is left off.
 
     Args:
-        system_or_scene: A ``skyscapes.System`` or ``skyscapes.Scene``.
+        system_or_scene: A ``skyscapes.Scene``.
         time_d: Scalar time of the planet markers, in days from the scene
             epoch. Required when the system has planets.
         view: ``"sky"`` or ``"side"``.
@@ -115,7 +110,7 @@ def plot_system(
             and the planet labels, so this view matches every other figure
             of the document. Names it does not declare take the brand
             roles (star yellow, planet cyan).
-        planet_labels: One label per planet, in ``System.positions`` order.
+        planet_labels: One label per planet, in ``Scene.positions`` order.
             None labels them ``b``, ``c``, ... .
         track_time_d: Optional times in days from the scene epoch,
             shape ``(T,)``, over which to draw each planet's track.
@@ -147,7 +142,7 @@ def plot_system(
 
     if view not in _VIEWS:
         raise ValueError(f"view must be one of {_VIEWS}, got {view!r}")
-    system = _unpack(system_or_scene)
+    system = system_or_scene
     n_planets = system.n_planets
     if n_planets and time_d is None:
         raise TypeError("time_d is required to place the planets")

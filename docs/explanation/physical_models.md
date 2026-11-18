@@ -31,7 +31,7 @@ flowchart TB
     APM --> SUM
 ```
 
-`System.planet_flux_densities` calls
+`Scene.planet_flux_densities` calls
 `physical_model.photon_flux_density(wavelength_nm, phase_angle_rad=...,
 star_planet_distance_AU=..., Rp_Rearth=..., time_d=..., star=..., dist_pc=...)`. This scene
 reader supplies a scalar wavelength and returns `(K, T)` in ph/s/m²/nm.
@@ -46,7 +46,7 @@ Consumers integrate photon densities with `hwoutils.spectral.Quadrature`;
 source methods accept wavelength arrays and have no band or bin-width input.
 The model photon result has shape `(K, T) + wavelength_nm.shape`.
 
-`System.contrasts` and `System.alpha_dMag` call
+`Scene.contrasts` and `Scene.alpha_dMag` call
 `physical_model.contrast_at_time(phase_angle_rad, star_planet_distance_AU,
 wavelength_nm, Rp_Rearth, time_d=..., star=..., dist_pc=...)`. This returns per-planet
 flux-ratio contrast, shape `(K, T)` for `K` planets and `T` epochs.
@@ -58,7 +58,7 @@ override the hook to use the physical epochs directly.
 Each physical model carries per-planet state as JAX arrays of length
 `K`. Planet radius is passed in at call time from the host `Planet`;
 the model does not store it. Heterogeneous planets
-(different physical-model classes) compose into a `System.planets`
+(different physical-model classes) compose into a `Scene.planets`
 tuple, with one `Planet` per physical-model type.
 
 ## Variants and when to use them
@@ -325,7 +325,7 @@ loop (forward simulation, MCMC sampling, multi-target evaluation).
 ## Composition with `Planet`
 
 A `Planet` carries its radii (`Rp_Rearth`) and a physical model.
-The shared `System.dynamics` owns masses and orbital state:
+The shared `Scene.dynamics` owns masses and orbital state:
 
 ```python
 import jax.numpy as jnp
@@ -339,14 +339,14 @@ planet = Planet(
 )
 ```
 
-Heterogeneous physical models compose at the `System.planets` level
+Heterogeneous physical models compose at the `Scene.planets` level
 -- one `Planet` per model type, each batching its own `K` planets:
 
 Requires a user-supplied `orbix.system.System` named `dynamics`,
 stellar data, and physical models.
 
 ```python notest
-from skyscapes import System
+from skyscapes import Scene
 from skyscapes.physical_model import PrecomputedPhysicalModel
 
 lambertian_planet = Planet(
@@ -357,7 +357,7 @@ cached_planet = Planet(
     Rp_Rearth=...,
     physical_model=PrecomputedPhysicalModel.from_physical_model(...),
 )
-system = System(
+system = Scene(
     star=star,
     planets=(lambertian_planet, cached_planet),
     dynamics=dynamics,

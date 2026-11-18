@@ -7,8 +7,15 @@ import skyscapes
 
 def test_toplevel_identity():
     """Top-level convenience names point at the canonical scene/io locations."""
-    assert skyscapes.System is skyscapes.scene.System
+    assert skyscapes.Scene is skyscapes.scene.Scene
     assert skyscapes.from_exovista is skyscapes.io.from_exovista
+
+
+def test_system_is_gone():
+    """The planetary System container was merged into Scene."""
+    assert not hasattr(skyscapes, "System")
+    assert not hasattr(skyscapes.scene, "System")
+    assert not hasattr(skyscapes.Scene, "system")
 
 
 def test_submodules_importable():

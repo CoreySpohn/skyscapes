@@ -34,7 +34,7 @@ from skyscapes.physical_model import (
     SumPhysicalModel,
     TimeSeriesPhysicalModel,
 )
-from skyscapes.scene import BlackbodyStar, FlatStar, Planet, Star, System
+from skyscapes.scene import BlackbodyStar, FlatStar, Planet, Scene, Star
 
 from .conftest import two_body_reference
 from .test_io_exovista_versions import scene_file as exovista_scene_file  # noqa: F401
@@ -43,7 +43,7 @@ from .test_io_exovista_versions import scene_file as exovista_scene_file  # noqa
 def _system(star, planets, *, a_AU=None, planet_mass_Msun=None, **kwargs):
     """Circular test scenes with explicit, separately owned dynamics."""
     count = sum(p.n_planets for p in planets)
-    return System.from_classical(
+    return Scene.from_classical(
         star,
         planets,
         star_mass_Msun=kwargs.pop("star_mass_Msun", 1.0),
@@ -66,7 +66,7 @@ def _make_planet(Ag: float, Rp_Rearth: float) -> Planet:
 
 
 def test_system_basic_fields():
-    """System stores star and planets tuple; disk defaults to None."""
+    """Scene stores star and planets tuple; disk defaults to None."""
     star = FlatStar(flux_phot_per_nm_m2=1e9)
     p1 = _make_planet(0.3, 1.0)
     p2 = _make_planet(0.5, 2.0)
@@ -78,7 +78,7 @@ def test_system_basic_fields():
 
 
 def test_system_with_disk_field():
-    """System stores an AbstractDisk when provided."""
+    """Scene stores an AbstractDisk when provided."""
     star = FlatStar(flux_phot_per_nm_m2=1e9)
     p = _make_planet(0.3, 1.0)
     wl = jnp.linspace(400.0, 1000.0, 5)
@@ -96,7 +96,7 @@ def test_system_with_disk_field():
 
 
 def test_system_positions_stacks_planets():
-    """System.positions concatenates per-planet (2, K, T) into (2, K_total, T)."""
+    """Scene.positions concatenates per-planet (2, K, T) into (2, K_total, T)."""
     star = FlatStar(flux_phot_per_nm_m2=1e9)
     p1 = _make_planet(0.3, 1.0)
     p2 = _make_planet(0.5, 2.0)
@@ -108,7 +108,7 @@ def test_system_positions_stacks_planets():
 
 
 def test_system_contrasts_stacks_planets():
-    """System.contrasts returns (K_total, T) per-planet contrast."""
+    """Scene.contrasts returns (K_total, T) per-planet contrast."""
     star = FlatStar(flux_phot_per_nm_m2=1e9)
     p1 = _make_planet(0.3, 1.0)
     p2 = _make_planet(0.5, 2.0)
@@ -476,7 +476,7 @@ def test_stellar_observables_scale_sign_and_sum(mass):
         rtol=3e-14,
         atol=0,
     )
-    batched = System(
+    batched = Scene(
         star,
         (jax.tree.map(lambda a, b: jnp.concatenate((a, b)), planet, other),),
         pair.dynamics,
@@ -528,7 +528,7 @@ def test_band_contrast_tophat_and_narrow_limits(tabulated):
         np.testing.assert_allclose(
             actual[0, 0, 0], 1.4481434672863644e-6, rtol=3e-14, atol=0
         )
-    batched = System(
+    batched = Scene(
         star,
         (jax.tree.map(lambda a, b: jnp.concatenate((a, b)), planet, other),),
         system.dynamics,
@@ -639,7 +639,7 @@ def _ephemeris_scene(e=0.05, inc=0.7, masses=(0.001, 0.005), reverse=False):
     n = len(masses)
     indices = list(range(n))[::-1] if reverse else list(range(n))
     planets = tuple(_make_planet(0.3 + i * 0.2, 1.0 + i) for i in indices)
-    return System.from_classical(
+    return Scene.from_classical(
         FlatStar(1e9),
         planets,
         star_mass_Msun=1.0,
@@ -782,7 +782,7 @@ def test_ephemeris_scene_order_and_reuse(batched, monkeypatch):
     def unexpected_solve(*args, **kwargs):
         raise AssertionError("A supplied ephemeris must never solve again")
 
-    monkeypatch.setattr(System, "ephemeris", unexpected_solve)
+    monkeypatch.setattr(Scene, "ephemeris", unexpected_solve)
     shared = _scene_observables(system, times, ephemeris=eph)
     reordered = _scene_observables(reverse, times, ephemeris=reversed_eph)
     for name, want in defaults.items():
@@ -888,7 +888,7 @@ def test_classical_builder_traced_order_and_ownership():
     """Fails if host sorting traces, explicit hierarchy fails, or owners duplicate."""
 
     def build(a, order=None, mass=1.0):
-        return System.from_classical(
+        return Scene.from_classical(
             FlatStar(1e9),
             (Planet(jnp.ones(2), LambertianPhysicalModel(jnp.array([0.3, 0.5]))),),
             star_mass_Msun=mass,
@@ -941,16 +941,16 @@ def test_scene_rejects_invalid_body_mapping(mapping):
     """Fails if a duplicate, missing, out-of-range or noninteger body is accepted."""
     scene = _ephemeris_scene()
     with pytest.raises(ValueError, match="permutation"):
-        System(scene.star, scene.planets, scene.dynamics, body_index=mapping)
+        Scene(scene.star, scene.planets, scene.dynamics, body_index=mapping)
     with pytest.raises(ValueError, match="count"):
-        System(scene.star, scene.planets[:1], scene.dynamics)
+        Scene(scene.star, scene.planets[:1], scene.dynamics)
 
 
 def test_empty_scene_and_reference_epoch():
     """Fails if the zero-body chain breaks or time_d is silently offset by epoch."""
     from hwoutils.epoch import Epoch
 
-    empty = System.from_classical(
+    empty = Scene.from_classical(
         FlatStar(1.0),
         (),
         star_mass_Msun=1.0,
@@ -1012,7 +1012,7 @@ def test_scene_epoch_float32_resolution(inclination):
     elapsed_d = 30.0 * 365.25
     epoch = Epoch(2451545.0 + elapsed_d)
     axis = (G * Msun2kg * (10.0 / (2 * np.pi)) ** 2) ** (1.0 / 3.0)
-    scene = System.from_classical(
+    scene = Scene.from_classical(
         FlatStar(1.0),
         (_make_planet(0.3, 1.0),),
         star_mass_Msun=1.0,
@@ -1044,10 +1044,10 @@ def test_scene_epoch_float32_resolution(inclination):
         absolute = jax.tree.map(
             lambda x: x.astype(jnp.float32) if eqx.is_inexact_array(x) else x, zero
         )
-        actual = eqx.filter_jit(System.positions)(
+        actual = eqx.filter_jit(Scene.positions)(
             single, time_d=jnp.asarray(times_d, jnp.float32)
         )
-        negative = eqx.filter_jit(System.positions)(
+        negative = eqx.filter_jit(Scene.positions)(
             absolute, time_d=jnp.asarray(epoch.jd(times_d), jnp.float32)
         )
     error = float(np.max(np.abs(np.asarray(actual) - truth)))
@@ -1070,7 +1070,7 @@ def test_exovista_scene_epoch_recovers_dates(request, version, start_year):
         years = start_year + np.array([0.0, 0.001, 0.002])
         for hdu in hdul[star_ext:]:
             hdu.data[:, 0] = years
-    scene = from_exovista(path, load_disk=False, planet_spectra="time").system
+    scene = from_exovista(path, load_disk=False, planet_spectra="time")
     grids = [scene.star._times_d]
     grids.extend(p.physical_model.times_d for p in scene.planets)
     if scene.star.spots is not None:

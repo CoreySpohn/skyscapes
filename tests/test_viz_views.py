@@ -22,7 +22,7 @@ from hwoutils.grids import PixelGrid, SkyOrientation
 from zodi import DensityDust
 
 import skyscapes.viz as viz
-from skyscapes import Scene, System
+from skyscapes import Scene
 from skyscapes.disk import ExovistaDisk, GraterDisk
 from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.scene import FlatStar, Planet
@@ -89,7 +89,7 @@ def make_system(incl=60.0, pa=30.0, disk=None, planets=True):
             for key in ("a_AU", "e", "W_rad", "i_rad", "w_rad", "M0_rad")
         }
     )
-    return System.from_classical(
+    return Scene.from_classical(
         star=star,
         planets=(make_planets(),) if planets else (),
         star_mass_Msun=1.0,
@@ -254,9 +254,14 @@ def test_view_creates_a_figure_when_no_axes_is_given(name):
     assert result.fig is result.ax.figure
 
 
-def test_views_accept_a_scene():
-    """A Scene is unpacked to its System by every system-level view."""
-    scene = Scene(system=make_system())
+def test_views_accept_a_scene_with_zodi():
+    """Every view draws a Scene that also carries a local zodi."""
+    import equinox as eqx
+    from zodi.jax import AYOZodi
+
+    scene = eqx.tree_at(
+        lambda s: s.zodi, make_system(), AYOZodi(), is_leaf=lambda x: x is None
+    )
     viz.plot_system(scene, 0.0)
     viz.plot_disk_radiance(scene, wavelength_nm=550.0, grid=_DISK_GRID)
     viz.plot_disk_geometry(scene)
@@ -404,7 +409,7 @@ def test_system_views_use_east_north_away(view):
         Rp_Rearth=jnp.array([1.0]),
         physical_model=LambertianPhysicalModel(Ag=jnp.array([0.3])),
     )
-    system = System.from_classical(
+    system = Scene.from_classical(
         star=FlatStar(flux_phot_per_nm_m2=1e9),
         planets=(planet,),
         star_mass_Msun=1.0,
@@ -1390,7 +1395,7 @@ def test_side_view_superior_conjunction_is_away_from_observer():
         Rp_Rearth=jnp.array([1.0]),
         physical_model=LambertianPhysicalModel(Ag=jnp.array([0.3])),
     )
-    system = System.from_classical(
+    system = Scene.from_classical(
         star=make_system().star,
         planets=(planet,),
         star_mass_Msun=1.0,

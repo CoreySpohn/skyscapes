@@ -1,7 +1,7 @@
 """Shared formatting helpers for hierarchical ``__repr__`` methods.
 
 Each leaf class in skyscapes (atmospheres, disks, stars) defines
-its own multi-line ``__repr__``; aggregator classes (Planet, System,
+its own multi-line ``__repr__``; aggregator classes (Planet, Scene,
 Scene) use :func:`indent` to nest the children one level deeper. The
 result is a tree-shaped summary that lets you call ``repr(scene)`` in
 a notebook and see everything in the scene at a glance.
@@ -16,7 +16,7 @@ from jaxtyping import Array
 def indent(text: str, prefix: str = "  ") -> str:
     """Prefix every line of ``text`` with ``prefix``.
 
-    Used by aggregator-class reprs (``Scene``, ``System``, ``Planet``)
+    Used by aggregator-class reprs (``Scene``, ``Planet``)
     to nest the child reprs one level deeper.
     """
     return "\n".join(prefix + line for line in text.split("\n"))
