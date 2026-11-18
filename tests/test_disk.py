@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from hwoutils.constants import arcsec2rad, h
-from hwoutils.grids import PixelGrid, SkyOrientation, resample
+from hwoutils.grids import Measure, PixelGrid, SkyOrientation, resample
 from zodi import DensityDust, SurfaceBrightnessDust
 
 from skyscapes.disk import (
@@ -138,8 +138,8 @@ def test_calibration_anchor_and_pixel_area(kind):
     )
     expected_pixel = 3 * 10 ** (-0.4 * 22) / 10 ** (-0.4 * 4.83) * 0.010**2
     np.testing.assert_allclose(pixel_contrast, expected_pixel, rtol=1e-6)
-    assert image.measure == "per_unit_area"
-    assert image.quantity == "ph s^-1 m^-2 nm^-1 sr^-1"
+    assert image.measure == Measure.density("sr")
+    assert image.quantity == "ph s^-1 m^-2 nm^-1"
 
 
 @pytest.mark.parametrize("kind", ["exovista", "grater"])
@@ -292,6 +292,7 @@ def test_exovista_disk_flux_shape():
     disk = ExovistaDisk(grid, wave, cube)
     star = solar_star()
     image = disk.photon_radiance(wave, 0.0, star=star, dist_pc=10.0, grid=grid)
+    assert image.leading_axes == ("wavelength",)
     expected = cube * star.photon_flux_density(wave, 0.0, dist_pc=10.0)[:, None, None]
     omega = 0.01**2 * (np.pi / (180 * 3600)) ** 2
     np.testing.assert_allclose(
@@ -428,8 +429,8 @@ def test_system_point_radiance_matches_grid(kind):
             radiance,
             native,
             ("wave_row", "wave_column"),
-            "per_unit_area",
-            "ph s^-1 m^-2 nm^-1 sr^-1",
+            Measure.density("sr"),
+            "ph s^-1 m^-2 nm^-1",
         )
         np.testing.assert_allclose(
             actual, resample(native_image, grid).data, rtol=5e-14

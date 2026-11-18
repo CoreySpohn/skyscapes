@@ -5,7 +5,6 @@ import interpax
 import jax
 import jax.numpy as jnp
 import numpy as np
-from hwoutils.constants import arcsec2rad
 from hwoutils.grids import PixelGrid
 from hwoutils.map_coordinates import map_coordinates
 from jaxtyping import Array
@@ -17,8 +16,8 @@ class ExovistaDisk(AbstractDisk):
     """Wavelength-interpolated contrast cube on a native PixelGrid.
 
     contrast_cube holds F_pixel/Phi_star, shape (n_wave, ny, nx). Since
-    F_pixel = L * Omega_native and Omega_native = native_grid.pixel_area
-    * arcsec2rad**2 sr, L = contrast_cube * Phi_star / Omega_native.
+    F_pixel = L * Omega_native and Omega_native = native_grid.cell_area("sr");
+    L = contrast_cube * Phi_star / Omega_native.
     Spatial sampling is bilinear, with zero extension of the native samples.
     There is no target pixel area factor. Geometry is baked into the cube;
     system angles are ignored.
@@ -85,4 +84,4 @@ class ExovistaDisk(AbstractDisk):
         contrast = contrast.reshape(wave.shape + east.shape)
         flux = star.photon_flux_density(wave, time_d, dist_pc=dist_pc)
         flux = flux.reshape(wave.shape + (1,) * east.ndim)
-        return contrast * flux / (grid.pixel_area * arcsec2rad**2)
+        return contrast * flux / grid.cell_area("sr")

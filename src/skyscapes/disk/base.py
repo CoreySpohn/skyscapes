@@ -4,7 +4,7 @@ from abc import abstractmethod
 
 import equinox as eqx
 import numpy as np
-from hwoutils.grids import Image, PixelGrid
+from hwoutils.grids import Image, Measure, PixelGrid
 from jaxtyping import Array
 
 
@@ -19,9 +19,11 @@ def radiance_image(data, grid):
     return Image(
         data,
         grid,
-        tuple(f"wavelength_{i}" for i in range(data.ndim - 2)),
-        measure="per_unit_area",
-        quantity="ph s^-1 m^-2 nm^-1 sr^-1",
+        ("wavelength",)
+        if data.ndim == 3
+        else tuple(f"wavelength_{i}" for i in range(data.ndim - 2)),
+        measure=Measure.density("sr"),
+        quantity="ph s^-1 m^-2 nm^-1",
     )
 
 
@@ -29,8 +31,7 @@ class AbstractDisk(eqx.Module):
     """Extended scattered light queried at sky coordinates.
 
     Values are photon radiance per steradian, independent of pixel area.
-    Consumers integrate a pixel by multiplying by
-    ``grid.pixel_area * hwoutils.constants.arcsec2rad**2``.
+    Call ``Image.integrated()`` to integrate over the sky pixels.
     Times are scalar days from the scene epoch; wavelengths have any shape.
     """
 
@@ -44,7 +45,7 @@ class AbstractDisk(eqx.Module):
         """Return an Image with shape ``wavelength_nm.shape + grid.shape``.
 
         ``grid`` must have unit arcsec and a SkyOrientation. The image has
-        measure per_unit_area and quantity ph s^-1 m^-2 nm^-1 sr^-1.
+        a per-steradian density measure and quantity ph s^-1 m^-2 nm^-1.
         """
         check_sky_grid(grid)
         east, north = grid.orientation.detector_to_sky(*grid.coordinates())

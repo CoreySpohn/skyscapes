@@ -154,7 +154,7 @@ class System(eqx.Module):
         """Disk photon radiance on grid, using the system's midplane angles.
 
         Returns ph s^-1 m^-2 nm^-1 sr^-1 with shape wavelength_nm.shape
-        + grid.shape, measure="per_unit_area". No disk returns a zero image.
+        + grid.shape. A system without a disk returns zero radiance.
         Batched systems exclude disks.
         """
         from ..disk.base import check_sky_grid, radiance_image

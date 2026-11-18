@@ -330,8 +330,7 @@ photon-flux method, supplying geometry and observer distance.
 
 Disks return `photon_radiance(wavelength_nm, time_d, *, star, dist_pc, grid)`:
 an `Image` in ph s^-1 m^-2 nm^-1 sr^-1 on a caller-owned arcsec `PixelGrid`
-with `SkyOrientation`. Multiply its data by `grid.pixel_area * arcsec2rad**2`
-for per-pixel photon flux density. Leading image axes match the wavelength array.
+with `SkyOrientation`. Call `image.integrated()` for per-pixel photon flux density. Leading image axes match the wavelength array.
 The native ExoVista cube is host contrast per pixel; its radiance divides by
 the native pixel solid angle before resampling as a density. Composites ask
 every component to render on the requested grid before summation.
