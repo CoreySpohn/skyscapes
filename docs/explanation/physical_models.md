@@ -309,7 +309,7 @@ contrast = cached.contrast(
 ```
 
 `from_physical_model` currently supports `ExoJaxPhysicalModel` (the
-classmethod calls the model's internal `_reflectivity_all_planets`).
+classmethod calls the model's public `reflectivity()`).
 The cache can also be persisted to disk via `.save(path)` and reloaded
 via `PrecomputedPhysicalModel.load(path)`.
 

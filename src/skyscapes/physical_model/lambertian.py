@@ -1,7 +1,13 @@
 """Gray Lambertian physical model -- analytic phase, no wavelength dependence."""
 
+import interpax
+import jax
 import jax.numpy as jnp
 from hwoutils.constants import Rearth2AU
+from hwoutils.conversions import (
+    nm_to_wavenumber_cm,
+    spherical_to_geometric_albedo,
+)
 from jaxtyping import Array
 
 from .._repr import fmt_scalar_or_array
@@ -26,6 +32,51 @@ def reflected_contrast(phase_angle_rad, dist_AU, Ag, Rp_Rearth):
     and Ag is geometric albedo (possibly wavelength dependent).
     """
     return Ag * lambert_phase(phase_angle_rad) * (Rp_Rearth * Rearth2AU / dist_AU) ** 2
+
+
+def project_reflected(
+    reflectivity: Array,
+    nu_grid: Array,
+    *,
+    phase_angle_rad: Array,
+    star_planet_distance_AU: Array,
+    wavelength_nm: Array,
+    radius_Rearth: Array,
+) -> Array:
+    """Reflected-light contrast cube from a plane-parallel reflectivity.
+
+    Interpolates ``reflectivity`` onto the wavelengths (linear, with linear
+    extrapolation, so values outside the grid can be negative), converts the
+    spherical albedo to geometric albedo with the Lambertian-sphere factor
+    2/3 (Seager 2010, eq 3.36), and applies Lambert phase and ``(Rp/d)^2``.
+
+    Args:
+        reflectivity: Plane-parallel reflectivity ``R(nu)``, shape ``(K, n_nu)``.
+        nu_grid: Wavenumber grid [cm^-1], shape ``(n_nu,)``.
+        phase_angle_rad: Star-planet-observer phase angle, shape ``(K, T)``.
+        star_planet_distance_AU: Star-planet distance [AU], shape ``(K, T)``.
+        wavelength_nm: Wavelengths [nm], shape ``(W,)``.
+        radius_Rearth: Planet radius [Earth radii], shape ``(K,)``.
+
+    Returns:
+        Contrast, shape ``(W, K, T)``.
+    """
+    target_nu = nm_to_wavenumber_cm(wavelength_nm)
+
+    def interp_one_planet(spectrum):
+        return interpax.interp1d(
+            target_nu, nu_grid, spectrum, method="linear", extrap=True
+        )
+
+    albedo = spherical_to_geometric_albedo(
+        jax.vmap(interp_one_planet)(reflectivity)
+    )  # (K, W)
+    return reflected_contrast(
+        phase_angle_rad[None, :, :],
+        star_planet_distance_AU[None, :, :],
+        albedo.T[:, :, None],
+        radius_Rearth[None, :, None],
+    )
 
 
 class LambertianPhysicalModel(AbstractPhysicalModel):

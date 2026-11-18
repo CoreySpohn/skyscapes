@@ -48,7 +48,6 @@ from pathlib import Path
 from typing import Any
 
 import equinox as eqx
-import interpax
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -56,14 +55,13 @@ from exojax.rt import ArtReflectPure
 from exojax.utils.grids import wavenumber_grid
 from hwoutils.conversions import (
     nm_to_wavenumber_cm,
-    spherical_to_geometric_albedo,
 )
 from jaxtyping import Array
 
 from ..._repr import indent
 from ..base import AbstractPhysicalModel
 from ..cached import PrecomputedPhysicalModel
-from ..lambertian import reflected_contrast
+from ..lambertian import project_reflected
 from .components import (
     MOLECULE_RECIPES,
     Absorption,
@@ -703,7 +701,7 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
         F_unit = jnp.ones(self.n_nu)
         return self.rt_engine.run(dtau_total, ssa, g_asym, refl_surface, F_unit)
 
-    def _reflectivity_all_planets(self) -> Array:
+    def reflectivity(self) -> Array:
         """Plane-parallel reflectivity for every planet, shape ``(K, n_nu)``.
 
         Loops over K planets in Python. JIT unrolls the loop; for the
@@ -717,89 +715,44 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
     def contrast(
         self,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         wavelength_nm: Array,
         Rp_Rearth: Array,
     ) -> Array:
         """Per-planet, per-time geometric-albedo contrast at one wavelength.
 
-        Linear interpolation preserves nonnegative reflectivity inside the
-        grid. Outside it, linear extrapolation is enabled and can be negative.
-
-        Args:
-            phase_angle_rad: Star-planet-observer phase angle, ``(K, T)``.
-            dist_AU: Star-planet distance [AU], ``(K, T)``.
-            wavelength_nm: Scalar wavelength [nm].
-            Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
-
-        Returns:
-            Contrast = ``A_g(lambda) * Lambert_phase(beta) * (Rp/d)^2``,
-            shape ``(K, T)``. The 2-stream RT produces the plane-
-            parallel (spherical) reflectivity; we convert to geometric
-            albedo via the Lambertian-sphere factor 2/3 (Seager 2010,
-            eq 3.36) so the output is a geometric-albedo contrast --
-            the same convention as :class:`LambertianPhysicalModel`.
+        The single-wavelength case of :meth:`contrast_cube`; shape ``(K, T)``.
+        Runs the 2-stream RT once per call.
         """
-        R_per_planet = self._reflectivity_all_planets()
-        target_nu_cm_inv = nm_to_wavenumber_cm(wavelength_nm)
-
-        def interp_one(spectrum):
-            return interpax.interp1d(
-                target_nu_cm_inv,
-                self.nu_grid,
-                spectrum,
-                method="linear",
-                extrap=True,
-            )
-
-        R_at_wl = jax.vmap(interp_one)(R_per_planet)
-
-        return reflected_contrast(
+        return self.contrast_cube(
             phase_angle_rad,
-            dist_AU,
-            spherical_to_geometric_albedo(R_at_wl)[:, None],
-            Rp_Rearth[:, None],
-        )
+            star_planet_distance_AU,
+            jnp.reshape(wavelength_nm, (1,)),
+            Rp_Rearth,
+        )[0]
 
     def contrast_cube(
         self,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         wavelengths_nm: Array,
         Rp_Rearth: Array,
     ) -> Array:
-        """Per-planet, per-time contrast across many wavelengths.
+        """Per-planet, per-time geometric-albedo contrast across wavelengths.
 
-        Uses linear interpolation within the grid and linear extrapolation
-        outside it, with the same nonnegativity limits as :meth:`contrast`.
-
-        Returns ``(W, K, T)`` geometric-albedo contrast cube. Computes
-        the underlying 2-stream RT exactly once per planet rather
-        than once per wavelength; applies the spherical-to-geometric
-        Lambertian-sphere conversion (Seager 2010, eq 3.36) the same
-        way as :meth:`contrast`.
+        Runs the 2-stream RT once per planet rather than once per
+        wavelength. Returns shape ``(W, K, T)`` via :func:`project_reflected`: linear
+        interpolation (extrapolating linearly outside the grid, where values
+        can be negative), then the Lambertian-sphere conversion to geometric
+        albedo (Seager 2010, eq 3.36), Lambert phase and ``(Rp/d)^2``.
         """
-        R_per_planet = self._reflectivity_all_planets()
-        target_nu_cm_inv = nm_to_wavenumber_cm(wavelengths_nm)
-
-        def interp_one_planet(spectrum):
-            return interpax.interp1d(
-                target_nu_cm_inv,
-                self.nu_grid,
-                spectrum,
-                method="linear",
-                extrap=True,
-            )
-
-        R_at_wls = spherical_to_geometric_albedo(
-            jax.vmap(interp_one_planet)(R_per_planet)
-        )  # (K, W)
-
-        return reflected_contrast(
-            phase_angle_rad[None, :, :],
-            dist_AU[None, :, :],
-            R_at_wls.T[:, :, None],
-            Rp_Rearth[None, :, None],
+        return project_reflected(
+            self.reflectivity(),
+            self.nu_grid,
+            phase_angle_rad=phase_angle_rad,
+            star_planet_distance_AU=star_planet_distance_AU,
+            wavelength_nm=wavelengths_nm,
+            radius_Rearth=Rp_Rearth,
         )
 
     def __repr__(self) -> str:

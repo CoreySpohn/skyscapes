@@ -331,7 +331,7 @@ def _a_band_ratio(model):
     each bin, including its edges; the first and last bins define continuum.
     """
     wavelength_nm = (1.0e7 / np.asarray(model.nu_grid))[::-1]
-    reflectivity = np.asarray(model._reflectivity_all_planets()[0])[::-1]
+    reflectivity = np.asarray(model.reflectivity()[0])[::-1]
     edges = 750.0 * np.exp(np.arange(6) / 140.0)
     means = []
     for lo, hi in pairwise(edges):

@@ -24,19 +24,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import equinox as eqx
-import interpax
-import jax
 import jax.numpy as jnp
 import numpy as np
-from hwoutils.conversions import (
-    nm_to_wavenumber_cm,
-    spherical_to_geometric_albedo,
-)
 from jaxtyping import Array
 
 from .._repr import indent
 from .base import AbstractPhysicalModel
-from .lambertian import reflected_contrast
+from .lambertian import project_reflected
 
 # Bump when the cache file layout changes in a way that invalidates
 # previously-saved caches.
@@ -65,17 +59,17 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
     ) -> PrecomputedPhysicalModel:
         """Pre-compute the reflectivity from an existing physical model.
 
-        Calls the model's internal ``_reflectivity_all_planets``
-        once and packages the result. Requires the model to expose
-        ``_reflectivity_all_planets``, ``nu_grid``, and ``n_nu`` --
+        Calls the model's public ``reflectivity()`` once and packages the
+        result. Requires the model to expose ``reflectivity()``,
+        ``nu_grid``, and ``n_nu`` --
         presently :class:`ExoJaxPhysicalModel` is the supported source.
         """
         try:
-            reflectivity = model._reflectivity_all_planets()
+            reflectivity = model.reflectivity()
         except AttributeError as e:  # pragma: no cover
             raise TypeError(
                 f"{type(model).__name__} does not expose "
-                "_reflectivity_all_planets; PrecomputedPhysicalModel only "
+                "reflectivity(); PrecomputedPhysicalModel only "
                 "supports physical models that compute a per-planet R(nu) "
                 "spectrum (currently ExoJaxPhysicalModel)."
             ) from e
@@ -136,84 +130,42 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
     def contrast(
         self,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         wavelength_nm: Array,
         Rp_Rearth: Array,
     ) -> Array:
         """Per-planet, per-time geometric-albedo contrast at one wavelength.
 
-        Linear interpolation preserves nonnegative reflectivity inside the
-        grid. Outside it, linear extrapolation is enabled and can be negative.
-
-        Args:
-            phase_angle_rad: Star-planet-observer phase angle, shape ``(K, T)``.
-            dist_AU: Star-planet distance [AU], shape ``(K, T)``.
-            wavelength_nm: Scalar wavelength [nm].
-            Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
-
-        Returns:
-            Contrast = ``A_g(lambda) * Lambert_phase(beta) * (Rp/d)^2``,
-            shape ``(K, T)``. The cached array stores the underlying
-            model's plane-parallel (spherical) reflectivity; we convert
-            to geometric albedo via the Lambertian-sphere factor 2/3
-            (Seager 2010, eq 3.36) at call time -- same convention as
-            :class:`ExoJaxPhysicalModel.contrast`.
+        The single-wavelength case of :meth:`contrast_cube`; shape ``(K, T)``.
         """
-        target_nu = nm_to_wavenumber_cm(wavelength_nm)
-
-        def interp_one(spectrum):
-            return interpax.interp1d(
-                target_nu,
-                self.nu_grid,
-                spectrum,
-                method="linear",
-                extrap=True,
-            )
-
-        R_at_wl = jax.vmap(interp_one)(self.reflectivity)  # (K,)
-        return reflected_contrast(
+        return self.contrast_cube(
             phase_angle_rad,
-            dist_AU,
-            spherical_to_geometric_albedo(R_at_wl)[:, None],
-            Rp_Rearth[:, None],
-        )
+            star_planet_distance_AU,
+            jnp.reshape(wavelength_nm, (1,)),
+            Rp_Rearth,
+        )[0]
 
     def contrast_cube(
         self,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         wavelengths_nm: Array,
         Rp_Rearth: Array,
     ) -> Array:
         """Per-planet, per-time geometric-albedo contrast across wavelengths.
 
-        Uses linear interpolation within the grid and linear extrapolation
-        outside it, with the same nonnegativity limits as :meth:`contrast`.
-
-        Returns shape ``(W, K, T)``. Avoids per-wavelength
-        recomputation by vectorising the interpolation; applies the
-        Lambertian-sphere spherical-to-geometric conversion the same
-        way as :meth:`contrast`.
+        Returns shape ``(W, K, T)`` via :func:`project_reflected`: linear
+        interpolation (extrapolating linearly outside the grid, where values
+        can be negative), then the Lambertian-sphere conversion to geometric
+        albedo (Seager 2010, eq 3.36), Lambert phase and ``(Rp/d)^2``.
         """
-        target_nu = nm_to_wavenumber_cm(wavelengths_nm)
-
-        def interp_one_planet(spectrum):
-            return interpax.interp1d(
-                target_nu,
-                self.nu_grid,
-                spectrum,
-                method="linear",
-                extrap=True,
-            )
-
-        R_at_wls = spherical_to_geometric_albedo(
-            jax.vmap(interp_one_planet)(self.reflectivity)
-        )  # (K, W)
-        return reflected_contrast(
-            phase_angle_rad[None, :, :],
-            dist_AU[None, :, :],
-            R_at_wls.T[:, :, None],
-            Rp_Rearth[None, :, None],
+        return project_reflected(
+            self.reflectivity,
+            self.nu_grid,
+            phase_angle_rad=phase_angle_rad,
+            star_planet_distance_AU=star_planet_distance_AU,
+            wavelength_nm=wavelengths_nm,
+            radius_Rearth=Rp_Rearth,
         )
 
     def __repr__(self) -> str:

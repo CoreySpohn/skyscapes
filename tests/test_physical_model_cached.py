@@ -247,3 +247,61 @@ def test_cached_setup_roundtrip_using_fake_engines(tmp_path, monkeypatch):
         cached_a.contrast(phase, dist, wl, Rp),
         cached_b.contrast(phase, dist, wl, Rp),
     )
+
+
+def test_cached_and_live_models_agree_on_contrast_cube():
+    """Cached and live models give the same cube for the same reflectivity.
+
+    Fails if the two models diverge in interpolation, albedo conversion or
+    contrast. Tolerance: rtol 1e-6 (both run the one shared projection).
+    """
+    K, T = 2, 3
+    model = make_physical_model(K=K)
+    cached = PrecomputedPhysicalModel.from_physical_model(model)
+    assert cached.reflectivity.shape == model.reflectivity().shape
+    phase = jnp.linspace(0.3, 2.0, K * T).reshape(K, T)
+    dist = jnp.linspace(0.8, 1.6, K * T).reshape(K, T)
+    wls = jnp.linspace(450.0, 900.0, 5)
+    Rp = jnp.array([1.0, 1.4])
+    live = model.contrast_cube(phase, dist, wls, Rp)
+    assert jnp.allclose(live, cached.contrast_cube(phase, dist, wls, Rp), rtol=1.0e-6)
+
+
+@pytest.mark.parametrize("which", ["cached", "live"])
+def test_scalar_contrast_is_the_cube_entry(which):
+    """``contrast`` at one wavelength equals the matching ``contrast_cube`` entry."""
+    K, T = 2, 3
+    model = make_physical_model(K=K)
+    if which == "cached":
+        model = PrecomputedPhysicalModel.from_physical_model(model)
+    phase = jnp.linspace(0.3, 2.0, K * T).reshape(K, T)
+    dist = jnp.linspace(0.8, 1.6, K * T).reshape(K, T)
+    wls = jnp.array([500.0, 640.0, 780.0])
+    Rp = jnp.array([1.0, 1.4])
+    cube = model.contrast_cube(phase, dist, wls, Rp)
+    for i, wl in enumerate(wls):
+        single = model.contrast(phase, dist, wl, Rp)
+        assert single.shape == (K, T)
+        assert jnp.allclose(single, cube[i], rtol=1.0e-6)
+
+
+def test_project_reflected_lambert_sphere_anchor():
+    """A Lambert sphere at quadrature, 1 Rearth and 1 AU has a known contrast.
+
+    R = 1.5 gives geometric albedo 2/3 * 1.5 = 1; Lambert phase at pi/2 is
+    1/pi; so contrast = (R_earth / AU)^2 / pi, built here from the IAU values.
+    """
+    from skyscapes.physical_model.lambertian import project_reflected
+
+    nu = jnp.linspace(1.0e4, 2.5e4, 20)
+    out = project_reflected(
+        jnp.full((1, 20), 1.5),
+        nu,
+        phase_angle_rad=jnp.full((1, 1), jnp.pi / 2),
+        star_planet_distance_AU=jnp.ones((1, 1)),
+        wavelength_nm=jnp.array([600.0]),
+        radius_Rearth=jnp.ones(1),
+    )
+    expected = (6.3781e6 / 1.495978707e11) ** 2 / jnp.pi
+    assert out.shape == (1, 1, 1)
+    assert jnp.allclose(out[0, 0, 0], expected, rtol=1.0e-5)
