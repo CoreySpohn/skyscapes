@@ -1,6 +1,8 @@
 """Sum of scattered-light components on a caller's sky grid."""
 
 import equinox as eqx
+import numpy as np
+from hwoutils.spectral import spectral_breaks
 
 from .base import AbstractDisk
 
@@ -31,6 +33,10 @@ class CompositeDisk(AbstractDisk):
     """Sum radiance from components that may have different native grids."""
 
     components: tuple[AbstractDisk, ...]
+
+    def spectral_breaks_nm(self) -> np.ndarray:
+        """Union of all component spectral breaks [nm]."""
+        return spectral_breaks(*self.components)
 
     def __check_init__(self):
         """Validate the declared disk inputs."""

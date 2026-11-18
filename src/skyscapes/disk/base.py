@@ -3,6 +3,7 @@
 from abc import abstractmethod
 
 import equinox as eqx
+import numpy as np
 from hwoutils.grids import Image, PixelGrid
 from jaxtyping import Array
 
@@ -32,6 +33,10 @@ class AbstractDisk(eqx.Module):
     ``grid.pixel_area * hwoutils.constants.arcsec2rad**2``.
     Times are scalar days from the scene epoch; wavelengths have any shape.
     """
+
+    def spectral_breaks_nm(self) -> np.ndarray:
+        """Wavelength breaks in the disk scattering spectrum [nm]."""
+        return np.empty(0)
 
     def photon_radiance(
         self, wavelength_nm, time_d, *, star, dist_pc, grid: PixelGrid

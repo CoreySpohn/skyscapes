@@ -239,6 +239,12 @@ line-resolved bands such as the O2 A-band and H2O, even when the final spectrum
 is binned to R=140. Use sampling resolving power $R_{\rm grid} \gtrsim 10^5$.
 This is distinct from the instrument resolving power.
 
+ExoJAX models and their precomputed reflectivity caches declare their native
+wavelength grid through `spectral_breaks_nm()`, so a band integral places
+quadrature nodes between every pair of grid points and resolves line cores.
+Four Gauss nodes across the O2 A-band instead of the native grid move the band
+mean by about 4%. Integration cost therefore scales with the grid size.
+
 The default is `resolving_power=1.5e5`. For the logarithmic wavenumber grid,
 $R_{\rm grid} = N / \ln(\nu_{\max}/\nu_{\min})$, using the point-count convention.
 Thus `N = ceil(resolving_power * ln(nu_max / nu_min))`, rounded up to even

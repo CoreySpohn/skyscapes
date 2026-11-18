@@ -1,5 +1,7 @@
 """Additive radiative components sharing one planet's geometry and radius."""
 
+import numpy as np
+from hwoutils.spectral import spectral_breaks
 from jaxtyping import Array
 
 from .base import AbstractPhysicalModel
@@ -17,6 +19,10 @@ class SumPhysicalModel(AbstractPhysicalModel):
     """
 
     components: tuple[AbstractPhysicalModel, ...]
+
+    def spectral_breaks_nm(self) -> np.ndarray:
+        """Union of all component spectral breaks [nm]."""
+        return spectral_breaks(*self.components)
 
     def __check_init__(self):
         """Reject an empty sum before tracing or evaluation."""

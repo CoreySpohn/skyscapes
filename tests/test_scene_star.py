@@ -275,15 +275,13 @@ def test_flat_fnu_quadrature_anchor(method):
         star.photon_flux_density(550.0, 0.0, dist_pc=10.0), anchor, rtol=3e-14
     )
     np.testing.assert_allclose(anchor, 9.9634e5, rtol=5e-6)
-    np.testing.assert_array_equal(star.quadrature_knots_nm, star.wavelengths_nm)
-    rule = Quadrature.build([Band(500.0, 600.0)], star.quadrature_knots_nm, order=4)
+    np.testing.assert_array_equal(star.spectral_breaks_nm(), star.wavelengths_nm)
+    rule = Quadrature.build([Band(500.0, 600.0)], star, order=4)
     actual = rule.integrate(star.photon_flux_density(rule.nodes_nm, 0.0, dist_pc=10.0))
     expected = fnu * 1e-26 / 6.62607015e-34 * np.log(600 / 500)
     np.testing.assert_allclose(actual, expected, rtol=1e-9, atol=0)
     if method == "linear":
-        midpoint = Quadrature.build(
-            [Band(500.0, 600.0)], star.quadrature_knots_nm, order=1
-        )
+        midpoint = Quadrature.build([Band(500.0, 600.0)], star, order=1)
         np.testing.assert_allclose(
             midpoint.integrate(
                 star.photon_flux_density(midpoint.nodes_nm, 0.0, dist_pc=10.0)

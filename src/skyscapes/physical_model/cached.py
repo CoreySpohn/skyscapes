@@ -26,6 +26,7 @@ from pathlib import Path
 import equinox as eqx
 import jax.numpy as jnp
 import numpy as np
+from hwoutils.conversions import wavenumber_cm_to_nm
 from jaxtyping import Array
 
 from .._repr import indent
@@ -52,6 +53,14 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
     reflectivity: Array
     nu_grid: Array
     n_nu: int = eqx.field(static=True)
+
+    def spectral_breaks_nm(self) -> np.ndarray:
+        """Declare the native line-by-line grid, in nm, as integration breaks.
+
+        Gauss nodes cannot resolve absorption lines between breaks, so a band
+        integral samples every native grid point. Cost scales with the grid.
+        """
+        return np.sort(np.asarray(wavenumber_cm_to_nm(np.asarray(self.nu_grid))))
 
     @classmethod
     def from_physical_model(

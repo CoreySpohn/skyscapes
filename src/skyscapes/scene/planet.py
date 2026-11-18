@@ -2,6 +2,7 @@
 
 import equinox as eqx
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array
 
 from .._repr import fmt_scalar_or_array, indent
@@ -18,6 +19,10 @@ class Planet(eqx.Module):
 
     Rp_Rearth: Array = eqx.field(converter=jnp.asarray)
     physical_model: AbstractPhysicalModel
+
+    def spectral_breaks_nm(self) -> np.ndarray:
+        """Wavelength breaks of the planetary spectrum [nm]."""
+        return self.physical_model.spectral_breaks_nm()
 
     @property
     def n_planets(self) -> int:

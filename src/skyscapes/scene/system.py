@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import wraps
 from inspect import signature
 from numbers import Integral
@@ -12,7 +13,7 @@ import jax.numpy as jnp
 import numpy as np
 from hwoutils.conversions import contrast_to_delta_mag
 from hwoutils.epoch import Epoch
-from hwoutils.spectral import Transmission, bin_mean
+from hwoutils.spectral import Quadrature, spectral_breaks
 from jaxtyping import Array
 from orbix.kepler import Markley
 from orbix.system import Body, Ephemeris, SkyFrame
@@ -552,109 +553,81 @@ class System(eqx.Module):
             jnp.asarray(wavelengths_nm)
         )
 
-    @_batch_method
-    def bin_mean_contrast_cube(
-        self,
-        centers_nm: Array,
-        widths_nm: Array,
-        time_d: Array,
-        *,
-        n_nodes: int = 4,
-        ephemeris=None,
-    ) -> Array:
-        """Ratio of bin-integrated planet and star photons, ``(W, K_total, T)``.
-
-        ``time_d`` is days from the scene epoch.
-
-        Centers and full nonnegative widths are ``(W,)`` in nm; dates are
-        ``(T,)``. Zero width returns ``contrast_cube``. For linear stellar
-        tables each stellar interval is integrated with ``n_nodes`` Gauss-
-        Legendre nodes, clipping the end intervals to the bin. This resolves
-        stellar lines and integrates the product of stellar flux and planet
-        contrast, with an exact stellar denominator for linear photon tables.
-        Resolve additional planetary features by increasing ``n_nodes``. Analytic
-        stars use one Gauss-Legendre rule per bin. This is a flux-weighted contrast,
-        not a mean of monochromatic contrasts. See Davis and Rabinowitz (1984),
-        Methods of Numerical Integration, for the quadrature rule. The static
-        interval cap covers all stellar knots.
-        """
-        eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
-        knots = self.star.quadrature_knots_nm
-        numerator = bin_mean(
-            lambda w: self.planet_flux_densities(w, time_d, ephemeris=eph),
-            centers_nm,
-            widths_nm,
-            n_nodes=n_nodes,
-            knots_nm=knots,
-            max_knots=None if knots is None else len(knots) + 1,
-        )
-        denominator = bin_mean(
-            lambda w: jax.vmap(
-                lambda t: self.star.photon_flux_density(
-                    w, t, dist_pc=self.dynamics.frame.dist_pc
-                )
-            )(time_d),
-            centers_nm,
-            widths_nm,
-            n_nodes=n_nodes,
-            knots_nm=knots,
-            max_knots=None if knots is None else len(knots) + 1,
-        )
-        centers, widths = jnp.asarray(centers_nm), jnp.asarray(widths_nm)
-        point_bin = centers - widths / 2 == centers + widths / 2
-        safe_denominator = jnp.where(point_bin[:, None], 1.0, denominator)
-        ratio = numerator / safe_denominator[:, None, :]
-        return jnp.where(
-            point_bin[:, None, None],
-            self.contrast_cube(centers, time_d, ephemeris=eph),
-            ratio,
-        )
+    def spectral_breaks_nm(self) -> np.ndarray:
+        """Union of stellar, planetary and disk wavelength breaks [nm]."""
+        models = (self.star, *self.planets)
+        if self.disk is not None:
+            models = (*models, self.disk)
+        return spectral_breaks(*models)
 
     @_batch_method
     def band_contrasts(
-        self, bandpass: Transmission, time_d: Array, *, n_nodes: int = 4, ephemeris=None
+        self,
+        quadrature: Quadrature,
+        time_d: Array,
+        *,
+        bandpass: Callable | None = None,
+        ephemeris=None,
     ) -> Array:
-        """Ratio of band-integrated planet and star photons, ``(K_total, T)``.
+        """Ratio of integrated planet and star photons, shape ``(W, K_total, T)``.
 
-        ``time_d`` is days from the scene epoch.
-
-        Multiply photon flux densities by the photon-counting transmission.
-        Split quadrature at both the bandpass table and stellar spectral
-        knots. ``n_nodes`` is the Gauss-Legendre order per interval: linear
-        transmission is exact at order one, its product with a linear photon
-        spectrum at order two. Increase the order to resolve smooth spectral
-        curvature or additional planetary features. The integrated stellar
-        photon flux must be nonzero.
+        Build the quadrature on the host with this system and any tabulated
+        bandpass. The optional photon-counting response is evaluated on all
+        ``(W, Q)`` wavelength nodes and must broadcast to that shape. Each
+        finite-width band must transmit nonzero stellar flux. Spectra may be
+        undefined where transmission is zero. A monochromatic channel returns
+        the model contrast directly, including for a reflected spectrum at a
+        stellar zero. An opaque response has undefined contrast.
+        Times are days from the scene epoch.
         """
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
-        centers = jnp.atleast_1d((bandpass.low_nm + bandpass.high_nm) / 2)
-        widths = jnp.atleast_1d(bandpass.high_nm - bandpass.low_nm)
-        knots = bandpass.quadrature_knots_nm
-        if self.star.quadrature_knots_nm is not None:
-            knots = jnp.sort(jnp.concatenate((knots, self.star.quadrature_knots_nm)))
-        quadrature = dict(
-            n_nodes=n_nodes,
-            knots_nm=knots,
-            max_knots=len(knots) + 1,
-            weight_fn=bandpass,
-        )
-        numerator = bin_mean(
-            lambda w: self.planet_flux_densities(w, time_d, ephemeris=eph),
-            centers,
-            widths,
-            **quadrature,
-        )[0]
-        denominator = bin_mean(
-            lambda w: jax.vmap(
-                lambda t: self.star.photon_flux_density(
-                    w, t, dist_pc=self.dynamics.frame.dist_pc
-                )
-            )(time_d),
-            centers,
-            widths,
-            **quadrature,
-        )[0]
-        return numerator / denominator[None, :]
+        wave = quadrature.nodes_nm
+        if len(quadrature.bands) == 1 and quadrature.bands[0].width_nm == 0:
+            contrast = self.contrast_cube(wave[:, 0], time_d, ephemeris=eph)
+            if bandpass is None:
+                return contrast
+            response = jnp.broadcast_to(bandpass(wave), wave.shape)[0, 0]
+            return jnp.where(response > 0, contrast, jnp.nan)
+
+        def densities(nodes):
+            planet = jax.vmap(
+                jax.vmap(lambda w: self.planet_flux_densities(w, time_d, ephemeris=eph))
+            )(nodes)
+            star = self.star.photon_flux_density(
+                nodes[..., None], time_d, dist_pc=self.dynamics.frame.dist_pc
+            )
+            return planet, star
+
+        if bandpass is not None:
+            throughput = jnp.broadcast_to(bandpass(wave), wave.shape)
+
+            def opaque_wings(nodes):
+                # Keep valid samples, including zeros of a fitted response:
+                # changing their transmission still changes detected photons.
+                planet, star = densities(nodes)
+                finite = jnp.all(jnp.isfinite(planet), axis=(-2, -1))
+                finite &= jnp.all(jnp.isfinite(star), axis=-1)
+                return (throughput == 0) & ~finite
+
+            masked = jax.lax.cond(
+                jnp.any(throughput == 0),
+                opaque_wings,
+                lambda nodes: jnp.zeros_like(nodes, dtype=bool),
+                wave,
+            )
+            # A zero cotangent times an undefined spectral slope can give NaN.
+            # Sample opaque, undefined nodes at a transmitted wavelength before
+            # differentiation. Their flux and throughput derivative are zero.
+            index = jnp.argmax(throughput > 0, axis=1, keepdims=True)
+            reference = jnp.take_along_axis(wave, index, axis=1)
+            wave = jnp.where(masked, reference, wave)
+            throughput = jnp.where(masked, 0.0, throughput)
+
+        planet, star = densities(wave)
+        if bandpass is not None:
+            planet = planet * throughput[..., None, None]
+            star = star * throughput[..., None]
+        return quadrature.integrate(planet) / quadrature.integrate(star)[:, None, :]
 
     @_batch_method
     def planet_flux_densities(

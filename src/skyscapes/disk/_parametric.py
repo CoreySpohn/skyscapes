@@ -5,6 +5,7 @@ from abc import abstractmethod
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 from hwoutils.constants import pc2AU
 from hwoutils.conversions import arcsec_to_au
 from zodi import AbstractDustAmplitude
@@ -21,10 +22,15 @@ class AbstractParametricDisk(AbstractDisk):
     """
 
     profile_id: eqx.AbstractClassVar[str]
+    wavelengths_nm: eqx.AbstractVar[jax.Array]
     amplitude: eqx.AbstractVar[AbstractDustAmplitude]
     inclination_deg: eqx.AbstractVar[jax.Array]
     position_angle_deg: eqx.AbstractVar[jax.Array]
     zero_point_jy: float | None = eqx.field(static=True, default=None, kw_only=True)
+
+    def spectral_breaks_nm(self) -> np.ndarray:
+        """Wavelength breaks of the tabulated scattering parameters [nm]."""
+        return np.asarray(self.wavelengths_nm)
 
     def __check_init__(self):
         """Validate the declared disk inputs."""

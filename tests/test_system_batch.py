@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from hwoutils.epoch import Epoch
 from hwoutils.grids import PixelGrid, SkyOrientation
-from hwoutils.spectral import Transmission
+from hwoutils.spectral import Band, Quadrature
 
 from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.scene import FlatStar, Planet, System
@@ -92,9 +92,8 @@ def _read(system, times, ephemeris=None):
         alpha_dMag=jnp.stack(system.alpha_dMag(times, **options), axis=-3),
         contrasts=system.contrasts(jnp.asarray(600.0), times, **options),
         band_contrasts=system.band_contrasts(
-            jax.tree.map(lambda x: x.astype(times.dtype), _BAND),
+            jax.tree.map(lambda x: x.astype(times.dtype), _RULE),
             times,
-            n_nodes=2,
             **options,
         ),
         planet_flux_densities=system.planet_flux_densities(
@@ -105,7 +104,7 @@ def _read(system, times, ephemeris=None):
     )
 
 
-_BAND = Transmission.tophat(600.0, 80.0)
+_RULE = Quadrature.build([Band(560.0, 640.0)], order=2)
 _read_jit = jax.jit(_read)
 _ephemeris_jit = jax.jit(System.ephemeris)
 

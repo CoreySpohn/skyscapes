@@ -5,6 +5,7 @@ from __future__ import annotations
 import interpax
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array
 
 from .base import AbstractPhysicalModel
@@ -25,6 +26,10 @@ class GridPhysicalModel(AbstractPhysicalModel):
     wavelengths_nm: Array
     phase_angle_deg: Array
     contrast_grid: Array
+
+    def spectral_breaks_nm(self) -> np.ndarray:
+        """Wavelength breaks of the phase-dependent contrast table [nm]."""
+        return np.unique(self.wavelengths_nm)
 
     def contrast(
         self,

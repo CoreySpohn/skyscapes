@@ -128,7 +128,7 @@ density, shape `(n_wl, n_time)`. `Star` converts this table once to photon
 density at construction. `photon_flux_density` interpolates that photon table
 and returns photons/s/m^2/nm. It replaces `spec_flux_density` by a rename
 only, with the same unit; the old method is removed.
-`quadrature_knots_nm` exposes table breakpoints for every interpolation method.
+`spectral_breaks_nm()` exposes table breakpoints for every interpolation method.
 A Gauss-Legendre rule split at the knots integrates a linear photon table
 exactly, even at order one. Direct construction uses cubic interpolation by
 default; stars imported with `from_exovista` use linear interpolation
@@ -476,14 +476,19 @@ exposure_time_s = compute_etc(scene, optical_path, target_snr=7.0)
 
 ## Band-integrated contrasts
 
-Use `hwoutils.spectral.Transmission` for a tabulated photon response:
+For a system observed through a triangular photon response, build the quadrature
+from the system and response before evaluating the contrast.
 
 ```python
-from hwoutils.spectral import Transmission
+from hwoutils.spectral import Band, Quadrature, Transmission
 
-response = Transmission.tophat(550.0, 100.0)
-contrasts = system.band_contrasts(response, time_d)
+
+def green_band_contrasts(system, time_d):
+    response = Transmission([500.0, 550.0, 600.0], [0.0, 1.0, 0.0])
+    rule = Quadrature.build([Band(500.0, 600.0)], system, response)
+    return system.band_contrasts(rule, time_d, bandpass=response)
 ```
 
 `skyscapes.io.bandpass_from_table(path)` also returns a `Transmission`.
-Quadrature splits at the response knots and the stellar spectrum knots.
+Quadrature splits at the response and system spectral breaks. The result has
+shape `(bands, planets, times)`. Omit `bandpass` for a unit photon response.

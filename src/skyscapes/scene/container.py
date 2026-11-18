@@ -21,6 +21,8 @@ the corresponding source types are implemented.
 from __future__ import annotations
 
 import equinox as eqx
+import numpy as np
+from hwoutils.spectral import spectral_breaks
 from zodi.jax import AbstractLocalZodi
 
 from .._repr import indent
@@ -38,6 +40,12 @@ class Scene(eqx.Module):
 
     system: System
     zodi: AbstractLocalZodi | None = None
+
+    def spectral_breaks_nm(self) -> np.ndarray:
+        """Union of system and background wavelength breaks [nm]."""
+        if self.zodi is None:
+            return self.system.spectral_breaks_nm()
+        return spectral_breaks(self.system, self.zodi)
 
     @property
     def star(self):

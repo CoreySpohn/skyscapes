@@ -18,6 +18,7 @@ import equinox as eqx
 import interpax
 import jax
 import jax.numpy as jnp
+import numpy as np
 from hwoutils.constants import pc2m
 from hwoutils.conversions import angular_diameter_arcsec, jy_to_photons_per_nm_per_m2
 from hwoutils.planck import planck_photon_radiance
@@ -53,10 +54,9 @@ class AbstractStar(eqx.Module):
     def angular_diameter_arcsec(self, dist_pc: Array) -> Array:
         """Apparent stellar diameter in arcseconds at observer distance dist_pc."""
 
-    @property
-    def quadrature_knots_nm(self) -> Array | None:
-        """Spectral integration knots [nm], or None for an analytic spectrum."""
-        return None
+    def spectral_breaks_nm(self) -> np.ndarray:
+        """Analytic stellar spectra have no wavelength breaks."""
+        return np.empty(0)
 
 
 class FlatStar(AbstractStar):
@@ -261,8 +261,7 @@ class Star(AbstractStar):
         wave, time = jnp.broadcast_arrays(wavelength_nm, time_d)
         return self._flux_interp(wave.reshape(-1), time.reshape(-1)).reshape(wave.shape)
 
-    @property
-    def quadrature_knots_nm(self) -> Array | None:
+    def spectral_breaks_nm(self) -> np.ndarray:
         """Return table breakpoints [nm] for consumer quadrature.
 
         Every interpolation method reports the table breakpoints. A linearly
@@ -270,7 +269,7 @@ class Star(AbstractStar):
         rule split at the knots, even at order one (Davis and Rabinowitz 1984,
         Methods of Numerical Integration).
         """
-        return self.wavelengths_nm
+        return np.unique(self.wavelengths_nm)
 
     def __repr__(self) -> str:
         """One-line summary of metadata + wavelength/time grid extent."""

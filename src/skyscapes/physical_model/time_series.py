@@ -63,6 +63,10 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
         ):
             raise ValueError("contrast_grid must contain finite nonnegative values")
 
+    def spectral_breaks_nm(self) -> np.ndarray:
+        """Wavelength breaks of the time-dependent contrast table [nm]."""
+        return np.unique(self.wavelengths_nm)
+
     def contrast(
         self,
         phase_angle_rad: Array,

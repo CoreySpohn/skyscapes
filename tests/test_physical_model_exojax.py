@@ -311,6 +311,11 @@ def test_saturated_band_contrast_nonnegative(cached):
     )
     if cached:
         model = PrecomputedPhysicalModel.from_physical_model(model)
+    np.testing.assert_allclose(
+        model.spectral_breaks_nm(),
+        np.sort(1.0e7 / np.asarray(model.nu_grid)),
+        rtol=1e-15,
+    )
     wavelengths_nm = 1.0e7 / jnp.linspace(1.0e4, 2.5e4, 301)
     phase, dist, radius = jnp.zeros((1, 1)), jnp.ones((1, 1)), jnp.ones(1)
     cube = model.contrast_cube(phase, dist, wavelengths_nm, radius)

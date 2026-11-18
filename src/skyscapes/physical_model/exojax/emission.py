@@ -258,6 +258,15 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
     rt_engine: Any = eqx.field(static=True)
     nu_grid: Array
     n_nu: int = eqx.field(static=True)
+
+    def spectral_breaks_nm(self) -> np.ndarray:
+        """Declare the native line-by-line grid, in nm, as integration breaks.
+
+        Gauss nodes cannot resolve absorption lines between breaks, so a band
+        integral samples every native grid point. Cost scales with the grid.
+        """
+        return np.sort(np.asarray(wavenumber_cm_to_nm(np.asarray(self.nu_grid))))
+
     cia: tuple[TabulatedCIA, ...] = ()
     cia_vmr: dict[str, Array] = eqx.field(default_factory=dict)
     mean_molecular_weight: float = 28.97

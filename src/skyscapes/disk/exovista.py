@@ -4,6 +4,7 @@ import equinox as eqx
 import interpax
 import jax
 import jax.numpy as jnp
+import numpy as np
 from hwoutils.constants import arcsec2rad
 from hwoutils.grids import PixelGrid
 from hwoutils.map_coordinates import map_coordinates
@@ -36,6 +37,10 @@ class ExovistaDisk(AbstractDisk):
         self._contrast_interp = interpax.CubicSpline(
             wavelengths_nm, contrast_cube, axis=0
         )
+
+    def spectral_breaks_nm(self) -> np.ndarray:
+        """Wavelength breaks of the stored contrast cube [nm]."""
+        return np.asarray(self.wavelengths_nm)
 
     def __check_init__(self):
         """Validate the declared disk inputs."""

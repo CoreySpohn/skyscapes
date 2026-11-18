@@ -21,6 +21,7 @@ from abc import abstractmethod
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array
 
 
@@ -31,6 +32,10 @@ class AbstractPhysicalModel(eqx.Module):
     grid contrast cube, ExoJax composition, etc.). The host planet's
     radius is supplied at call time via ``contrast(..., Rp_Rearth=...)``.
     """
+
+    def spectral_breaks_nm(self) -> np.ndarray:
+        """Analytic spectra declare no integration breaks; tabulated ones override."""
+        return np.empty(0)
 
     def photon_flux_density(
         self,

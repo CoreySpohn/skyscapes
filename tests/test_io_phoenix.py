@@ -20,7 +20,7 @@ from astropy import units as u
 from astropy.io import fits
 from hwoutils.constants import Rsun2m, h, k_B, nm2m, pc2m, sigma_SB
 from hwoutils.constants import c as c_si
-from hwoutils.spectral import bin_mean
+from hwoutils.spectral import Band, Quadrature
 
 from skyscapes.datasets import fetch_castelli_kurucz, fetch_phoenix
 from skyscapes.io import (
@@ -291,17 +291,13 @@ def test_castelli_kurucz_synthetic_units_and_missing_gravity(
         wavelength_range_nm=None,
         fetch=paths.__getitem__,
     )
-    centers, widths = jnp.array([1500.0, 4500.0]), jnp.array([400.0, 1000.0])
+    bands = (Band(1300.0, 1700.0), Band(4000.0, 5000.0))
+    rule = Quadrature.build(bands, star)
+    centers = np.asarray([b.center_nm for b in bands])
     surface = (factor * u.erg / u.cm**2 / u.s / u.AA).to_value(u.W / u.m**2 / u.nm)
     expected = surface * (Rsun2m / (10 * pc2m)) ** 2 * centers * nm2m / (h * c_si)
     np.testing.assert_allclose(
-        bin_mean(
-            lambda w: star.photon_flux_density(w, 0.0, dist_pc=10.0),
-            centers,
-            widths,
-            knots_nm=star.quadrature_knots_nm,
-            n_nodes=4,
-        ),
+        rule.mean(star.photon_flux_density(rule.nodes_nm, 0.0, dist_pc=10.0)),
         expected,
         rtol=1e-12,
     )
@@ -341,18 +337,13 @@ def test_castelli_kurucz_phoenix_overlap_bin_flux():
     )
     ck = from_castelli_kurucz(10000, 4.0, fetch=lambda _: ck_path, **kwargs)
     ph = from_phoenix(10000, 4.0, fetch=lambda _: ph_path, **kwargs)
-    centers = jnp.arange(1250.0, 5000.0, 500.0)
-    widths = jnp.full_like(centers, 500.0)
-    evaluate = eqx.filter_jit(
-        lambda s: bin_mean(
-            lambda w: s.photon_flux_density(w, 0.0, dist_pc=10.0),
-            centers,
-            widths,
-            knots_nm=s.quadrature_knots_nm,
-            max_knots=len(s.wavelengths_nm) + 1,
-        )
-    )
-    ck_flux = evaluate(ck)
-    ph_flux = evaluate(ph)
+    bands = Band(1000.0, 5000.0).channels(8)
+
+    @eqx.filter_jit
+    def evaluate(star, rule):
+        return rule.mean(star.photon_flux_density(rule.nodes_nm, 0.0, dist_pc=10.0))
+
+    ck_flux = evaluate(ck, Quadrature.build(bands, ck))
+    ph_flux = evaluate(ph, Quadrature.build(bands, ph))
     print("CK04/PHOENIX bin ratios:", np.asarray(ck_flux / ph_flux))
     np.testing.assert_allclose(ck_flux, ph_flux, rtol=0.05, atol=0)
