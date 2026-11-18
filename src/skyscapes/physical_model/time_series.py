@@ -66,7 +66,7 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
     def contrast(
         self,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         wavelength_nm: Array,
         Rp_Rearth: Array,
     ) -> Array:
@@ -78,7 +78,7 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
     def contrast_at_time(
         self,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         wavelength_nm: Array,
         Rp_Rearth: Array,
         *,
@@ -90,7 +90,7 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
 
         Args:
             phase_angle_rad: Phase angle [rad]; ignored.
-            dist_AU: Star-planet distance [AU]; ignored.
+            star_planet_distance_AU: Star-planet distance [AU]; ignored.
             wavelength_nm: Scalar wavelength, or one wavelength per query epoch.
             Rp_Rearth: Planet radius [Earth radii]; ignored.
             time_d: Observation times in days from the scene epoch,

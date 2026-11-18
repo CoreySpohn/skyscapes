@@ -41,7 +41,7 @@ def test_grid_returns_grid_value_on_nodes():
     # Interior phase in radians: 90 deg = pi/2
     result = model.contrast(
         phase_angle_rad=jnp.array([[jnp.pi / 2]]),
-        dist_AU=jnp.array([[1.0]]),  # ignored by GridPhysicalModel
+        star_planet_distance_AU=jnp.array([[1.0]]),  # ignored by GridPhysicalModel
         wavelength_nm=jnp.array([600.0]),
         Rp_Rearth=jnp.array([1.0]),  # ignored by GridPhysicalModel
     )
@@ -67,7 +67,7 @@ def test_grid_multiple_planets_independent():
     )
     result = model.contrast(
         phase_angle_rad=jnp.array([[jnp.pi / 3], [jnp.pi / 3]]),
-        dist_AU=jnp.array([[1.0], [1.0]]),
+        star_planet_distance_AU=jnp.array([[1.0], [1.0]]),
         wavelength_nm=jnp.array([600.0]),
         Rp_Rearth=jnp.array([1.0, 2.0]),
     )
@@ -97,7 +97,7 @@ def test_grid_handles_x64_query_against_float32_cube():
     with jax.enable_x64():
         result = model.contrast(
             phase_angle_rad=jnp.array([[jnp.pi / 2]], dtype=jnp.float64),
-            dist_AU=jnp.array([[1.0]], dtype=jnp.float64),
+            star_planet_distance_AU=jnp.array([[1.0]], dtype=jnp.float64),
             wavelength_nm=jnp.array(600.0, dtype=jnp.float64),
             Rp_Rearth=jnp.asarray([1.0], dtype=jnp.float32),
         )

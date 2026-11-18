@@ -91,11 +91,11 @@ def test_planet_alpha_dMag_matches_orbix():
     reference = two_body_reference(
         time_d, **elements, star_mass_kg=total_mass_kg, dist_pc=dist_pc
     )
-    r_AU, dist_AU = reference.position_AU, reference.distance_AU
+    r_AU, star_planet_distance_AU = reference.position_AU, reference.distance_AU
     # Raw orbix z points away: cos(beta) = z / r.
-    cos_a = r_AU[:, 2, :] / dist_AU
+    cos_a = r_AU[:, 2, :] / star_planet_distance_AU
     phase = lambert_phase(jnp.arccos(cos_a))
-    log_arg = Ag[:, None] * (Rp_AU[:, None] / dist_AU) ** 2 * phase
+    log_arg = Ag[:, None] * (Rp_AU[:, None] / star_planet_distance_AU) ** 2 * phase
     dMag_ref = -2.5 * jnp.log10(log_arg + jnp.finfo(log_arg.dtype).tiny)
     alpha_ref = reference.separation_arcsec
 
@@ -127,7 +127,7 @@ def test_planet_photon_flux_density_formula_phase_and_jax():
     model = p.planets[0].physical_model
     geometry = dict(
         phase_angle_rad=eph.phase_angle_rad(jnp.array([1]), 0),
-        dist_AU=eph.distance_AU(jnp.array([1]), 0),
+        star_planet_distance_AU=eph.distance_AU(jnp.array([1]), 0),
         Rp_Rearth=p.planets[0].Rp_Rearth,
         star=p.star,
         dist_pc=p.dist_pc,
@@ -337,7 +337,7 @@ def test_scene_mass_and_observables(mass):
     old_position = jnp.stack([r[:, 0, :] * scale, r[:, 1, :] * scale])
     old_contrast = p.planets[0].physical_model.contrast_at_time(
         phase_angle_rad=phase,
-        dist_AU=dist,
+        star_planet_distance_AU=dist,
         wavelength_nm=jnp.asarray(600.0),
         Rp_Rearth=p.planets[0].Rp_Rearth,
         time_d=times,

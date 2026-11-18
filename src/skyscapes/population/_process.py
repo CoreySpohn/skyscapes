@@ -71,10 +71,12 @@ class _TypeReflector(AbstractPhysicalModel):
             self.type_index, wavelength_nm, self.wavelengths_nm, self.spectrum
         )
 
-    def contrast(self, phase_angle_rad, dist_AU, wavelength_nm, Rp_Rearth):
+    def contrast(
+        self, phase_angle_rad, star_planet_distance_AU, wavelength_nm, Rp_Rearth
+    ):
         """Use the existing Lambertian phase law with the type's spectral albedo."""
         return LambertianPhysicalModel(self.geometric_albedo(wavelength_nm)).contrast(
-            phase_angle_rad, dist_AU, wavelength_nm, Rp_Rearth
+            phase_angle_rad, star_planet_distance_AU, wavelength_nm, Rp_Rearth
         )
 
 

@@ -496,7 +496,7 @@ class System(eqx.Module):
             stop = start + planet.n_planets
             geometry = dict(
                 phase_angle_rad=phase[start:stop],
-                dist_AU=distance[start:stop],
+                star_planet_distance_AU=distance[start:stop],
                 Rp_Rearth=jnp.where(self.valid[start:stop], planet.Rp_Rearth, 0.0),
                 time_d=time_d,
                 star=self.star,

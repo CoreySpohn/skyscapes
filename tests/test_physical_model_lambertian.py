@@ -25,7 +25,7 @@ def test_lambertian_phase_zero_angle():
     lamb = LambertianPhysicalModel(Ag=jnp.array([0.3]))
     contrast = lamb.contrast(
         phase_angle_rad=jnp.array([[0.0]]),
-        dist_AU=jnp.array([[1.0]]),
+        star_planet_distance_AU=jnp.array([[1.0]]),
         wavelength_nm=jnp.array([500.0]),
         Rp_Rearth=jnp.array([1.0]),
     )
@@ -46,7 +46,7 @@ def test_lambertian_phase_pi_is_dark():
     lamb = LambertianPhysicalModel(Ag=jnp.array([0.3]))
     contrast = lamb.contrast(
         phase_angle_rad=jnp.array([[jnp.pi]]),
-        dist_AU=jnp.array([[1.0]]),
+        star_planet_distance_AU=jnp.array([[1.0]]),
         wavelength_nm=jnp.array([500.0]),
         Rp_Rearth=jnp.array([1.0]),
     )
@@ -58,13 +58,13 @@ def test_lambertian_inverse_square():
     lamb = LambertianPhysicalModel(Ag=jnp.array([0.3]))
     c1 = lamb.contrast(
         phase_angle_rad=jnp.array([[jnp.pi / 3]]),
-        dist_AU=jnp.array([[1.0]]),
+        star_planet_distance_AU=jnp.array([[1.0]]),
         wavelength_nm=jnp.array([500.0]),
         Rp_Rearth=jnp.array([1.0]),
     )
     c2 = lamb.contrast(
         phase_angle_rad=jnp.array([[jnp.pi / 3]]),
-        dist_AU=jnp.array([[2.0]]),
+        star_planet_distance_AU=jnp.array([[2.0]]),
         wavelength_nm=jnp.array([500.0]),
         Rp_Rearth=jnp.array([1.0]),
     )
@@ -76,13 +76,13 @@ def test_lambertian_wavelength_independent():
     lamb = LambertianPhysicalModel(Ag=jnp.array([0.3]))
     c_blue = lamb.contrast(
         phase_angle_rad=jnp.array([[jnp.pi / 4]]),
-        dist_AU=jnp.array([[1.0]]),
+        star_planet_distance_AU=jnp.array([[1.0]]),
         wavelength_nm=jnp.array([400.0]),
         Rp_Rearth=jnp.array([1.0]),
     )
     c_red = lamb.contrast(
         phase_angle_rad=jnp.array([[jnp.pi / 4]]),
-        dist_AU=jnp.array([[1.0]]),
+        star_planet_distance_AU=jnp.array([[1.0]]),
         wavelength_nm=jnp.array([800.0]),
         Rp_Rearth=jnp.array([1.0]),
     )
@@ -108,18 +108,21 @@ def test_lambertian_matches_closed_form_dmag():
     # Independent two-body phase/distance feed LambertianPhysicalModel.
     # The output contrast must match the analytic Lambert dMag.
     reference = two_body_reference(time_d, **elements, star_mass_kg=star_mass_kg)
-    phase_angle_rad, dist_AU = reference.phase_angle_rad, reference.distance_AU
+    phase_angle_rad, star_planet_distance_AU = (
+        reference.phase_angle_rad,
+        reference.distance_AU,
+    )
 
     phase = (
         jnp.sin(phase_angle_rad) + (jnp.pi - phase_angle_rad) * jnp.cos(phase_angle_rad)
     ) / jnp.pi
-    log_arg = Ag[:, None] * (Rp_AU[:, None] / dist_AU) ** 2 * phase
+    log_arg = Ag[:, None] * (Rp_AU[:, None] / star_planet_distance_AU) ** 2 * phase
     dMag_ref = -2.5 * jnp.log10(log_arg + jnp.finfo(log_arg.dtype).tiny)
 
     lamb = LambertianPhysicalModel(Ag=jnp.array([0.3]))
     contrast = lamb.contrast(
         phase_angle_rad=phase_angle_rad,
-        dist_AU=dist_AU,
+        star_planet_distance_AU=star_planet_distance_AU,
         wavelength_nm=jnp.array([500.0]),
         Rp_Rearth=jnp.array([1.0]),
     )

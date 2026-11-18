@@ -378,14 +378,16 @@ def test_planet_flux_preserves_keyword_only_model_overrides():
     """Fails if the default flux hook breaks existing keyword-only time hooks."""
 
     class KeywordModel(AbstractPhysicalModel):
-        def contrast(self, phase_angle_rad, dist_AU, wavelength_nm, Rp_Rearth):
+        def contrast(
+            self, phase_angle_rad, star_planet_distance_AU, wavelength_nm, Rp_Rearth
+        ):
             raise AssertionError("The time-aware override must be used")
 
         def contrast_at_time(
             self,
             *,
             phase_angle_rad,
-            dist_AU,
+            star_planet_distance_AU,
             wavelength_nm,
             Rp_Rearth,
             time_d,
@@ -639,7 +641,7 @@ def _independent_observables(system, times, index=0):
     )
     geometry = dict(
         phase_angle_rad=phase,
-        dist_AU=distance,
+        star_planet_distance_AU=distance,
         Rp_Rearth=planet.Rp_Rearth,
         time_d=times,
         star=star,

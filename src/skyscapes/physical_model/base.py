@@ -38,7 +38,7 @@ class AbstractPhysicalModel(eqx.Module):
         time_d: Array,
         *,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         Rp_Rearth: Array,
         star,
         dist_pc: Array,
@@ -59,7 +59,7 @@ class AbstractPhysicalModel(eqx.Module):
                 w,
                 time_d=time_d,
                 phase_angle_rad=phase_angle_rad,
-                dist_AU=dist_AU,
+                star_planet_distance_AU=star_planet_distance_AU,
                 Rp_Rearth=Rp_Rearth,
                 star=star,
                 dist_pc=dist_pc,
@@ -73,7 +73,7 @@ class AbstractPhysicalModel(eqx.Module):
         wavelength_nm: Array,
         *,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         Rp_Rearth: Array,
         time_d: Array,
         star,
@@ -87,7 +87,7 @@ class AbstractPhysicalModel(eqx.Module):
         Args:
             wavelength_nm: Scalar wavelength [nm].
             phase_angle_rad: Phase angle [rad], shape ``(K, T)``.
-            dist_AU: Star-planet distance [AU], shape ``(K, T)``.
+            star_planet_distance_AU: Star-planet distance [AU], shape ``(K, T)``.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
             time_d: Observation times in days from the scene epoch, shape ``(T,)``.
             dist_pc: Observer distance supplied by the system [pc].
@@ -98,7 +98,7 @@ class AbstractPhysicalModel(eqx.Module):
         """
         contrast = self.contrast_at_time(
             phase_angle_rad=phase_angle_rad,
-            dist_AU=dist_AU,
+            star_planet_distance_AU=star_planet_distance_AU,
             wavelength_nm=wavelength_nm,
             Rp_Rearth=Rp_Rearth,
             time_d=time_d,
@@ -113,7 +113,7 @@ class AbstractPhysicalModel(eqx.Module):
     def contrast(
         self,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         wavelength_nm: Array,
         Rp_Rearth: Array,
     ) -> Array:
@@ -122,7 +122,7 @@ class AbstractPhysicalModel(eqx.Module):
         Args:
             phase_angle_rad: Star-planet-observer phase angle ``beta``,
                 shape ``(K, T)`` for K planets and T times.
-            dist_AU: Star-planet distance, shape ``(K, T)``.
+            star_planet_distance_AU: Star-planet distance, shape ``(K, T)``.
             wavelength_nm: Scalar wavelength [nm]. Use ``System.contrast_cube``
                 to evaluate an array of wavelengths.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``,
@@ -135,7 +135,7 @@ class AbstractPhysicalModel(eqx.Module):
     def contrast_at_time(
         self,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         wavelength_nm: Array,
         Rp_Rearth: Array,
         *,
@@ -153,7 +153,7 @@ class AbstractPhysicalModel(eqx.Module):
 
         Args:
             phase_angle_rad: Phase angle [rad], shape ``(K, T)``.
-            dist_AU: Star-planet distance [AU], shape ``(K, T)``.
+            star_planet_distance_AU: Star-planet distance [AU], shape ``(K, T)``.
             wavelength_nm: Scalar wavelength [nm], as accepted by ``contrast``.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
             time_d: Observation times in days from the scene epoch, shape ``(T,)``.
@@ -163,4 +163,6 @@ class AbstractPhysicalModel(eqx.Module):
         Returns:
             Planet-to-star flux ratio, shape ``(K, T)``.
         """
-        return self.contrast(phase_angle_rad, dist_AU, wavelength_nm, Rp_Rearth)
+        return self.contrast(
+            phase_angle_rad, star_planet_distance_AU, wavelength_nm, Rp_Rearth
+        )

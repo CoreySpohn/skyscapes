@@ -32,7 +32,7 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
         *,
         dist_pc: Array,
         phase_angle_rad: Array | None = None,
-        dist_AU: Array | None = None,
+        star_planet_distance_AU: Array | None = None,
         time_d: Array | None = None,
         star=None,
     ) -> Array:
@@ -57,7 +57,7 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
     def contrast(
         self,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         wavelength_nm: Array,
         Rp_Rearth: Array,
     ) -> Array:
@@ -69,7 +69,7 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
     def contrast_at_time(
         self,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         wavelength_nm: Array,
         Rp_Rearth: Array,
         *,
@@ -82,7 +82,7 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
         Args:
             phase_angle_rad: Phase angle [rad], shape ``(K, T)``; sets the
                 output shape only.
-            dist_AU: Star-planet distance [AU]; ignored.
+            star_planet_distance_AU: Star-planet distance [AU]; ignored.
             wavelength_nm: Wavelength [nm], scalar.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
             time_d: Observation times in days from the scene epoch, shape ``(T,)``.
@@ -111,7 +111,7 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
         flux = self._photon_flux_density(
             wavelength_nm,
             phase_angle_rad=phase_angle_rad,
-            dist_AU=dist_AU,
+            star_planet_distance_AU=star_planet_distance_AU,
             Rp_Rearth=Rp_Rearth,
             time_d=time_d,
             star=star,

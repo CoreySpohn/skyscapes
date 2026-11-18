@@ -33,7 +33,7 @@ flowchart TB
 
 `System.planet_flux_densities` calls
 `physical_model.photon_flux_density(wavelength_nm, phase_angle_rad=...,
-dist_AU=..., Rp_Rearth=..., time_d=..., star=..., dist_pc=...)`. This scene
+star_planet_distance_AU=..., Rp_Rearth=..., time_d=..., star=..., dist_pc=...)`. This scene
 reader supplies a scalar wavelength and returns `(K, T)` in ph/s/m²/nm.
 The physical-model method accepts arbitrary wavelength shapes. The base implementation
 multiplies `contrast_at_time` by stellar photon flux. Thermal models
@@ -47,7 +47,7 @@ source methods accept wavelength arrays and have no band or bin-width input.
 The model photon result has shape `(K, T) + wavelength_nm.shape`.
 
 `System.contrasts` and `System.alpha_dMag` call
-`physical_model.contrast_at_time(phase_angle_rad, dist_AU,
+`physical_model.contrast_at_time(phase_angle_rad, star_planet_distance_AU,
 wavelength_nm, Rp_Rearth, time_d=..., star=..., dist_pc=...)`. This returns per-planet
 flux-ratio contrast, shape `(K, T)` for `K` planets and `T` epochs.
 The default `AbstractPhysicalModel.contrast_at_time` ignores the time
@@ -169,7 +169,7 @@ model = TimeSeriesPhysicalModel(
 )
 contrast = model.contrast_at_time(
     phase_angle_rad=jnp.array([[0.4, 0.4]]),
-    dist_AU=jnp.ones((1, 2)),
+    star_planet_distance_AU=jnp.ones((1, 2)),
     wavelength_nm=550.0,
     Rp_Rearth=jnp.ones(1),
     time_d=jnp.array([0.0, 1.0]),
@@ -302,7 +302,7 @@ cached = PrecomputedPhysicalModel.from_physical_model(ej)
 # Use as a drop-in physical model
 contrast = cached.contrast(
     phase_angle_rad=jnp.array([[jnp.pi / 3]]),  # (K, T)
-    dist_AU=jnp.array([[1.0]]),  # (K, T)
+    star_planet_distance_AU=jnp.array([[1.0]]),  # (K, T)
     wavelength_nm=550.0,
     Rp_Rearth=jnp.array([1.0]),  # (K,)
 )

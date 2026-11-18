@@ -77,7 +77,7 @@ def test_contrast_matches_planck_ratio(temperature, wavelength, x64):
         flux = model._photon_flux_density(
             wl,
             phase_angle_rad=args[0],
-            dist_AU=args[1],
+            star_planet_distance_AU=args[1],
             Rp_Rearth=rp,
             time_d=times,
             star=star,

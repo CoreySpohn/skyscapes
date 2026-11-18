@@ -155,7 +155,7 @@ asymmetric stellar leakage through a coronagraph. System contrast methods call
 `contrast_at_time(..., time_d=..., star=..., dist_pc=...)`; phase-dependent models inherit
 a default hook that delegates to `contrast`. `System.planet_flux_densities`
 calls the model's `spec_flux_density(wavelength_nm, phase_angle_rad=...,
-dist_AU=..., Rp_Rearth=..., time_d=..., star=..., dist_pc=...)`, returning `(K, T)`
+star_planet_distance_AU=..., Rp_Rearth=..., time_d=..., star=..., dist_pc=...)`, returning `(K, T)`
 photon flux in ph/s/m²/nm. Thermal models evaluate flux directly;
 `SumPhysicalModel` adds component fluxes, including through bin integration.
 

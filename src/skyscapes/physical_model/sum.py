@@ -28,7 +28,7 @@ class SumPhysicalModel(AbstractPhysicalModel):
         wavelength_nm: Array,
         *,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         Rp_Rearth: Array,
         time_d: Array,
         star,
@@ -42,7 +42,7 @@ class SumPhysicalModel(AbstractPhysicalModel):
             component._photon_flux_density(
                 wavelength_nm,
                 phase_angle_rad=phase_angle_rad,
-                dist_AU=dist_AU,
+                star_planet_distance_AU=star_planet_distance_AU,
                 Rp_Rearth=Rp_Rearth,
                 time_d=time_d,
                 star=star,
@@ -54,7 +54,7 @@ class SumPhysicalModel(AbstractPhysicalModel):
     def contrast(
         self,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         wavelength_nm: Array,
         Rp_Rearth: Array,
     ) -> Array:
@@ -64,7 +64,7 @@ class SumPhysicalModel(AbstractPhysicalModel):
     def contrast_at_time(
         self,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         wavelength_nm: Array,
         Rp_Rearth: Array,
         *,
@@ -81,7 +81,7 @@ class SumPhysicalModel(AbstractPhysicalModel):
         flux = self._photon_flux_density(
             wavelength_nm,
             phase_angle_rad=phase_angle_rad,
-            dist_AU=dist_AU,
+            star_planet_distance_AU=star_planet_distance_AU,
             Rp_Rearth=Rp_Rearth,
             time_d=time_d,
             star=star,

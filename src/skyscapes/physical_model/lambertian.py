@@ -25,13 +25,17 @@ def lambert_phase(phase_angle_rad: Array) -> Array:
     return jnp.maximum((sin_b + (jnp.pi - phase_angle_rad) * cos_b) / jnp.pi, 0.0)
 
 
-def reflected_contrast(phase_angle_rad, dist_AU, Ag, Rp_Rearth):
+def reflected_contrast(phase_angle_rad, star_planet_distance_AU, Ag, Rp_Rearth):
     """Return Ag Phi(beta) (Rp/r)^2 for broadcast-compatible input arrays.
 
     Geometry comes from orbix. Radius is in Earth radii, distance in AU,
     and Ag is geometric albedo (possibly wavelength dependent).
     """
-    return Ag * lambert_phase(phase_angle_rad) * (Rp_Rearth * Rearth2AU / dist_AU) ** 2
+    return (
+        Ag
+        * lambert_phase(phase_angle_rad)
+        * (Rp_Rearth * Rearth2AU / star_planet_distance_AU) ** 2
+    )
 
 
 def project_reflected(
@@ -91,19 +95,22 @@ class LambertianPhysicalModel(AbstractPhysicalModel):
     def contrast(
         self,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         wavelength_nm: Array,
         Rp_Rearth: Array,
     ) -> Array:
         """Contrast = Ag * Phi(beta) * (Rp/r)**2. Wavelength-independent.
 
-        ``phase_angle_rad`` and ``dist_AU`` are shape ``(K, T)``.
+        ``phase_angle_rad`` and ``star_planet_distance_AU`` are shape ``(K, T)``.
         ``wavelength_nm`` is part of the interface but ignored in the
         gray case. ``Rp_Rearth`` is shape ``(K,)``, supplied by the
         host ``Planet``.
         """
         return reflected_contrast(
-            phase_angle_rad, dist_AU, self.Ag[:, None], Rp_Rearth[:, None]
+            phase_angle_rad,
+            star_planet_distance_AU,
+            self.Ag[:, None],
+            Rp_Rearth[:, None],
         )
 
     def __repr__(self) -> str:

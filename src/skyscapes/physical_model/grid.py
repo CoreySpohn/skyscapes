@@ -29,7 +29,7 @@ class GridPhysicalModel(AbstractPhysicalModel):
     def contrast(
         self,
         phase_angle_rad: Array,
-        dist_AU: Array,
+        star_planet_distance_AU: Array,
         wavelength_nm: Array,
         Rp_Rearth: Array,
     ) -> Array:
@@ -37,7 +37,7 @@ class GridPhysicalModel(AbstractPhysicalModel):
 
         Args:
             phase_angle_rad: Phase angle per planet [rad], shape ``(K, T)``.
-            dist_AU: Shape ``(K, T)``; ignored (grid encodes flux ratio).
+            star_planet_distance_AU: Shape ``(K, T)``; ignored (grid has the ratio).
             wavelength_nm: Scalar wavelength.
             Rp_Rearth: Shape ``(K,)``; ignored (grid encodes flux ratio).
 

@@ -399,7 +399,7 @@ def test_flux_density_matches_si_planck_at_the_observer(engines):
     star = FlatStar(3.0)
     args = dict(
         phase_angle_rad=jnp.zeros((1, 2)),
-        dist_AU=jnp.ones((1, 2)),
+        star_planet_distance_AU=jnp.ones((1, 2)),
         Rp_Rearth=jnp.ones(1),
         time_d=times,
         star=star,

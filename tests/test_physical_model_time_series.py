@@ -34,7 +34,7 @@ def _evaluate(model, time_d, wavelength_nm=500.0):
     shape = (model.contrast_grid.shape[0], times.size)
     return model.contrast_at_time(
         phase_angle_rad=jnp.full(shape, jnp.pi / 3),
-        dist_AU=jnp.ones(shape),
+        star_planet_distance_AU=jnp.ones(shape),
         wavelength_nm=jnp.asarray(wavelength_nm),
         Rp_Rearth=jnp.ones(shape[0]),
         time_d=times,
@@ -180,7 +180,7 @@ def test_default_time_hook_preserves_existing_model_behavior(kind, request):
     flux = model.photon_flux_density(
         args[2],
         phase_angle_rad=args[0],
-        dist_AU=args[1],
+        star_planet_distance_AU=args[1],
         Rp_Rearth=args[3],
         time_d=times,
         star=star,
