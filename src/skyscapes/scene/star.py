@@ -49,6 +49,10 @@ class AbstractStar(eqx.Module):
         natively in photon units, without a conversion at evaluation time.
         """
 
+    @abstractmethod
+    def angular_diameter_arcsec(self, dist_pc: Array) -> Array:
+        """Apparent stellar diameter in arcseconds at observer distance dist_pc."""
+
     @property
     def quadrature_knots_nm(self) -> Array | None:
         """Spectral integration knots [nm], or None for an analytic spectrum."""
@@ -60,11 +64,15 @@ class FlatStar(AbstractStar):
 
     Attributes:
         flux_phot_per_nm_m2: Constant observer flux density in ph/s/m^2/nm.
-        diameter_arcsec: Angular diameter in arcseconds, default 0.0 (point star).
+        fixed_diameter_arcsec: Angular diameter in arcseconds, default 0.0 (point star).
     """
 
     flux_phot_per_nm_m2: float
-    diameter_arcsec: float = 0.0
+    fixed_diameter_arcsec: float = 0.0
+
+    def angular_diameter_arcsec(self, dist_pc: Array) -> Array:
+        """Return the stored apparent diameter in arcseconds, ignoring dist_pc."""
+        return jnp.asarray(self.fixed_diameter_arcsec)
 
     def photon_flux_density(
         self,
@@ -86,7 +94,9 @@ class FlatStar(AbstractStar):
     def __repr__(self) -> str:
         """Summarize flux and nonzero angular diameter."""
         diameter = (
-            f", diam={self.diameter_arcsec:.3g} arcsec" if self.diameter_arcsec else ""
+            f", diam={self.fixed_diameter_arcsec:.3g} arcsec"
+            if self.fixed_diameter_arcsec
+            else ""
         )
         return f"FlatStar(flux={self.flux_phot_per_nm_m2:.3g} ph/s/m^2/nm{diameter})"
 
@@ -106,13 +116,13 @@ class BlackbodyStar(AbstractStar):
     teff_K: float
     radius_m: float
 
-    def diameter_arcsec(self, *, dist_pc: Array) -> Array:
+    def angular_diameter_arcsec(self, dist_pc: Array) -> Array:
         """Small-angle diameter, 2 R / d, in arcseconds.
 
         Uses the small-angle relation from Carroll & Ostlie (2007),
         An Introduction to Modern Astrophysics.
         """
-        return angular_diameter_arcsec(self.radius_m, dist_pc)
+        return jnp.asarray(angular_diameter_arcsec(self.radius_m, dist_pc))
 
     def photon_flux_density(
         self,
@@ -150,7 +160,7 @@ class Star(AbstractStar):
 
     ra_deg: float
     dec_deg: float
-    diameter_arcsec: float
+    fixed_diameter_arcsec: float
     luminosity_Lsun: float
     spots: StarSpots | None
     metadata: dict = eqx.field(static=True)
@@ -169,7 +179,7 @@ class Star(AbstractStar):
         flux_density_jy: Array,
         ra_deg: float = 0.0,
         dec_deg: float = 0.0,
-        diameter_arcsec: float = 0.0,
+        fixed_diameter_arcsec: float = 0.0,
         luminosity_Lsun: float = 1.0,
         spots: StarSpots | None = None,
         metadata: dict | None = None,
@@ -188,7 +198,7 @@ class Star(AbstractStar):
         self._interpolation_method = interpolation_method
         self.ra_deg = ra_deg
         self.dec_deg = dec_deg
-        self.diameter_arcsec = diameter_arcsec
+        self.fixed_diameter_arcsec = fixed_diameter_arcsec
         self.luminosity_Lsun = luminosity_Lsun
         self.spots = spots
         self.metadata = {} if metadata is None else dict(metadata)
@@ -225,6 +235,10 @@ class Star(AbstractStar):
             float(jnp.min(self._wavelengths_nm)),
             float(jnp.max(self._wavelengths_nm)),
         )
+
+    def angular_diameter_arcsec(self, dist_pc: Array) -> Array:
+        """Return the stored apparent diameter in arcseconds, ignoring dist_pc."""
+        return jnp.asarray(self.fixed_diameter_arcsec)
 
     def photon_flux_density(
         self,
@@ -266,7 +280,7 @@ class Star(AbstractStar):
         return (
             f"Star("
             f"L={self.luminosity_Lsun:.3g} Lsun, "
-            f"diam={self.diameter_arcsec:.3g} arcsec, "
+            f"diam={self.fixed_diameter_arcsec:.3g} arcsec, "
             f"RA/Dec=({self.ra_deg:.4f}, {self.dec_deg:.4f}) deg, "
             f"wl={wl_min:.0f}-{wl_max:.0f} nm, n_times={n_t})"
         )

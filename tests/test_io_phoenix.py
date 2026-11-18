@@ -134,7 +134,7 @@ def test_star_photon_flux_energy_matches_dilution():
     expected = SIGMA_SB_TEST * teff_K**4 * (radius_m / (dist_pc * pc2m)) ** 2
     np.testing.assert_allclose(energy, expected, rtol=0.05)
     np.testing.assert_allclose(
-        star.diameter_arcsec,
+        star.angular_diameter_arcsec(dist_pc),
         np.degrees(2 * radius_m / (dist_pc * pc2m)) * 3600.0,
         rtol=1e-6,
     )

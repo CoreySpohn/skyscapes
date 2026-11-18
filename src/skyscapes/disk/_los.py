@@ -78,7 +78,8 @@ def _legendre_nodes(
     u, w = np.polynomial.legendre.leggauss(n)
     u = jnp.asarray(0.5 * (u + 1.0), dtype=width.dtype)
     w = jnp.asarray(0.5 * w, dtype=width.dtype)
-    return low + u[:, None, None] * width, w[:, None, None] * width
+    node_shape = (n,) + (1,) * width.ndim
+    return low + u.reshape(node_shape) * width, w.reshape(node_shape) * width
 
 
 def los_integrate_scattered(
@@ -134,8 +135,8 @@ def los_integrate_scattered(
         position_angle_deg: Major-axis angle north through east [deg].
         rmin_AU: Inner truncation radius [AU].
         rmax_AU: Outer truncation radius [AU].
-        east_AU: East offsets, shape (ny, nx), in AU.
-        north_AU: North offsets, shape (ny, nx), in AU.
+        east_AU: East offsets in AU, broadcastable with north_AU.
+        north_AU: North offsets in AU, broadcastable with east_AU.
         n_slices_los: Number of Gauss-Legendre LOS nodes (static).
         scale_height_fn: ``r_AU -> h_AU``, the scale height in
             ``exp(-(|z| / h)^gamma)``, differentiable in ``r``.
@@ -144,7 +145,7 @@ def los_integrate_scattered(
             differentiable.
 
     Returns:
-        LOS-integrated scattered-light map, shape ``(ny, nx)``.
+        Scattered-light integral with the broadcast shape of the sky offsets.
         Integral of rho * phase / distance_AU**2 over depth_AU.
     """
     incl = incl_deg * deg2rad
@@ -164,8 +165,8 @@ def los_integrate_scattered(
         n_slices_los,
     )
 
-    y_d = y_rot[None, :, :] * cos_i + l_grid * sin_i
-    z_d = -y_rot[None, :, :] * sin_i + l_grid * cos_i
+    y_d = y_rot * cos_i + l_grid * sin_i
+    z_d = -y_rot * sin_i + l_grid * cos_i
 
     xy_sq = x_rot * x_rot + y_d * y_d
     d_star_sq = xy_sq + z_d * z_d

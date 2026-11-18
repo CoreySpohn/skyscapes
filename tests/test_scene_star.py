@@ -19,40 +19,52 @@ from hwoutils.spectral import Band, Quadrature
 from skyscapes.scene import AbstractStar, BlackbodyStar, FlatStar, Star
 
 
-def test_simple_star_fields():
-    """Fails if FlatStar lacks the point-star default or breaks positional use."""
-    s = FlatStar(flux_phot_per_nm_m2=1e9)
-    assert not hasattr(s, "Ms_kg")
-    assert not hasattr(s, "dist_pc")
-    assert isinstance(s, AbstractStar)
-    assert s.diameter_arcsec == 0.0
-    positional = FlatStar(1e9)
-    assert positional.flux_phot_per_nm_m2 == 1e9
-    assert positional.diameter_arcsec == 0.0
+@pytest.mark.parametrize("kind", AbstractStar.__subclasses__())
+def test_angular_diameter_contract(kind):
+    """Fails if a star detaches its size from JAX or misinterprets distance.
 
+    Fixed diameters are exact inputs. The physical diameter uses the
+    small-angle ratio in independently converted astropy units (1e-12).
+    """
+    distance = jnp.array([10.0, 20.0])
+    fixed = 0.003
+    radius = 6.957e8
+    if kind is FlatStar:
+        star = kind(1e9, fixed)
+        expected = [fixed, fixed]
+        assert repr(star) == "FlatStar(flux=1e+09 ph/s/m^2/nm, diam=0.003 arcsec)"
+        assert FlatStar(1e9).angular_diameter_arcsec(10.0) == 0.0
+    elif kind is BlackbodyStar:
+        star = kind(5772.0, radius)
+        expected = (2 * radius * u.m / (np.asarray(distance) * u.pc)).to_value(
+            u.arcsec, equivalencies=u.dimensionless_angles()
+        )
+    else:
+        assert kind is Star
+        star = kind(
+            wavelengths_nm=jnp.array([500.0, 600.0]),
+            times_d=jnp.array([0.0]),
+            flux_density_jy=jnp.ones((2, 1)),
+            fixed_diameter_arcsec=fixed,
+        )
+        expected = [fixed, fixed]
 
-@pytest.mark.parametrize("diameter_arcsec", [0.0, 0.003])
-def test_flat_star_diameter_pytree(diameter_arcsec):
-    """Fails if explicit diameters are lost or excluded from JAX leaves."""
-    star = FlatStar(
-        flux_phot_per_nm_m2=1e9,
-        diameter_arcsec=diameter_arcsec,
+    assert not hasattr(star, "Ms_kg")
+    assert not hasattr(star, "dist_pc")
+
+    @eqx.filter_jit
+    def diameter(source, distances):
+        return jax.vmap(source.angular_diameter_arcsec)(distances)
+
+    actual = diameter(star, distance)
+    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=0)
+    size = (
+        (lambda s: s.radius_m)
+        if kind is BlackbodyStar
+        else (lambda s: s.fixed_diameter_arcsec)
     )
-    assert star.diameter_arcsec == diameter_arcsec
-    assert FlatStar(1e9, diameter_arcsec).diameter_arcsec == (diameter_arcsec)
-    leaves, treedef = jax.tree_util.tree_flatten(star)
-    restored = jax.tree_util.tree_unflatten(treedef, leaves)
-    updated = eqx.tree_at(lambda s: s.flux_phot_per_nm_m2, restored, 2e9)
-    assert updated.diameter_arcsec == diameter_arcsec
-    dynamic = jax.tree_util.tree_map(jnp.asarray, updated)
-    compiled = eqx.filter_jit(lambda s: s.diameter_arcsec * 2.0)
-    assert float(compiled(dynamic)) == 2.0 * diameter_arcsec
-    doubled = eqx.tree_at(
-        lambda s: s.diameter_arcsec, dynamic, jnp.asarray(2.0 * diameter_arcsec)
-    )
-    assert float(compiled(doubled)) == 4.0 * diameter_arcsec
-    diameter_text = f", diam={diameter_arcsec:.3g} arcsec" if diameter_arcsec else ""
-    assert repr(star) == (f"FlatStar(flux=1e+09 ph/s/m^2/nm{diameter_text})")
+    doubled = eqx.tree_at(size, star, jnp.asarray(2 * size(star)))
+    np.testing.assert_allclose(diameter(doubled, distance), 2 * actual, rtol=1e-12)
 
 
 def test_simple_star_flux_is_flat():
@@ -68,24 +80,6 @@ def test_simple_star_flux_is_flat():
 def blackbody_star():
     """Solar-temperature blackbody observed at ten parsecs."""
     return BlackbodyStar(teff_K=5772.0, radius_m=6.957e8)
-
-
-def test_blackbody_star_fields(blackbody_star):
-    """Fails if blackbody angular diameter is missing or has incorrect units."""
-    assert isinstance(blackbody_star, AbstractStar)
-    assert not hasattr(blackbody_star, "Ms_kg")
-    assert not hasattr(blackbody_star, "dist_pc")
-    assert blackbody_star.teff_K == 5772.0
-    assert blackbody_star.radius_m == 6.957e8
-    expected = (2.0 * blackbody_star.radius_m * u.m / (10.0 * u.pc)).to_value(
-        u.arcsec, equivalencies=u.dimensionless_angles()
-    )
-    assert blackbody_star.diameter_arcsec(dist_pc=10.0) == pytest.approx(
-        expected, rel=1e-12
-    )
-    dynamic = jax.tree_util.tree_map(jnp.asarray, blackbody_star)
-    compiled = eqx.filter_jit(lambda s: s.diameter_arcsec(dist_pc=10.0))
-    assert float(compiled(dynamic)) == pytest.approx(expected, rel=1e-12)
 
 
 def test_blackbody_star_integrated_energy_flux(blackbody_star):
@@ -115,7 +109,7 @@ def test_blackbody_star_photon_peak(blackbody_star):
 def test_blackbody_star_scaling(
     blackbody_star, radius_factor, distance_factor, flux_factor
 ):
-    """Fails if radius or distance updates leave flux or angular size stale."""
+    """Fails if radius or distance updates leave flux stale."""
     scaled = BlackbodyStar(
         teff_K=blackbody_star.teff_K,
         radius_m=blackbody_star.radius_m * radius_factor,
@@ -125,20 +119,6 @@ def test_blackbody_star_scaling(
     assert jnp.array_equal(
         scaled.photon_flux_density(wavelength_nm, 0.0, dist_pc=10.0 * distance_factor),
         baseline * flux_factor,
-    )
-    updated = eqx.tree_at(
-        lambda s: s.radius_m,
-        blackbody_star,
-        scaled.radius_m,
-    )
-    expected = (
-        2.0 * scaled.radius_m * u.m / ((10.0 * distance_factor) * u.pc)
-    ).to_value(u.arcsec, equivalencies=u.dimensionless_angles())
-    assert scaled.diameter_arcsec(dist_pc=10.0 * distance_factor) == pytest.approx(
-        expected, rel=1e-12
-    )
-    assert updated.diameter_arcsec(dist_pc=10.0 * distance_factor) == pytest.approx(
-        expected, rel=1e-12
     )
 
 
@@ -195,18 +175,6 @@ def test_spectrum_star_interpolates():
     # Jy to phot: 1 Jy * 1e-26 / (600 nm * h) ~= 2.5153e4
     expected = jy_to_photons_per_nm_per_m2(1.0, 600.0)
     assert jnp.allclose(f, expected, rtol=1e-4)
-
-
-def test_spectrum_star_isinstance():
-    """Star is an AbstractStar."""
-    wl = jnp.linspace(400.0, 1000.0, 3)
-    t = jnp.linspace(0.0, 1.0, 3)
-    s = Star(
-        wavelengths_nm=wl,
-        times_d=t,
-        flux_density_jy=jnp.zeros((wl.size, t.size)),
-    )
-    assert isinstance(s, AbstractStar)
 
 
 @pytest.mark.parametrize("n_epochs", [1, 5])

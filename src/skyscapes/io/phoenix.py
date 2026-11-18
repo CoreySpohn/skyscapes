@@ -25,7 +25,8 @@ import astropy.units as u
 import jax.numpy as jnp
 import numpy as np
 from astropy.io import fits
-from hwoutils.constants import Jy, Rsun2m, c, nm2m, pc2m, rad2arcsec
+from hwoutils.constants import Jy, Rsun2m, c, nm2m, pc2m
+from hwoutils.conversions import angular_diameter_arcsec
 
 from ..datasets import PHOENIX_TEFF_K, fetch_phoenix
 from ..scene.star import Star
@@ -239,7 +240,7 @@ def _from_surface_flux(
         flux_density_jy=jnp.asarray(flux_jy)[:, None],
         ra_deg=ra_deg,
         dec_deg=dec_deg,
-        diameter_arcsec=2.0 * radius_m / (dist_pc * pc2m) * rad2arcsec,
+        fixed_diameter_arcsec=angular_diameter_arcsec(radius_m, dist_pc),
         luminosity_Lsun=(radius_m / Rsun2m) ** 2 * (teff_K / _TEFF_SUN_K) ** 4,
         metadata={
             "source": source,

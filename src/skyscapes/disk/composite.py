@@ -2,7 +2,7 @@
 
 import equinox as eqx
 
-from .base import AbstractDisk, radiance_image
+from .base import AbstractDisk
 
 
 def orient_disk(disk, inclination_deg, position_angle_deg):
@@ -28,7 +28,7 @@ def orient_disk(disk, inclination_deg, position_angle_deg):
 
 
 class CompositeDisk(AbstractDisk):
-    """Components may have different native grids; each renders on the target."""
+    """Sum radiance from components that may have different native grids."""
 
     components: tuple[AbstractDisk, ...]
 
@@ -37,12 +37,18 @@ class CompositeDisk(AbstractDisk):
         if not self.components:
             raise ValueError("CompositeDisk requires at least one component.")
 
-    def photon_radiance(self, wavelength_nm, time_d, *, star, dist_pc, grid):
-        """Sum photon radiance densities on exactly the requested grid."""
-        data = sum(
-            c.photon_radiance(
-                wavelength_nm, time_d, star=star, dist_pc=dist_pc, grid=grid
-            ).data
+    def photon_radiance_at(
+        self, wavelength_nm, time_d, east_arcsec, north_arcsec, *, star, dist_pc
+    ):
+        """Sum component photon radiance in photons/s/m^2/nm/sr."""
+        return sum(
+            c.photon_radiance_at(
+                wavelength_nm,
+                time_d,
+                east_arcsec,
+                north_arcsec,
+                star=star,
+                dist_pc=dist_pc,
+            )
             for c in self.components
         )
-        return radiance_image(data, grid)

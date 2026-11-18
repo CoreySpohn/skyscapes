@@ -55,10 +55,14 @@ def test_system_file_star_has_full_angular_diameter(tmp_path, rstar, dist):
     header = {"RSTAR": rstar, "DIST": dist, "ANGDIAM": 0.465 * rstar / (dist / 10.0)}
     scene = from_exovista(_write_scene(tmp_path / "s.fits", header), load_disk=False)
     expected = _expected_diameter_arcsec(rstar, dist)
-    np.testing.assert_allclose(scene.star.diameter_arcsec, expected, rtol=1e-6)
+    np.testing.assert_allclose(
+        scene.star.angular_diameter_arcsec(scene.dist_pc), expected, rtol=1e-6
+    )
     # Twice the stored ANGDIAM; the tolerance covers ExoVista's rounded 0.465 mas.
     np.testing.assert_allclose(
-        scene.star.diameter_arcsec, 2 * header["ANGDIAM"] / 1e3, rtol=1e-3
+        scene.star.angular_diameter_arcsec(scene.dist_pc),
+        2 * header["ANGDIAM"] / 1e3,
+        rtol=1e-3,
     )
 
 
@@ -66,14 +70,16 @@ def test_sun_at_ten_parsecs_spans_0p93_mas(tmp_path):
     """The Sun at 10 pc from a system file, whose ANGDIAM card reads 0.465."""
     header = {"RSTAR": 1.0, "DIST": 10.0, "ANGDIAM": 0.465}
     scene = from_exovista(_write_scene(tmp_path / "s.fits", header), load_disk=False)
-    assert float(scene.star.diameter_arcsec) == pytest.approx(9.3009e-4, rel=1e-4)
+    assert float(scene.star.angular_diameter_arcsec(scene.dist_pc)) == pytest.approx(
+        9.3009e-4, rel=1e-4
+    )
 
 
 def test_system_file_star_without_a_radius_is_a_point(tmp_path):
     """ExoVista's default system-file RSTAR is 0, with ANGDIAM 0 to match."""
     header = {"RSTAR": 0.0, "DIST": 10.0, "ANGDIAM": 0.0}
     scene = from_exovista(_write_scene(tmp_path / "p.fits", header), load_disk=False)
-    assert float(scene.star.diameter_arcsec) == 0.0
+    assert float(scene.star.angular_diameter_arcsec(scene.dist_pc)) == 0.0
 
 
 @pytest.mark.parametrize(("theta_mas", "dist"), [(0.93, 10.0), (2.4, 3.6)])
@@ -87,8 +93,12 @@ def test_catalog_star_keeps_its_angular_diameter(tmp_path, theta_mas, dist):
     header = {"RSTAR": rstar, "DIST": dist, "ANGDIAM": theta_mas}
     scene = from_exovista(_write_scene(tmp_path / "c.fits", header), load_disk=False)
     expected = _expected_diameter_arcsec(rstar, dist)
-    np.testing.assert_allclose(scene.star.diameter_arcsec, expected, rtol=1e-6)
-    np.testing.assert_allclose(scene.star.diameter_arcsec, theta_mas / 1e3, rtol=1e-6)
+    np.testing.assert_allclose(
+        scene.star.angular_diameter_arcsec(scene.dist_pc), expected, rtol=1e-6
+    )
+    np.testing.assert_allclose(
+        scene.star.angular_diameter_arcsec(scene.dist_pc), theta_mas / 1e3, rtol=1e-6
+    )
 
 
 @pytest.mark.parametrize(

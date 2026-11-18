@@ -94,7 +94,9 @@ def test_layout_selects_actual_bodies_and_earths(scene_file, version):
     path = scene_file(version=version)
     scene = from_exovista(path, load_disk=False)
     assert scene.n_planets == 2
-    assert float(scene.star.diameter_arcsec) == pytest.approx(0.0009)
+    assert float(scene.star.angular_diameter_arcsec(scene.dist_pc)) == pytest.approx(
+        0.0009
+    )
     assert get_earth_like_planet_indices(path) == [0]
     assert from_exovista(path, only_earths=True, load_disk=False).n_planets == 1
     selected = from_exovista(path, planet_indices=[1, 0], load_disk=False)

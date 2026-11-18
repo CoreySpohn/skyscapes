@@ -283,7 +283,8 @@ def test_jax_radiance_contract(kind):
 def test_exovista_disk_flux_shape():
     """Fails if stored pixel contrast is treated as a density or re-area-scaled.
 
-    Native-grid recovery has only multiply/divide roundoff (3e-15).
+    Native-grid recovery has 3e-15 relative algebra roundoff. Near zero,
+    allow one float64 epsilon of peak flux for the rotated coordinate round trip.
     """
     wave = jnp.array([500.0, 550.0, 650.0])
     cube = jnp.arange(3 * 4 * 6, dtype=float).reshape(3, 4, 6) * 1e-10
@@ -293,7 +294,12 @@ def test_exovista_disk_flux_shape():
     image = disk.photon_radiance(wave, 0.0, star=star, dist_pc=10.0, grid=grid)
     expected = cube * star.photon_flux_density(wave, 0.0, dist_pc=10.0)[:, None, None]
     omega = 0.01**2 * (np.pi / (180 * 3600)) ** 2
-    np.testing.assert_allclose(image.data * omega, expected, rtol=3e-15, atol=0)
+    np.testing.assert_allclose(
+        image.data * omega,
+        expected,
+        rtol=3e-15,
+        atol=np.finfo(expected.dtype).eps * expected.max(),
+    )
     assert isinstance(disk, AbstractDisk)
 
 
@@ -347,3 +353,86 @@ def test_system_radiance_owns_midplane_override():
     )
     with pytest.raises(ValueError, match="SkyOrientation"):
         system.photon_radiance(550.0, 0.0, grid=replace(grid, orientation=None))
+
+
+@pytest.mark.parametrize("kind", ["exovista", "grater", "cube", "composite", None])
+def test_system_point_radiance_matches_grid(kind):
+    """Fails if a disk point uses a different sky frame or wavelength sampling.
+
+    Relative tolerance 5e-14 allows float64 coordinate round trips and JIT
+    fusion. The rotated target samples the stored cube between native pixels.
+    """
+    from skyscapes.disk import CompositeDisk
+    from skyscapes.scene import System
+
+    grid = PixelGrid.regular(
+        (3, 4),
+        0.005,
+        "arcsec",
+        center=(19.5, 1.1),
+        orientation=SkyOrientation(20.0),
+    )
+    wave = jnp.array([500.0, 575.0, 650.0])
+    if kind in ("cube", "composite"):
+        native = replace(
+            grid,
+            shape=(13, 13),
+            center_x=18.0,
+            center_y=-9.0,
+            orientation=SkyOrientation(70.0),
+        )
+        cube = 1e-10 * jnp.linspace(1.0, 3.0, 3 * 13 * 13).reshape(3, 13, 13)
+        disk = ExovistaDisk(native, wave, cube)
+        if kind == "composite":
+            disk = CompositeDisk((profile(), disk))
+    else:
+        disk = None if kind is None else profile(kind)
+    empty = jnp.empty(0)
+    scene = System.from_classical(
+        solar_star(),
+        (),
+        star_mass_Msun=1.0,
+        planet_mass_Msun=empty,
+        a_AU=empty,
+        e=empty,
+        W_rad=empty,
+        i_rad=empty,
+        w_rad=empty,
+        M0_rad=empty,
+        dist_pc=10.0,
+        disk=disk,
+        midplane_inc_deg=20.0,
+        midplane_position_angle_deg=31.0,
+    )
+    # Non-knot wavelengths exercise the cube's spectral interpolant.
+    query = jnp.array([[520.0], [580.0]])
+    east, north = grid.orientation.detector_to_sky(*grid.coordinates())
+    expected = scene.photon_radiance(query, 0.0, grid=grid).data
+    actual = eqx.filter_jit(scene.photon_radiance_at)(
+        query, jnp.asarray(0.0), east, north
+    )
+    np.testing.assert_allclose(actual, expected, rtol=5e-14, atol=0)
+    if kind == "cube":
+        # The input is affine in wavelength, so interpax reproduces linear
+        # interpolation. Resample the independent native radiance as before.
+        from hwoutils.grids import Image
+
+        contrast = cube[0] + (query - wave[0])[..., None, None] * (
+            (cube[-1] - cube[0]) / (wave[-1] - wave[0])
+        )
+        flux = scene.star.photon_flux_density(query, 0.0, dist_pc=scene.dist_pc)
+        radiance = (
+            contrast * flux[..., None, None] / (native.pixel_area * arcsec2rad**2)
+        )
+        native_image = Image(
+            radiance,
+            native,
+            ("wave_row", "wave_column"),
+            "per_unit_area",
+            "ph s^-1 m^-2 nm^-1 sr^-1",
+        )
+        np.testing.assert_allclose(
+            actual, resample(native_image, grid).data, rtol=5e-14
+        )
+    if kind is None:
+        np.testing.assert_array_equal(actual, 0.0)

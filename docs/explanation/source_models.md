@@ -117,9 +117,9 @@ value.
 the observer flux in photons/s/m^2/nm. Following Rybicki and Lightman
 (1979), *Radiative Processes in Astrophysics*, the surface flux is
 `pi * B_photon`, diluted by `(radius_m / (dist_pc * pc2m))**2` at the
-observer. Supply `dist_pc` when evaluating photon flux for any star, or
-`diameter_arcsec(*, dist_pc)` for a blackbody. Apparent-flux `Star` and
-`FlatStar` ignore the supplied distance. Wavelengths are in nanometers,
+observer. All stars expose `angular_diameter_arcsec(dist_pc)`. Apparent-flux
+`Star` and `FlatStar` ignore the supplied distance and return their
+`fixed_diameter_arcsec` value. Wavelengths are in nanometers,
 and the result retains their shape. The spectrum is static, so `time_d` is ignored. Both `jax.jit`
 and `jax.vmap` over wavelength are supported.
 

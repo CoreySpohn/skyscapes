@@ -4,6 +4,7 @@ from abc import abstractmethod
 
 import equinox as eqx
 from hwoutils.grids import Image, PixelGrid
+from jaxtyping import Array
 
 
 def check_sky_grid(grid):
@@ -24,7 +25,7 @@ def radiance_image(data, grid):
 
 
 class AbstractDisk(eqx.Module):
-    """Extended scattered light sampled at sky pixel centers.
+    """Extended scattered light queried at sky coordinates.
 
     Values are photon radiance per steradian, independent of pixel area.
     Consumers integrate a pixel by multiplying by
@@ -32,7 +33,6 @@ class AbstractDisk(eqx.Module):
     Times are scalar days from the scene epoch; wavelengths have any shape.
     """
 
-    @abstractmethod
     def photon_radiance(
         self, wavelength_nm, time_d, *, star, dist_pc, grid: PixelGrid
     ) -> Image:
@@ -40,4 +40,20 @@ class AbstractDisk(eqx.Module):
 
         ``grid`` must have unit arcsec and a SkyOrientation. The image has
         measure per_unit_area and quantity ph s^-1 m^-2 nm^-1 sr^-1.
+        """
+        check_sky_grid(grid)
+        east, north = grid.orientation.detector_to_sky(*grid.coordinates())
+        data = self.photon_radiance_at(
+            wavelength_nm, time_d, east, north, star=star, dist_pc=dist_pc
+        )
+        return radiance_image(data, grid)
+
+    @abstractmethod
+    def photon_radiance_at(
+        self, wavelength_nm, time_d, east_arcsec, north_arcsec, *, star, dist_pc
+    ) -> Array:
+        """Photon radiance in photons/s/m^2/nm/sr at the supplied sky offsets.
+
+        Wavelength axes precede the broadcast shape of east_arcsec and
+        north_arcsec. time_d is scalar days from the scene epoch.
         """

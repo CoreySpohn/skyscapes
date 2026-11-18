@@ -91,9 +91,7 @@ def density_level(amplitude, profile, *, star, dist_pc, time_d=0.0):
     radius = amplitude.reference_radius_au
     if radius == "eeid":
         radius = eeid_AU(amplitude.reference_star.luminosity_lsun)
-    integral = profile._scattered_integral(
-        wave, jnp.full((1, 1), radius), jnp.zeros((1, 1)), 0.0, 0.0
-    )[0, 0]
+    integral = profile._scattered_integral(wave, radius, 0.0, 0.0, 0.0)
     integral = eqx.error_if(
         integral,
         (integral <= 0) | ~jnp.isfinite(integral),

@@ -246,7 +246,7 @@ def _load_star(hdul: fits.HDUList, epoch: Epoch, fits_ext: int = 4) -> Star:
         spectra = _phoenix_surface_to_observer_jy(spectra, wavelengths_um, obj_header)
     flux_density_jy = jnp.asarray(np.asarray(spectra).T.astype(np.float32))
 
-    diameter_arcsec = _angular_diameter_arcsec(obj_header)
+    fixed_diameter_arcsec = _angular_diameter_arcsec(obj_header)
     ra_deg = obj_header.get("RA", 0.0)
     dec_deg = obj_header.get("DEC", 0.0)
     luminosity_Lsun = obj_header.get("LSTAR", 1.0)
@@ -254,7 +254,7 @@ def _load_star(hdul: fits.HDUList, epoch: Epoch, fits_ext: int = 4) -> Star:
     return Star(
         ra_deg=ra_deg,
         dec_deg=dec_deg,
-        diameter_arcsec=diameter_arcsec,
+        fixed_diameter_arcsec=fixed_diameter_arcsec,
         luminosity_Lsun=luminosity_Lsun,
         wavelengths_nm=wavelengths_nm,
         times_d=times_d,

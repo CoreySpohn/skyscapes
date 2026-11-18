@@ -157,18 +157,39 @@ class System(eqx.Module):
         Batched systems exclude disks.
         """
         from ..disk.base import check_sky_grid, radiance_image
-        from ..disk.composite import orient_disk
 
         check_sky_grid(grid)
+        east, north = grid.orientation.detector_to_sky(*grid.coordinates())
+        return radiance_image(
+            self.photon_radiance_at(wavelength_nm, time_d, east, north), grid
+        )
+
+    def photon_radiance_at(
+        self, wavelength_nm, time_d, east_arcsec, north_arcsec
+    ) -> Array:
+        """Disk photon radiance in photons/s/m^2/nm/sr at the given sky offsets.
+
+        Axes of wavelength_nm precede the broadcast shape of the supplied
+        east/north offsets. Positions are in arcseconds and time_d is scalar
+        days from the scene epoch. No disk gives zero.
+        """
+        from ..disk.composite import orient_disk
+
         if self.disk is None:
-            return radiance_image(
-                jnp.zeros(jnp.shape(wavelength_nm) + grid.shape), grid
+            sky_shape = jnp.broadcast_shapes(
+                jnp.shape(east_arcsec), jnp.shape(north_arcsec)
             )
+            return jnp.zeros(jnp.shape(wavelength_nm) + sky_shape)
         disk = orient_disk(
             self.disk, self.midplane_inc_deg, self.midplane_position_angle_deg
         )
-        return disk.photon_radiance(
-            wavelength_nm, time_d, star=self.star, dist_pc=self.dist_pc, grid=grid
+        return disk.photon_radiance_at(
+            wavelength_nm,
+            time_d,
+            east_arcsec,
+            north_arcsec,
+            star=self.star,
+            dist_pc=self.dist_pc,
         )
 
     @property

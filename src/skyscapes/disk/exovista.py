@@ -2,12 +2,14 @@
 
 import equinox as eqx
 import interpax
+import jax
 import jax.numpy as jnp
 from hwoutils.constants import arcsec2rad
-from hwoutils.grids import PixelGrid, resample
+from hwoutils.grids import PixelGrid
+from hwoutils.map_coordinates import map_coordinates
 from jaxtyping import Array
 
-from .base import AbstractDisk, check_sky_grid, radiance_image
+from .base import AbstractDisk, check_sky_grid
 
 
 class ExovistaDisk(AbstractDisk):
@@ -16,8 +18,9 @@ class ExovistaDisk(AbstractDisk):
     contrast_cube holds F_pixel/Phi_star, shape (n_wave, ny, nx). Since
     F_pixel = L * Omega_native and Omega_native = native_grid.pixel_area
     * arcsec2rad**2 sr, L = contrast_cube * Phi_star / Omega_native.
-    Resampling L as per_unit_area preserves density, with no target pixel
-    area factor. Geometry is baked into the cube; system angles are ignored.
+    Spatial sampling is bilinear, with zero extension of the native samples.
+    There is no target pixel area factor. Geometry is baked into the cube;
+    system angles are ignored.
     """
 
     native_grid: PixelGrid = eqx.field(static=True)
@@ -43,18 +46,38 @@ class ExovistaDisk(AbstractDisk):
         ):
             raise ValueError("contrast_cube must match wavelengths and native_grid")
 
-    def photon_radiance(self, wavelength_nm, time_d, *, star, dist_pc, grid):
-        """Convert native pixel contrasts to radiance, then resample density."""
-        check_sky_grid(grid)
+    def photon_radiance_at(
+        self, wavelength_nm, time_d, east_arcsec, north_arcsec, *, star, dist_pc
+    ):
+        """Photon radiance in photons/s/m^2/nm/sr from the stored contrast cube."""
+        east, north = jnp.broadcast_arrays(east_arcsec, north_arcsec)
+        grid = self.native_grid
+        pixels = grid.unit_to_pixel(*grid.orientation.sky_to_detector(east, north))
+        spline = self._contrast_interp
+
+        def at_wavelength(wave):
+            # A wavelength needs only the four planes from its spline segment.
+            index = jnp.clip(
+                jnp.searchsorted(spline.x, wave, side="right") - 1,
+                0,
+                spline.x.size - 2,
+            )
+            knots = jax.lax.dynamic_slice_in_dim(spline.x, index, 2)
+            planes = spline.c[:, index].astype(jnp.result_type(spline.c, wave))
+
+            def sample(plane):
+                return map_coordinates(plane, (pixels.y, pixels.x), order=1)
+
+            # Spatial interpolation commutes with the spectral polynomial.
+            coefficients = jax.vmap(sample)(planes)
+            sampled = interpax.PPoly.construct_fast(
+                coefficients[:, None], knots, spline.extrapolate
+            )
+            return sampled(wave)
+
         wave = jnp.asarray(wavelength_nm, dtype=float)
-        contrast = self._contrast_interp(wave.reshape(-1)).reshape(
-            wave.shape + self.native_grid.shape
-        )
+        contrast = jax.vmap(at_wavelength)(wave.reshape(-1))
+        contrast = contrast.reshape(wave.shape + east.shape)
         flux = star.photon_flux_density(wave, time_d, dist_pc=dist_pc)
-        data = (
-            contrast
-            * flux[..., None, None]
-            / (self.native_grid.pixel_area * arcsec2rad**2)
-        )
-        native = radiance_image(data, self.native_grid)
-        return native if grid == self.native_grid else resample(native, grid)
+        flux = flux.reshape(wave.shape + (1,) * east.ndim)
+        return contrast * flux / (grid.pixel_area * arcsec2rad**2)
