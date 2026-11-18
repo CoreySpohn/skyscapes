@@ -92,20 +92,20 @@ def scene_file(tmp_path):
 def test_layout_selects_actual_bodies_and_earths(scene_file, version):
     """Header identity determines body count and selection, not N_EXT."""
     path = scene_file(version=version)
-    scene = from_exovista(path, load_disk=False)
+    scene = from_exovista(path, load_disk=False).system
     assert scene.n_planets == 2
     assert float(scene.star.angular_diameter_arcsec(scene.dist_pc)) == pytest.approx(
         0.0009
     )
     assert get_earth_like_planet_indices(path) == [0]
-    assert from_exovista(path, only_earths=True, load_disk=False).n_planets == 1
-    selected = from_exovista(path, planet_indices=[1, 0], load_disk=False)
+    assert from_exovista(path, only_earths=True, load_disk=False).system.n_planets == 1
+    selected = from_exovista(path, planet_indices=[1, 0], load_disk=False).system
     np.testing.assert_array_equal([p.Rp_Rearth[0] for p in selected.planets], [11, 1])
 
 
 def test_new_layout_preserves_spot_history_and_stellar_metadata(scene_file):
     """Spot areas convert from cm^2 to m^2; temperatures survive import."""
-    scene = from_exovista(scene_file(), load_disk=False)
+    scene = from_exovista(scene_file(), load_disk=False).system
     spots = scene.star.spots
     assert spots.latitude_deg.shape == (3, 2)
     np.testing.assert_array_equal(spots.longitude_deg, 25.0)
@@ -118,7 +118,7 @@ def test_new_layout_preserves_spot_history_and_stellar_metadata(scene_file):
 
 def test_new_layout_keeps_time_dependent_contrast_at_equal_phase(scene_file):
     """Phase-only regridding must not erase a factor-three illumination change."""
-    scene = from_exovista(scene_file(), load_disk=False)
+    scene = from_exovista(scene_file(), load_disk=False).system
     times = scene.star._times_d
     np.testing.assert_allclose(
         scene.contrasts(600.0, times)[0], [1e-10, 2e-10, 3e-10], rtol=1e-6, atol=0
@@ -140,7 +140,7 @@ def test_single_snapshot_and_empty_spots_are_supported(
         scene_file(version=version, n_times=1, n_spots=0),
         load_disk=False,
         planet_spectra=planet_spectra,
-    )
+    ).system
     if version >= 2.5:
         assert scene.star.spots.latitude_deg.shape == (1, 0)
     else:
@@ -163,7 +163,7 @@ def test_single_snapshot_phase_model_preserves_spectrum(scene_file, version):
     path = scene_file(version=version, n_times=1)
     with fits.open(path, mode="update") as hdul:
         hdul[-2].data[0, 16:] = np.array([1.0, 2.0, 4.0]) * 1e-10
-    scene = from_exovista(path, load_disk=False, planet_spectra="phase")
+    scene = from_exovista(path, load_disk=False, planet_spectra="phase").system
     model = scene.planets[0].physical_model
     phases = jnp.deg2rad(jnp.array([[0.0, 30.0, 90.0, 180.0]]))
     for wavelength, expected in [(500.0, 1.0), (550.0, 1.5), (700.0, 4.0)]:
@@ -177,7 +177,7 @@ def test_single_snapshot_phase_model_preserves_spectrum(scene_file, version):
 
 def test_legacy_has_no_imported_spots(scene_file):
     """Older files do not pretend to carry measured zero spot coverage."""
-    scene = from_exovista(scene_file(version=2.33), load_disk=False)
+    scene = from_exovista(scene_file(version=2.33), load_disk=False).system
     assert scene.star.spots is None
 
 
@@ -193,7 +193,7 @@ def test_elapsed_years_use_fixed_duration_and_shared_epoch(scene_file):
     with fits.open(path, mode="update") as hdul:
         for hdu in hdul[5:]:
             hdu.data[:, 0] = [0.0, 0.5, 1.0]
-    scene = from_exovista(path, load_disk=False)
+    scene = from_exovista(path, load_disk=False).system
     expected = np.array([0.0, 182.625, 365.25])
     np.testing.assert_allclose(scene.star._times_d, expected, rtol=0, atol=1e-9)
     np.testing.assert_array_equal(scene.star.spots.times_d, expected)
@@ -207,7 +207,7 @@ def test_imported_positive_flux_cannot_overshoot_below_zero(scene_file):
     path = scene_file(n_times=4)
     with fits.open(path, mode="update") as hdul:
         hdul[5].data[:, 16:] = np.array([1.0, 0.01, 0.01, 1.0])[:, None]
-    scene = from_exovista(path, load_disk=False)
+    scene = from_exovista(path, load_disk=False).system
     midpoint = jnp.mean(scene.star._times_d[1:3])
     flux = scene.star.photon_flux_density(600.0, midpoint, dist_pc=scene.dist_pc)
     expected = 0.01 * 1e-26 / (h * 600.0)
@@ -227,7 +227,7 @@ def test_import_requires_precision_for_orbital_states(
     )
     with jax.enable_x64(enable_x64):
         if enable_x64:
-            scene = from_exovista(path, load_disk=False)
+            scene = from_exovista(path, load_disk=False).system
             assert scene.star._times_d.dtype == jnp.float64
         else:
             with pytest.raises(ValueError, match="jax_enable_x64"):
@@ -302,7 +302,7 @@ def test_unmarked_recent_spectra_are_observer_flux_of_the_phoenix_star(scene_fil
     path = scene_file()
     wave_um, f_nu_jy = _write_phoenix_star(path)
     with pytest.warns(RuntimeWarning, match="without checking"):
-        scene = from_exovista(path, load_disk=False)
+        scene = from_exovista(path, load_disk=False).system
 
     for wavelength_um, expected_jy in zip(wave_um, f_nu_jy, strict=True):
         wavelength_nm = wavelength_um * 1e3
@@ -330,7 +330,7 @@ def test_unmarked_spectrum_consistent_with_its_vmag_converts_silently(scene_file
     _write_phoenix_star(path, {"VMAG": vmag})
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        scene = from_exovista(path, load_disk=False)
+        scene = from_exovista(path, load_disk=False).system
 
     wavelength_nm = wave_um[v_channel] * 1e3
     expected = f_nu_jy[v_channel] * Jy / (h * wavelength_nm)
@@ -385,7 +385,7 @@ def test_unmarked_legacy_spectra_are_read_as_jy(scene_file):
     path = scene_file(version=2.33)
     with fits.open(path, mode="update") as hdul:
         del hdul[4].header["SPECUNIT"]
-    scene = from_exovista(path, load_disk=False)
+    scene = from_exovista(path, load_disk=False).system
     np.testing.assert_allclose(
         scene.star.photon_flux_density(
             600.0, scene.star._times_d[0], dist_pc=scene.dist_pc

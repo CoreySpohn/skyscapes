@@ -26,7 +26,7 @@ def _major_axis_deg(x, y, weights):
 @pytest.fixture(scope="module")
 def midplane_measurements(fits_fixture):
     """Measure a forward-scattering ring on the demo cube's exact pixel grid."""
-    system = from_exovista(fits_fixture)
+    system = from_exovista(fits_fixture).system
     loaded = system.disk
     wavelength_nm = jnp.asarray(550.0)
     args = tuple(

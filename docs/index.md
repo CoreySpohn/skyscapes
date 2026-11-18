@@ -32,7 +32,7 @@ products.
 flowchart LR
     src["External sources<br/>ExoVista · spectra · catalogues"]
     sky(["<b>skyscapes</b><br/>Scene · System · Star · Planet · Disk · PhysicalModel"])
-    opt["<b>optixstuff</b><br/>OpticalPath"]
+    opt["<b>optixstuff</b><br/>Instrument"]
     cor["<b>coronagraphoto</b><br/>2D image simulation"]
     jet["<b>jaxedith</b><br/>Scalar count rates"]
 
@@ -54,10 +54,9 @@ import jax
 
 jax.config.update("jax_enable_x64", True)
 
-from skyscapes import Scene, from_exovista
+from skyscapes import from_exovista
 
-system = from_exovista("path/to/exovista_system.fits")
-scene = Scene(system=system)
+scene = from_exovista("path/to/exovista_system.fits")  # with a default AYOZodi
 ```
 
 Building one from scratch is a little more involved -- a `Scene`

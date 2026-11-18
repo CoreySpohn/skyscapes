@@ -450,8 +450,7 @@ from skyscapes import Scene, System, from_exovista
 import jax
 
 jax.config.update("jax_enable_x64", True)
-system = from_exovista("system.fits", planet_spectra="auto")
-scene = Scene(system=system)
+scene = from_exovista("system.fits", planet_spectra="auto")
 
 # Or programmatically
 scene = Scene(

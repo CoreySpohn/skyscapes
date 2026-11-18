@@ -42,11 +42,12 @@ from hwoutils.epoch import Epoch
 from hwoutils.grids import PixelGrid, SkyOrientation
 from orbix.equations.orbit import state_vector_to_keplerian
 from orbix.system import FrameOrbit, phase_angle_rad
+from zodi.jax import AYOZodi
 
 from ..disk import ExovistaDisk
 from ..physical_model import GridPhysicalModel, TimeSeriesPhysicalModel
 from ..population import earth_like
-from ..scene import Planet, Star, StarSpots, System
+from ..scene import Planet, Scene, Star, StarSpots, System
 from ..scene.system import _known_planet_mass
 
 # Area of the quiet-disk limb-darkening mask that the ExoVista v2.5 and v2.6
@@ -490,7 +491,7 @@ def get_earth_like_planet_indices(fits_file: str) -> list[int]:
         return _earth_like_planet_indices_from_hdul(hdul)
 
 
-def from_exovista(
+def _system_from_exovista(
     fits_file: str,
     planet_indices: Sequence[int] | None = None,
     only_earths: bool = False,
@@ -609,3 +610,50 @@ def from_exovista(
         midplane_inc_deg=midplane_inc_deg,
         midplane_position_angle_deg=midplane_position_angle_deg,
     )
+
+
+def from_exovista(
+    fits_file: str,
+    planet_indices: Sequence[int] | None = None,
+    only_earths: bool = False,
+    load_disk: bool = True,
+    zodi_surface_brightness_mag: float = 22.0,
+    *,
+    planet_spectra: Literal["auto", "time", "phase"] = "auto",
+    epoch: Epoch | None = None,
+) -> Scene:
+    """Load an ExoVista FITS file into a ``Scene`` with a default zodi.
+
+    Builds the ``System`` (star, planets, disk, midplane metadata) and adds an
+    :class:`~zodi.jax.AYOZodi` background. Raises ``ValueError`` unless
+    ``jax_enable_x64`` is set (orbital states need float64), and for an
+    invalid FITS layout, planet selection or spectra mode.
+
+    Args:
+        fits_file: Path to ExoVista FITS file.
+        planet_indices: Planet indices to load (0-based). ``None`` = all.
+        only_earths: If True and *planet_indices* is None, auto-filter Earths.
+        load_disk: If False, skip the disk and set ``System.disk`` to ``None``.
+        zodi_surface_brightness_mag: V-band surface brightness of the default
+            zodi background in mag per square arcsecond (22.0 is the AYO
+            standard).
+        planet_spectra: ``auto`` preserves time-dependent contrasts in
+            v2.5+ scenes and the phase model for older scenes; ``time`` keeps
+            the recorded spectra at their epochs; ``phase`` assumes contrast
+            depends on phase alone.
+        epoch: Scene epoch that stored times are measured from. ``None``
+            uses the first stellar timestamp.
+
+    Returns:
+        ``Scene`` with the loaded system and an ``AYOZodi`` background.
+    """
+    system = _system_from_exovista(
+        fits_file,
+        planet_indices=planet_indices,
+        only_earths=only_earths,
+        load_disk=load_disk,
+        planet_spectra=planet_spectra,
+        epoch=epoch,
+    )
+    zodi = AYOZodi(surface_brightness_mag_arcsec2=zodi_surface_brightness_mag)
+    return Scene(system=system, zodi=zodi)

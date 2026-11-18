@@ -155,7 +155,7 @@ def jupiter_system(tmp_path_factory):
     """Load the integrated Jupiter-mass system and its true sky offsets."""
     path = tmp_path_factory.mktemp("massive") / "jupiter.fits"
     expected = _write_fits(path, JUPITER_MEARTH)
-    return from_exovista(path, load_disk=False, planet_spectra="time"), expected
+    return from_exovista(path, load_disk=False, planet_spectra="time").system, expected
 
 
 def test_massive_planet_positions_follow_the_two_body_integration(jupiter_system):

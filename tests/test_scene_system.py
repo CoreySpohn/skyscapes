@@ -1070,7 +1070,7 @@ def test_exovista_scene_epoch_recovers_dates(request, version, start_year):
         years = start_year + np.array([0.0, 0.001, 0.002])
         for hdu in hdul[star_ext:]:
             hdu.data[:, 0] = years
-    scene = from_exovista(path, load_disk=False, planet_spectra="time")
+    scene = from_exovista(path, load_disk=False, planet_spectra="time").system
     grids = [scene.star._times_d]
     grids.extend(p.physical_model.times_d for p in scene.planets)
     if scene.star.spots is not None:

@@ -87,7 +87,7 @@ def known_orbit_file(tmp_path, request):
 def test_exovista_sky_positions_round_trip(known_orbit_file):
     """FITS west/north positions load as east/north at every recorded epoch."""
     path, _ = known_orbit_file
-    system = from_exovista(path, load_disk=False)
+    system = from_exovista(path, load_disk=False).system
     with fits.open(path) as hdul:
         rows = hdul[6].data.astype(np.float64)
         star_rows = hdul[5].data.astype(np.float64)
@@ -105,7 +105,7 @@ def test_exovista_sky_positions_round_trip(known_orbit_file):
 def test_exovista_recovers_known_elements(known_orbit_file):
     """Preserve header a/e and recover i, Omega, omega, M from both states."""
     path, expected = known_orbit_file
-    orbit = from_exovista(path, load_disk=False).dynamics.orbits.to_classical()
+    orbit = from_exovista(path, load_disk=False).system.dynamics.orbits.to_classical()
     actual = np.array(
         [
             orbit["a_AU"][0],
@@ -154,7 +154,7 @@ def test_exovista_recovers_known_elements_with_stellar_reflex(
 
     orbit = from_exovista(
         path, load_disk=False, planet_spectra="time"
-    ).dynamics.orbits.to_classical()
+    ).system.dynamics.orbits.to_classical()
     actual = np.array(
         [
             orbit["a_AU"][0],
@@ -174,7 +174,7 @@ def test_exovista_recovers_known_elements_with_stellar_reflex(
 def test_exovista_phase_matches_fits_observer_direction(known_orbit_file):
     """A planet toward the observer has a crescent, not a gibbous phase."""
     path, _ = known_orbit_file
-    system = from_exovista(path, load_disk=False, planet_spectra="phase")
+    system = from_exovista(path, load_disk=False, planet_spectra="phase").system
     with fits.open(path) as hdul:
         rows = hdul[6].data.astype(np.float64)
     times = system.epoch.days(J2000_JD + rows[:, 0] * (yr2s / d2s))
@@ -195,7 +195,7 @@ def test_exovista_phase_model_preserves_analytic_light_curve(known_orbit_file):
         contrast = 1e-10 * (1 + beta / np.pi)
         rows[:, 16:] = contrast[:, None] * np.array([1.0, 2.0, 3.0])
         times = J2000_JD + rows[:, 0].astype(np.float64) * (yr2s / d2s)
-    system = from_exovista(path, load_disk=False, planet_spectra="phase")
+    system = from_exovista(path, load_disk=False, planet_spectra="phase").system
     times = system.epoch.days(times)
     np.testing.assert_allclose(
         system.contrasts(600.0, times)[0], 2 * contrast, rtol=2e-6, atol=0

@@ -9,19 +9,22 @@ from astropy.io import fits
 from hwoutils.epoch import Epoch
 
 from skyscapes.disk import ExovistaDisk
-from skyscapes.io import from_exovista, get_earth_like_planet_indices
+from skyscapes.io import (
+    from_exovista,
+    get_earth_like_planet_indices,
+)
 from skyscapes.scene import Planet, Star, System
 
 
 def test_from_exovista_returns_scene_system(fits_fixture):
     """from_exovista returns a scene.System instance."""
-    sys_obj = from_exovista(fits_fixture)
+    sys_obj = from_exovista(fits_fixture).system
     assert isinstance(sys_obj, System)
 
 
 def test_from_exovista_star_is_spectrum_star(fits_fixture):
     """Fails if stellar mass or distance is duplicated in appearance metadata."""
-    sys_obj = from_exovista(fits_fixture)
+    sys_obj = from_exovista(fits_fixture).system
     assert isinstance(sys_obj.star, Star)
     assert sys_obj.star_mass_Msun > 0.0
     assert "MASS" not in sys_obj.star.metadata
@@ -30,7 +33,7 @@ def test_from_exovista_star_is_spectrum_star(fits_fixture):
 
 def test_from_exovista_planets_are_tuple(fits_fixture):
     """Planets is a non-empty tuple of scene.Planet."""
-    sys_obj = from_exovista(fits_fixture)
+    sys_obj = from_exovista(fits_fixture).system
     assert isinstance(sys_obj.planets, tuple)
     assert len(sys_obj.planets) > 0
     for p in sys_obj.planets:
@@ -44,7 +47,7 @@ def test_from_exovista_planets_coplanar_with_disk(fits_fixture):
     (within the small mutual spread). Regression guard for the double
     sky-rotation bug that tilted every planetary system off its disk.
     """
-    sys_obj = from_exovista(fits_fixture)
+    sys_obj = from_exovista(fits_fixture).system
     disk_inc = sys_obj.midplane_inc_deg
     for inc in sys_obj.dynamics.orbits.to_classical()["i_rad"]:
         i_deg = float(jnp.rad2deg(inc))
@@ -58,26 +61,41 @@ def test_from_exovista_planets_coplanar_with_disk(fits_fixture):
 
 def test_from_exovista_disk_is_exovista_disk(fits_fixture):
     """Loaded disk is an ExovistaDisk."""
-    sys_obj = from_exovista(fits_fixture)
+    sys_obj = from_exovista(fits_fixture).system
     assert isinstance(sys_obj.disk, ExovistaDisk)
 
 
 def test_from_exovista_load_disk_false_skips_disk(fits_fixture):
     """load_disk=False leaves System.disk as None."""
-    sys_obj = from_exovista(fits_fixture, load_disk=False)
+    sys_obj = from_exovista(fits_fixture, load_disk=False).system
     assert sys_obj.disk is None
+
+
+def test_from_exovista_returns_scene_with_default_zodi_and_honours_load_disk(
+    fits_fixture,
+):
+    """from_exovista returns a Scene with an AYOZodi background."""
+    from zodi.jax import AYOZodi
+
+    scene = from_exovista(
+        fits_fixture, load_disk=False, zodi_surface_brightness_mag=21.5
+    )
+    assert isinstance(scene.zodi, AYOZodi)
+    assert scene.zodi.surface_brightness_mag_arcsec2 == 21.5
+    assert scene.system.disk is None
+    assert isinstance(from_exovista(fits_fixture).system.disk, ExovistaDisk)
 
 
 def test_from_exovista_only_earths_filters(fits_fixture):
     """only_earths=True keeps only Earth-like planets."""
-    sys_obj_all = from_exovista(fits_fixture)
-    sys_obj_earths = from_exovista(fits_fixture, only_earths=True)
+    sys_obj_all = from_exovista(fits_fixture).system
+    sys_obj_earths = from_exovista(fits_fixture, only_earths=True).system
     assert len(sys_obj_earths.planets) <= len(sys_obj_all.planets)
 
 
 def test_from_exovista_respects_planet_indices(fits_fixture):
     """Explicit planet_indices controls the set of planets loaded."""
-    sys_obj = from_exovista(fits_fixture, planet_indices=[0, 2])
+    sys_obj = from_exovista(fits_fixture, planet_indices=[0, 2]).system
     assert len(sys_obj.planets) == 2
 
 
@@ -90,7 +108,7 @@ def test_get_earth_like_planet_indices_returns_list(fits_fixture):
 
 def test_from_exovista_positions_runnable(fits_fixture):
     """Sanity: a System loaded from FITS can be propagated."""
-    sys_obj = from_exovista(fits_fixture, planet_indices=[0])
+    sys_obj = from_exovista(fits_fixture, planet_indices=[0]).system
     t0 = sys_obj.dynamics.orbits.epoch_d
     pos = sys_obj.positions(jnp.atleast_1d(t0))
     assert pos.shape[0] == 2
@@ -135,7 +153,7 @@ def test_exovista_flux_preserved_with_standard_phase(
     """
     system = from_exovista(
         fits_fixture, planet_indices=[0, 2, 4], load_disk=False, planet_spectra=mode
-    )
+    ).system
     times = jnp.asarray(system.epoch.days([2451545.0, 2451645.0, 2451795.0]))
     np.testing.assert_allclose(
         system.contrasts(600.0, times), expected_contrast, rtol=1e-6, atol=0
@@ -161,7 +179,7 @@ def test_exovista_disk_and_planet_share_east_north_chart(fits_fixture):
     A 3 deg tolerance allows their 1.12 deg spread but rejects the mirrored
     image at 57.34 deg (64.20 deg from the orbit, modulo 180).
     """
-    system = from_exovista(fits_fixture)
+    system = from_exovista(fits_fixture).system
     disk = system.disk
     brightness = np.asarray(
         disk.photon_radiance(
@@ -218,7 +236,7 @@ def test_exovista_disk_and_planet_share_east_north_chart(fits_fixture):
 
 def test_exovista_cube_is_used_as_written(fits_fixture):
     """FITS rows are north and columns west; no spatial flip at load."""
-    disk = from_exovista(fits_fixture).disk
+    disk = from_exovista(fits_fixture).system.disk
     with fits.open(fits_fixture) as hdul:
         expected = hdul[2].data[:-1].astype(np.float32)
     np.testing.assert_array_equal(disk.contrast_cube, expected)
@@ -233,9 +251,9 @@ def test_exovista_supplied_epoch_keeps_absolute_dates(fits_fixture):
     rounding of the day offsets (1e-10 relative is far above it).
     """
     kwargs = dict(planet_indices=[0, 2], load_disk=False, planet_spectra="time")
-    default = from_exovista(fits_fixture, **kwargs)
+    default = from_exovista(fits_fixture, **kwargs).system
     shared = Epoch(2450544.0, 0.75)
-    moved = from_exovista(fits_fixture, **kwargs, epoch=shared)
+    moved = from_exovista(fits_fixture, **kwargs, epoch=shared).system
     assert moved.epoch == shared
     dates = [2451545.0, 2451645.5, 2451795.0]
     t_default = jnp.asarray(default.epoch.days(dates))

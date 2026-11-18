@@ -38,8 +38,12 @@ def main(wavelength_nm=600.0):
             star = hdul[_star_extension(hdul)].data
             offset = np.linalg.norm(star[0, 9:12].astype(float))
             star[:, 9:15] = 0.0
-        subtracted = from_exovista(source, load_disk=False, planet_spectra="phase")
-        barycentric = from_exovista(zeroed, load_disk=False, planet_spectra="phase")
+        subtracted = from_exovista(
+            source, load_disk=False, planet_spectra="phase"
+        ).system
+        barycentric = from_exovista(
+            zeroed, load_disk=False, planet_spectra="phase"
+        ).system
     with fits.open(source) as hdul:
         elapsed = hdul[_star_extension(hdul)].data[:, 0].astype(float)
     times = J2000_JD + elapsed * (yr2s / d2s)
