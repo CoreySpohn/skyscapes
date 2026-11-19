@@ -90,27 +90,27 @@ def _planet_group(system, model_template):
     )
 
 
-def from_scenes(cls, systems, *, capacity=None, batch_shape=None):
-    """Pack unbatched systems, sorted by semi-major axis, on the host."""
-    systems = list(systems)
-    if not systems:
-        raise ValueError("systems must be nonempty")
-    if any(s.batch_shape for s in systems):
-        raise ValueError("from_scenes requires unbatched systems")
-    if any(s.disk is not None or s.local_zodi is not None for s in systems):
+def from_scenes(cls, scenes, *, capacity=None, batch_shape=None):
+    """Pack unbatched scenes, sorted by semi-major axis, on the host."""
+    scenes = list(scenes)
+    if not scenes:
+        raise ValueError("scenes must be nonempty")
+    if any(s.batch_shape for s in scenes):
+        raise ValueError("from_scenes requires unbatched scenes")
+    if any(s.disk is not None or s.local_zodi is not None for s in scenes):
         raise ValueError("Scenes with a disk or local zodi cannot enter a batch")
-    if len({s.ra_deg is None for s in systems}) > 1:
+    if len({s.ra_deg is None for s in scenes}) > 1:
         raise ValueError(
             "Scenes must all be placed on the sky (ra_deg and dec_deg) or all unplaced"
         )
-    if any(s.epoch != systems[0].epoch for s in systems):
+    if any(s.epoch != scenes[0].epoch for s in scenes):
         raise ValueError("Scenes must share one epoch")
-    star_classes = {type(s.star) for s in systems}
-    model_classes = {type(p.physical_model) for s in systems for p in s.planets}
+    star_classes = {type(s.star) for s in scenes}
+    model_classes = {type(p.physical_model) for s in scenes for p in s.planets}
     if len(star_classes) != 1 or len(model_classes) != 1:
         raise ValueError("Scenes must share one star class and physical-model class")
     model_template = max(
-        (p for s in systems for p in s.planets), key=lambda p: p.n_planets
+        (p for s in scenes for p in s.planets), key=lambda p: p.n_planets
     )
     template_leaves = dict(
         (jax.tree_util.keystr(path), x)
@@ -118,17 +118,17 @@ def from_scenes(cls, systems, *, capacity=None, batch_shape=None):
             model_template.physical_model
         )[0]
     )
-    counts = [int(np.count_nonzero(s.valid)) for s in systems]
+    counts = [int(np.count_nonzero(s.valid)) for s in scenes]
     capacity = max(counts) if capacity is None else capacity
     if not isinstance(capacity, int) or capacity < max(counts):
         raise ValueError(
             "capacity must be an integer at least the largest planet count"
         )
-    batch_shape = (len(systems),) if batch_shape is None else tuple(batch_shape)
-    if np.prod(batch_shape, dtype=int) != len(systems):
-        raise ValueError("batch_shape must contain exactly len(systems) entries")
+    batch_shape = (len(scenes),) if batch_shape is None else tuple(batch_shape)
+    if np.prod(batch_shape, dtype=int) != len(scenes):
+        raise ValueError("batch_shape must contain exactly len(scenes) entries")
     rows = []
-    for system, count in zip(systems, counts, strict=True):
+    for system, count in zip(scenes, counts, strict=True):
         group = _planet_group(system, model_template)
         chain = np.argsort(np.asarray(system.dynamics.orbits.a_AU), kind="stable")
         inverse = np.argsort(system.body_index)

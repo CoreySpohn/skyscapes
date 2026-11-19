@@ -94,6 +94,15 @@ def test_draw_is_deterministic_in_the_key(draw, world):
     assert not np.array_equal(np.asarray(other.a_AU), np.asarray(world.a_AU))
 
 
+def test_inclination_support_beyond_pi_is_refused():
+    """A distribution that reaches past pi cannot be an inclination in radians.
+
+    Fails if degrees are passed where radians are required.
+    """
+    with pytest.raises(ValueError, match="support within"):
+        PopulationConfig(inclination_rad=priorities.Uniform(0.0, 5.0))
+
+
 def test_orbit_ranges_follow_the_config(draw):
     """Eccentricity and inclination fall inside the configured uniform ranges.
 
@@ -101,7 +110,7 @@ def test_orbit_ranges_follow_the_config(draw):
     """
     config = PopulationConfig(
         eccentricity=priorities.Uniform(0.1, 0.2),
-        inclination=priorities.Uniform(np.deg2rad(1.0), np.deg2rad(3.0)),
+        inclination_rad=priorities.Uniform(np.deg2rad(1.0), np.deg2rad(3.0)),
     )
     p = draw(0, config)
     present = np.asarray(p.present)

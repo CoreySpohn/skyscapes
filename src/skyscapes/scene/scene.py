@@ -277,17 +277,17 @@ class Scene(eqx.Module):
         return self.dynamics.planets.mass_Msun.shape[-1]
 
     @classmethod
-    def from_scenes(cls, systems, *, capacity=None, batch_shape=None):
+    def from_scenes(cls, scenes, *, capacity=None, batch_shape=None):
         """Pack same-class scenes into NumPy float64 leaves, sorted inner to outer.
 
-        The default batch shape is (len(systems),); capacity defaults to the
+        The default batch shape is (len(scenes),); capacity defaults to the
         largest valid count. Disks, mixed epochs and mixed model classes raise.
         At least one Planet group must supply the physical-model class; an
         empty group is sufficient. Host layout data restores source group
         boundaries and scene order when unpacking.
         """
         return _system_batch.from_scenes(
-            cls, systems, capacity=capacity, batch_shape=batch_shape
+            cls, scenes, capacity=capacity, batch_shape=batch_shape
         )
 
     def to_scenes(self):

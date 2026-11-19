@@ -294,7 +294,7 @@ def test_support_errors_and_type_photometry(process, marks):
         degenerate.mark_log_density(scene, host)
     with pytest.raises(ValueError, match=r"eccentricity is None"):
         eqx.filter_jit(degenerate.mark_log_density)(scene, host)
-    coplanar = eqx.tree_at(lambda p: p.config.inclination, process, None)
+    coplanar = eqx.tree_at(lambda p: p.config.inclination_rad, process, None)
     np.testing.assert_array_equal(
         coplanar.mark_log_density(scene, host), process.mark_log_density(scene, host)
     )

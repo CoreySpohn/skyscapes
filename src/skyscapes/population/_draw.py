@@ -53,7 +53,7 @@ class PopulationConfig(eqx.Module):
         eccentricity: Eccentricity distribution of the planets, a
             `priorities.AbstractDistribution` such as `kipping_eccentricity()`, or
             ``None`` for circular orbits (the ExoVista default).
-        inclination: Distribution of the planet inclination to the system midplane
+        inclination_rad: Distribution of the planet inclination to the system midplane
             in radians, a scalar `priorities.AbstractDistribution` such as
             ``priorities.TruncatedDistribution(IsotropicInclination(), high=0.1)``
             with `orbix.system.IsotropicInclination`, or ``None`` for coplanar
@@ -68,7 +68,7 @@ class PopulationConfig(eqx.Module):
     """
 
     eccentricity: priorities.AbstractDistribution | None = None
-    inclination: priorities.AbstractDistribution | None = eqx.field(
+    inclination_rad: priorities.AbstractDistribution | None = eqx.field(
         default_factory=lambda: priorities.Uniform(0.0, 5.0 * deg2rad)
     )
     earth_candidate_probability: float = 1.0
@@ -77,12 +77,22 @@ class PopulationConfig(eqx.Module):
     max_iterations: int = eqx.field(static=True, default=200)
     max_stalled: int = eqx.field(static=True, default=50)
 
+    def __check_init__(self):
+        """Refuse an inclination distribution whose support exceeds ``[0, pi]``."""
+        if self.inclination_rad is None:
+            return
+        low, high = self.inclination_rad.support()
+        if isinstance(low, jax.core.Tracer) or isinstance(high, jax.core.Tracer):
+            return
+        if bool(jnp.any(low < 0.0)) or bool(jnp.any(high > math.pi)):
+            raise ValueError("inclination_rad must have support within [0, pi]")
+
 
 def _draw_tilt(config, key, shape):
     """Draw planet inclinations to the midplane [rad]; zero when coplanar."""
-    if config.inclination is None:
+    if config.inclination_rad is None:
         return jnp.zeros(shape)
-    return config.inclination.sample(key, shape)
+    return config.inclination_rad.sample(key, shape)
 
 
 class PlanetPopulation(eqx.Module):

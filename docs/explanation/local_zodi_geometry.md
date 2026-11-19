@@ -60,6 +60,17 @@ flux = zodi.photon_radiance(
 )
 ```
 
+A scene that carries a sky position gives both angles without an
+observatory object: `scene.ra_deg` and `scene.dec_deg` come from its
+`SkyFrame`, and {func}`orbix.observatory.ecliptic_pointing` turns them
+and a time in days from the scene epoch into the same two angles.
+
+```python notest
+from orbix.observatory import ecliptic_pointing
+
+ecl_lat, helio_lon = ecliptic_pointing(scene.ra_deg, scene.dec_deg, scene.epoch, time_d)
+```
+
 {func}`skyscapes.viz.plot_local_zodi_geometry` draws what the two inputs
 mean. Seen from the ecliptic pole, the sightline's projection leaves the
 observer at the helio-ecliptic longitude difference from the Sun
