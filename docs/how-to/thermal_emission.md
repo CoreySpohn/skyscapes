@@ -70,14 +70,17 @@ cold tropopause near 216 K, and the 9.6 micron ozone band sits in between.
 
 CIA is optional: `cia_pairs=()` leaves the line-only spectrum unchanged.
 To include the O2-O2 fundamental near 6.4 microns and N2-N2 absorption, add
-these arguments to `from_default_setup` above:
+these arguments to `from_default_setup` above, for example as
+`ExoJaxEmissionModel.from_default_setup(..., **cia_options)`:
 
-Keyword fragment to insert into the configured model above.
+This fragment extends the configured model above.
 
 ```python notest
-cia_pairs = (("O2-O2", "N2-N2"),)
-cia_vmr = ({"N2": 0.78, "O2": 0.21},)
-mean_molecular_weight = (28.97,)
+cia_options = dict(
+    cia_pairs=("O2-O2", "N2-N2"),
+    cia_vmr={"N2": 0.78, "O2": 0.21},
+    mean_molecular_weight=28.97,
+)
 ```
 
 `cia_vmr` specifies constant **volume** mixing ratios for partners absent

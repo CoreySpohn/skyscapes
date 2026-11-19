@@ -251,8 +251,8 @@ Thus `N = ceil(resolving_power * ln(nu_max / nu_min))`, rounded up to even
 because ExoJAX premodit requires an even point count. The logarithmic sampling
 follows [Kawahara et al. (2022), ApJS 258, 31, Section 2.1.2](https://arxiv.org/abs/2105.14782);
 see also the [ExoJAX grid documentation](https://secondearths.sakura.ne.jp/exojax/exojax/exojax.utils.html#exojax.utils.grids.wavenumber_grid).
-Over 400-1000 nm the default uses 137444 points, versus the former 2000
-(only $R_{\rm grid} \simeq 2200$).
+Over 400-1000 nm the default uses 137444 points; a 2000-point grid would
+give only $R_{\rm grid} \simeq 2200$.
 
 Measured Earth-modern R=140-binned minimum/continuum ratios illustrate the
 sampling error (smaller ratios mean deeper absorption):
