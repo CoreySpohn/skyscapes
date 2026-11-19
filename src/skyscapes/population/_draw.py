@@ -33,7 +33,7 @@ import jax.numpy as jnp
 import priorities
 from hwoutils.constants import AU2m, G, G_si, Mearth2kg, Msun2kg, d2s, deg2rad
 from orbix.equations.orbit import state_vector_to_keplerian
-from orbix.system import FrameOrbit
+from orbix.system import FrameOrbit, isotropic_orientation
 from orbix.system.rotation import from_axis_angle, rotate
 
 from ..habitable_zone import HZ_INNER_EEID, HZ_OUTER_EEID
@@ -51,8 +51,10 @@ class PopulationConfig(eqx.Module):
         eccentricity: Eccentricity distribution of the planets, a
             `priorities.AbstractDistribution` such as `kipping_eccentricity()`, or
             ``None`` for circular orbits (the ExoVista default).
-        inc_min_deg: Lower bound of the planet inclination to the system midplane.
-        inc_max_deg: Upper bound of the planet inclination to the midplane.
+        inclination: Distribution of the planet inclination to the system midplane
+            in radians, a scalar `priorities.AbstractDistribution` such as
+            ``priorities.Truncated(orbix.system.IsotropicInclination(), high=0.1)``,
+            or ``None`` for the ExoVista default, uniform on 0 to 5 degrees.
         earth_candidate_probability: Probability that a planet inside the exoEarth
             candidate box is an exoEarth-candidate type.
         mutual_hill_min: Smallest allowed separation in mutual Hill radii.
@@ -62,13 +64,20 @@ class PopulationConfig(eqx.Module):
     """
 
     eccentricity: priorities.AbstractDistribution | None = None
-    inc_min_deg: float = 0.0
-    inc_max_deg: float = 5.0
+    inclination: priorities.AbstractDistribution | None = None
     earth_candidate_probability: float = 1.0
     mutual_hill_min: float = 6.0
     max_planets: int = eqx.field(static=True, default=30)
     max_iterations: int = eqx.field(static=True, default=200)
     max_stalled: int = eqx.field(static=True, default=50)
+
+
+_DEFAULT_TILT = priorities.Uniform(0.0, 5.0 * deg2rad)
+
+
+def _tilt_distribution(config):
+    """The configured planet inclination to the midplane, or the ExoVista default."""
+    return _DEFAULT_TILT if config.inclination is None else config.inclination
 
 
 class PlanetPopulation(eqx.Module):
@@ -181,10 +190,6 @@ def _remove_unstable(a_AU, mass_Mearth, present, three_star_mass_Mearth, hill_mi
     return jax.lax.while_loop(cond, body, present)
 
 
-def _uniform_between(key, lo, hi, shape):
-    return lo + jax.random.uniform(key, shape) * (hi - lo)
-
-
 def _type_weights(types, config, a_scaled, radius):
     """Unnormalized eligible-type probabilities shared by both population laws."""
     r_lo = jnp.where(
@@ -243,9 +248,9 @@ def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=N
     m_edges = occurrence.mass_edges_Mearth
 
     key, k_pa, k_inc, k_flip, k_bin = jax.random.split(key, 5)
-    midplane_pa = jax.random.uniform(k_pa, (n_stars,)) * 360.0
-    cos_inc = jax.random.uniform(k_inc, (n_stars,)) * 2.0 - 1.0
-    midplane_inc = jnp.degrees(jnp.arccos(cos_inc))
+    iso_inc, angle, _, _ = isotropic_orientation()
+    midplane_pa = jnp.degrees(angle.sample(k_pa, (n_stars,)))
+    midplane_inc = jnp.degrees(iso_inc.sample(k_inc, (n_stars,)))
     midplane_inc = jnp.where(
         jax.random.uniform(k_flip, (n_stars,)) < 0.5, midplane_inc - 180.0, midplane_inc
     )
@@ -333,12 +338,10 @@ def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=N
                 if config.eccentricity is None
                 else config.eccentricity.sample(k_e, (cap,))
             ),
-            "inc_deg": _uniform_between(
-                k_i, config.inc_min_deg, config.inc_max_deg, (cap,)
-            ),
-            "node_deg": jax.random.uniform(k_node, (cap,)) * 360.0,
-            "argperi_deg": jax.random.uniform(k_peri, (cap,)) * 360.0,
-            "mean_anomaly_deg": jax.random.uniform(k_anom, (cap,)) * 360.0,
+            "inc_deg": jnp.degrees(_tilt_distribution(config).sample(k_i, (cap,))),
+            "node_deg": jnp.degrees(angle.sample(k_node, (cap,))),
+            "argperi_deg": jnp.degrees(angle.sample(k_peri, (cap,))),
+            "mean_anomaly_deg": jnp.degrees(angle.sample(k_anom, (cap,))),
             "cell": cell.astype(jnp.int32),
         }
         # Rank of each new planet among those landing on the same star.

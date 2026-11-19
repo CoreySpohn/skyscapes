@@ -273,7 +273,7 @@ def test_support_errors_and_type_photometry(process, marks):
 
     Albedo and photometry use the same interpolation and permit 16 float64
     eps for fused phase/radius arithmetic; support and masks are exact.
-    Zero-width tilt is tested because isotropic mixing removes its singularity.
+    A narrow tilt is tested because isotropic mixing removes its singularity.
     """
     from skyscapes.physical_model import LambertianPhysicalModel
 
@@ -294,9 +294,11 @@ def test_support_errors_and_type_photometry(process, marks):
         degenerate.mark_log_density(scene, host)
     with pytest.raises(ValueError, match=r"eccentricity is None"):
         eqx.filter_jit(degenerate.mark_log_density)(scene, host)
-    zero_tilt = eqx.tree_at(lambda p: p.config.inc_max_deg, process, 0.0)
+    narrow = eqx.tree_at(
+        lambda p: p.config.inclination, process, priorities.Uniform(0.0, 1e-3)
+    )
     np.testing.assert_array_equal(
-        zero_tilt.mark_log_density(scene, host), process.mark_log_density(scene, host)
+        narrow.mark_log_density(scene, host), process.mark_log_density(scene, host)
     )
     single = jax.tree.map(lambda x: x[0], scene)
     assert process.log_intensity(single, host).shape == (1,)

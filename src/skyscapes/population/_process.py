@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import priorities
 from hwoutils.constants import Mearth2kg, Msun2kg
 from hwoutils.epoch import Epoch
-from orbix.system import Body, SkyFrame
+from orbix.system import Body, SkyFrame, isotropic_orientation
 from orbix.system import System as DynamicsSystem
 from orbix.system.core import GM_SUN_AU3_PER_D2, enclosed_mu, jacobi_to_barycentric
 from orbix.system.frame_orbit import FrameOrbit
@@ -23,6 +23,7 @@ from ._draw import (
     _remove_unstable,
     _sample_types,
     _sky_elements_one,
+    _tilt_distribution,
     _type_weights,
     earth_like,
 )
@@ -157,10 +158,13 @@ class OccurrencePopulation(eqx.Module):
         a_edges, m_edges = self.occurrence.a_edges_AU, self.occurrence.mass_edges_Mearth
         a_scaled = priorities.LogUniform(a_edges[ia], a_edges[ia + 1]).sample(keys[1])
         mass = priorities.LogUniform(m_edges[im], m_edges[im + 1]).sample(keys[2])
-        angles = jax.random.uniform(keys[3], (n, 3)) * (2 * jnp.pi)
+        iso_inc, angle, _, _ = isotropic_orientation()
+        node, peri, anomaly = (
+            angle.sample(k, (n,)) for k in jax.random.split(keys[3], 3)
+        )
         ecc = self.config.eccentricity
         e = jnp.zeros(n) if ecc is None else ecc.sample(keys[4], (n,))
-        inc = jnp.arccos(2 * jax.random.uniform(keys[5], (n,)) - 1)
+        inc = iso_inc.sample(keys[5], (n,))
         types = _sample_types(
             keys[6],
             self.types,
@@ -174,9 +178,9 @@ class OccurrencePopulation(eqx.Module):
             mass=mass,
             e=e,
             i_rad=inc,
-            W_rad=angles[:, 0],
-            w_rad=angles[:, 1],
-            M0_rad=angles[:, 2],
+            W_rad=node,
+            w_rad=peri,
+            M0_rad=anomaly,
             type_index=types,
         )
 
@@ -265,15 +269,14 @@ class OccurrencePopulation(eqx.Module):
         take = selected[jnp.minimum(jnp.arange(k), capacity - 1)]
         valid = jnp.arange(k) < jnp.sum(alive)
         marks = jax.tree.map(lambda x: x[take], marks)
-        plane = jax.random.uniform(plane_key, (2,))
-        mid_inc, mid_pa = jnp.arccos(2 * plane[0] - 1), 2 * jnp.pi * plane[1]
+        iso_inc, angle, _, _ = isotropic_orientation()
+        k_inc, k_pa = jax.random.split(plane_key)
+        mid_inc, mid_pa = iso_inc.sample(k_inc), angle.sample(k_pa)
         # Orient surviving marks about a common isotropic system midplane.
         # Tilt is drawn per candidate so selecting K cannot change it.
-        tilt = jnp.deg2rad(
-            self.config.inc_min_deg
-            + jax.random.uniform(tilt_key, (capacity,))
-            * (self.config.inc_max_deg - self.config.inc_min_deg)
-        )[order][take]
+        tilt = _tilt_distribution(self.config).sample(tilt_key, (capacity,))[order][
+            take
+        ]
         e, inc, node, peri, anomaly, _ = jax.vmap(
             _sky_elements_one, in_axes=(0, 0, 0, 0, 0, 0, 0, None, None, None)
         )(
@@ -498,7 +501,7 @@ class OccurrencePopulation(eqx.Module):
         a rotation-invariant normal distribution; the unique invariant law
         on the sphere is uniform. Uniform periapsis and anomaly supply the
         remaining independent angles. This proof includes any fixed tilt,
-        so inc_min_deg == inc_max_deg does not make this marginal singular.
+        so any inclination distribution leaves this marginal nonsingular.
         Circular orbits (config.eccentricity None) make it singular and raise
         ValueError on the host, also at trace construction.
 

@@ -100,7 +100,8 @@ def test_orbit_ranges_follow_the_config(draw):
     Fails if the config bounds are swapped, ignored or applied in the wrong units.
     """
     config = PopulationConfig(
-        eccentricity=priorities.Uniform(0.1, 0.2), inc_min_deg=1.0, inc_max_deg=3.0
+        eccentricity=priorities.Uniform(0.1, 0.2),
+        inclination=priorities.Uniform(np.deg2rad(1.0), np.deg2rad(3.0)),
     )
     p = draw(0, config)
     present = np.asarray(p.present)
