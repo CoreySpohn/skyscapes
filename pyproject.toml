@@ -148,7 +148,9 @@ optional_dependencies_dev_groups = ["dev", "docs", "test"]
 [tool.deptry.per_rule_ignores]
 # JAX loads its compiled backend; keep the explicit minimum version constraint.
 # vaex-core is constrained for exojax's transitive dependency to have Python 3.12 wheels.
-DEP002 = ["jaxlib", "vaex-core"]
+# hwostyle is a user-facing floor in the viz extra: the docs examples and tests import it
+# to read brand colors, while skyscapes.viz reaches it only through eyepiece.
+DEP002 = ["hwostyle", "jaxlib", "vaex-core"]
 
 [tool.ty.environment]
 python-version = "3.11"
