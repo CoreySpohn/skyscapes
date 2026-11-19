@@ -1,5 +1,48 @@
 # Changelog
 
+## [5.0.0](https://github.com/CoreySpohn/skyscapes/compare/v4.1.0...v5.0.0) (2026-11-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* declare disk radiance as a per-steradian density
+* declare spectral breaks on every scene model and read band contrasts from one quadrature
+* rename dist_AU to star_planet_distance_AU across physical models and scene
+* one reflected-light projection, public reflectivity(), star_planet_distance_AU keyword
+* put angular diameter on the stellar interface and query disk radiance at sky positions
+* read band transmissions, conversions and colours from hwoutils and eyepiece
+* Planck radiance and band centres come from hwoutils
+* local-zodi models come from zodi.jax and skyscapes.background is gone
+* one Lambert phase and reflected contrast, orbit mechanics from orbix, Legendre-only disk sightlines and no opacity alias
+* disks return a photon radiance image on a caller grid from a calibrated dust amplitude, in astronomical position angle
+* stars, planets and local zodi return photon quantities as functions of wavelength
+
+### Features
+
+* declare spectral breaks on every scene model and read band contrasts from one quadrature ([a024600](https://github.com/CoreySpohn/skyscapes/commit/a02460082c73eb8d5088b1e648b3ec68b8702e7d))
+* disks return a photon radiance image on a caller grid from a calibrated dust amplitude, in astronomical position angle ([07ef2a3](https://github.com/CoreySpohn/skyscapes/commit/07ef2a368ee6412918bf72f3c8893472e6d65676))
+* **population:** exoEarth-candidate flag for the planets of a scene ([ac988b1](https://github.com/CoreySpohn/skyscapes/commit/ac988b10b093b001ee1e62d9882373b2248835ee))
+* **population:** read a one-planet mark to coordinates and rebuild the system from them ([b5cd835](https://github.com/CoreySpohn/skyscapes/commit/b5cd8354441ebf7795607867aad12e85a1b2bd11))
+* put angular diameter on the stellar interface and query disk radiance at sky positions ([d9ba388](https://github.com/CoreySpohn/skyscapes/commit/d9ba388c42bf94f2742486d88ac2b005beec181a))
+* stars, planets and local zodi return photon quantities as functions of wavelength ([c55c3b1](https://github.com/CoreySpohn/skyscapes/commit/c55c3b1976d9720514ab2ffcacc6416b8bdb3f04))
+* **zodi:** declare the Table 19 colour breakpoints for band quadrature ([4c8b2ef](https://github.com/CoreySpohn/skyscapes/commit/4c8b2ef5573e6458f80e6f2a194b6f3f7813b888))
+
+
+### Bug Fixes
+
+* declare disk radiance as a per-steradian density ([141a067](https://github.com/CoreySpohn/skyscapes/commit/141a0678c94fb0c262a93f9295ee83989de51ad3))
+* **physical_model:** form the blackbody contrast from log occupation factors, which keeps the star-temperature gradient under jit ([4724737](https://github.com/CoreySpohn/skyscapes/commit/47247375d5e941a5a551a9a2c7000fd03e425d7c))
+
+
+### Code Refactoring
+
+* local-zodi models come from zodi.jax and skyscapes.background is gone ([9703858](https://github.com/CoreySpohn/skyscapes/commit/9703858047193884caa6b236bbf309611160287c))
+* one Lambert phase and reflected contrast, orbit mechanics from orbix, Legendre-only disk sightlines and no opacity alias ([823cf14](https://github.com/CoreySpohn/skyscapes/commit/823cf14f5db4ccb401992d37626a86b9c0553a00))
+* one reflected-light projection, public reflectivity(), star_planet_distance_AU keyword ([adb3fe7](https://github.com/CoreySpohn/skyscapes/commit/adb3fe742d6ea2abdb85e874671b5dfd790b5142))
+* Planck radiance and band centres come from hwoutils ([e590fe6](https://github.com/CoreySpohn/skyscapes/commit/e590fe621b62d415608892efe77b2faccd86f34c))
+* read band transmissions, conversions and colours from hwoutils and eyepiece ([aa1cddc](https://github.com/CoreySpohn/skyscapes/commit/aa1cddce7a5c38e5f16cd3a3d7e2a489a05d9f40))
+* rename dist_AU to star_planet_distance_AU across physical models and scene ([52cc018](https://github.com/CoreySpohn/skyscapes/commit/52cc018528bb5de0baa08307a63067762a74d847))
+
 ## [4.1.0](https://github.com/CoreySpohn/skyscapes/compare/v4.0.1...v4.1.0) (2026-11-16)
 
 
