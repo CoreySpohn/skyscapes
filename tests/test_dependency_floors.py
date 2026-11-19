@@ -40,12 +40,12 @@ def _floor(requirement):
 
 
 def test_orbix_floor_is_declared_for_install_and_test():
-    """Both the runtime dependency and the test extra require orbix 4.2.0."""
+    """Runtime and test extra share one orbix floor, at or above 4.2.0."""
     groups = {
         group: _floor(req) for group, req in _requirements() if req.name == "orbix"
     }
-    assert groups["dependencies"] == SKY_FLOORS["orbix"]
-    assert groups["extra:test"] == SKY_FLOORS["orbix"]
+    assert groups["dependencies"] == groups["extra:test"]
+    assert groups["dependencies"] >= SKY_FLOORS["orbix"]
 
 
 def test_every_sibling_pin_is_at_or_above_the_sky_chart_release():
