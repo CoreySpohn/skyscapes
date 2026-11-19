@@ -158,8 +158,6 @@ class Star(AbstractStar):
     tabulated flux or automatically add spatially resolved stellar emission.
     """
 
-    ra_deg: float
-    dec_deg: float
     fixed_diameter_arcsec: float
     luminosity_Lsun: float
     spots: StarSpots | None
@@ -177,8 +175,6 @@ class Star(AbstractStar):
         wavelengths_nm: Array,
         times_d: Array,
         flux_density_jy: Array,
-        ra_deg: float = 0.0,
-        dec_deg: float = 0.0,
         fixed_diameter_arcsec: float = 0.0,
         luminosity_Lsun: float = 1.0,
         spots: StarSpots | None = None,
@@ -196,8 +192,6 @@ class Star(AbstractStar):
         if interpolation_method not in ("linear", "cubic"):
             raise ValueError("interpolation_method must be linear or cubic.")
         self._interpolation_method = interpolation_method
-        self.ra_deg = ra_deg
-        self.dec_deg = dec_deg
         self.fixed_diameter_arcsec = fixed_diameter_arcsec
         self.luminosity_Lsun = luminosity_Lsun
         self.spots = spots
@@ -280,6 +274,5 @@ class Star(AbstractStar):
             f"Star("
             f"L={self.luminosity_Lsun:.3g} Lsun, "
             f"diam={self.fixed_diameter_arcsec:.3g} arcsec, "
-            f"RA/Dec=({self.ra_deg:.4f}, {self.dec_deg:.4f}) deg, "
             f"wl={wl_min:.0f}-{wl_max:.0f} nm, n_times={n_t})"
         )

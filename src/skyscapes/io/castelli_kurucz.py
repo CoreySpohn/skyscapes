@@ -43,8 +43,6 @@ def from_castelli_kurucz(
     radius_m: float,
     mh: float = 0.0,
     wavelength_range_nm: tuple[float, float] | None = (100.0, 30000.0),
-    ra_deg: float = 0.0,
-    dec_deg: float = 0.0,
     fetch: Callable[[int], str] = fetch_castelli_kurucz,
 ) -> Star:
     """Build a static linear-spectrum Star from solar-metallicity ATLAS9.
@@ -67,7 +65,5 @@ def from_castelli_kurucz(
         dist_pc=dist_pc,
         radius_m=radius_m,
         wavelength_range_nm=wavelength_range_nm,
-        ra_deg=ra_deg,
-        dec_deg=dec_deg,
         source="Castelli and Kurucz (2004) ATLAS9 (STScI cdbs ckp00)",
     )

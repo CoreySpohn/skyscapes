@@ -1,4 +1,4 @@
-"""Scene holds the zodi, and an analytic exozodi is a disk."""
+"""Scene holds the local zodi and sky position; an analytic exozodi is a disk."""
 
 from __future__ import annotations
 
@@ -33,28 +33,28 @@ def _scene(**extra):
 
 def test_zodi_defaults_to_none_and_is_stored():
     """from_classical and the constructor carry the zodi on the scene."""
-    assert _scene().zodi is None
+    assert _scene().local_zodi is None
     zodi = AYOZodi()
-    scene = _scene(zodi=zodi)
-    assert scene.zodi is zodi
-    direct = Scene(scene.star, scene.planets, scene.dynamics, zodi=zodi)
-    assert direct.zodi is zodi
-    assert "zodi: AYOZodi" in repr(scene)
-    assert "zodi: None" in repr(_scene())
+    scene = _scene(local_zodi=zodi)
+    assert scene.local_zodi is zodi
+    direct = Scene(scene.star, scene.planets, scene.dynamics, local_zodi=zodi)
+    assert direct.local_zodi is zodi
+    assert "local_zodi: AYOZodi" in repr(scene)
+    assert "local_zodi: None" in repr(_scene())
 
 
 def test_batches_reject_zodi():
     """A zodi has no batch axes, so packing or batching a zodi scene fails."""
-    with pytest.raises(ValueError, match="disk or zodi"):
-        Scene.from_scenes([_scene(zodi=AYOZodi())])
+    with pytest.raises(ValueError, match="disk or local zodi"):
+        Scene.from_scenes([_scene(local_zodi=AYOZodi())])
     batch = Scene.from_scenes([_scene()])
-    with pytest.raises(ValueError, match="no zodi"):
+    with pytest.raises(ValueError, match="no local zodi"):
         Scene(
             batch.star,
             batch.planets,
             batch.dynamics,
             valid=batch.valid,
-            zodi=AYOZodi(),
+            local_zodi=AYOZodi(),
         )
 
 
@@ -82,3 +82,33 @@ def test_ayo_exozodi_disk_on_a_grid_and_in_a_scene():
     got = scene.photon_radiance_at(wave, 0.0, east, north)
     assert got.shape == (3, 4, 3)
     assert np.all(np.asarray(got) > 0)
+
+
+def test_scene_position_is_read_from_the_frame_and_defaults_to_unplaced():
+    """from_classical places the scene on the frame; omitting it leaves it unplaced."""
+    assert _scene().ra_deg is None
+    assert _scene().dec_deg is None
+    placed = _scene(ra_deg=100.0, dec_deg=-20.0)
+    np.testing.assert_allclose(placed.ra_deg, 100.0)
+    np.testing.assert_allclose(placed.dec_deg, -20.0)
+    assert placed.dynamics.frame.ra_deg is placed.ra_deg
+    assert "ra_deg" not in vars(placed.star)
+
+
+def test_from_scenes_refuses_a_mix_of_placed_and_unplaced_scenes():
+    """A batch is all placed or all unplaced, never a mix."""
+    placed = _scene(ra_deg=100.0, dec_deg=-20.0)
+    with pytest.raises(ValueError, match="must all be placed"):
+        Scene.from_scenes([placed, _scene()])
+    batch = Scene.from_scenes([placed, _scene(ra_deg=10.0, dec_deg=5.0)])
+    np.testing.assert_allclose(batch.ra_deg, [100.0, 10.0])
+    assert Scene.from_scenes([_scene(), _scene()]).ra_deg is None
+
+
+def test_table_round_trip_keeps_the_sky_position():
+    """to_table and from_table preserve the placed frame and its epoch."""
+    batch = Scene.from_scenes([_scene(ra_deg=100.0, dec_deg=-20.0)] * 2)
+    back = Scene.from_table(batch.to_table(), template=batch)
+    np.testing.assert_allclose(back.ra_deg, [100.0, 100.0])
+    np.testing.assert_allclose(back.dec_deg, [-20.0, -20.0])
+    assert back.epoch == batch.epoch

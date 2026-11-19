@@ -403,3 +403,17 @@ def test_declared_surface_flux_cannot_be_read_as_observer_jy(scene_file):
         hdul[5].header["SPECUNIT"] = "erg/s/cm^2/cm"
     with pytest.raises(ValueError, match="SPECUNIT must be Jy"):
         from_exovista(path, load_disk=False)
+
+
+def test_from_exovista_places_the_scene_from_the_star_header(scene_file):
+    """RA and DEC in the stellar header place the scene; without them it is unplaced."""
+    path = scene_file()
+    assert from_exovista(path, load_disk=False).ra_deg is None
+    with fits.open(path, mode="update") as hdul:
+        star_ext = next(i for i, h in enumerate(hdul) if "MASS" in h.header)
+        hdul[star_ext].header["RA"] = 101.25
+        hdul[star_ext].header["DEC"] = -16.7
+    scene = from_exovista(path, load_disk=False)
+    np.testing.assert_allclose(scene.ra_deg, 101.25)
+    np.testing.assert_allclose(scene.dec_deg, -16.7)
+    assert not hasattr(scene.star, "ra_deg")

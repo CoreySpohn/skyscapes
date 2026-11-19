@@ -1,4 +1,4 @@
-"""The Scene: star, planets, disk and zodi, with one orbix system owning dynamics."""
+"""The Scene: star, planets, disk and local zodi, over one orbix system."""
 
 from __future__ import annotations
 
@@ -133,7 +133,7 @@ class Scene(eqx.Module):
         disk: Optional extended source, the only exozodi (``AbstractDisk | None``):
             an ExoVista disk, a parametric disk, or an analytic exozodi model
             such as ``skyscapes.disk.AYOExozodiDisk``.
-        zodi: Optional local (solar-system) zodiacal light, any
+        local_zodi: Optional local (solar-system) zodiacal light, any
             :mod:`zodi.jax` local-zodi model. Unbatched scenes only.
         midplane_inc_deg: Disk midplane inclination [deg] in [0, 180],
             with 0 face-on (the default). Together with ``midplane_position_angle_deg``,
@@ -151,7 +151,7 @@ class Scene(eqx.Module):
     valid: Array
     _source_layout: Array | None = None
     disk: AbstractDisk | None = None
-    zodi: AbstractLocalZodi | None = None
+    local_zodi: AbstractLocalZodi | None = None
     midplane_inc_deg: float = 0.0
     midplane_position_angle_deg: float = 0.0
     body_index: tuple[int, ...] = eqx.field(static=True, default=())
@@ -161,7 +161,7 @@ class Scene(eqx.Module):
 
         Returns ph s^-1 m^-2 nm^-1 sr^-1 with shape wavelength_nm.shape
         + grid.shape. A scene without a disk returns zero radiance.
-        Batched scenes exclude disks and zodi.
+        Batched scenes exclude disks and local zodi.
         """
         from ..disk.base import check_sky_grid, radiance_image
 
@@ -213,7 +213,7 @@ class Scene(eqx.Module):
         midplane_inc_deg=0.0,
         midplane_position_angle_deg=0.0,
         *,
-        zodi=None,
+        local_zodi=None,
         body_index=None,
         valid=None,
     ):
@@ -233,7 +233,7 @@ class Scene(eqx.Module):
             else jnp.asarray(valid, dtype=bool)
         )
         self.disk = disk
-        self.zodi = zodi
+        self.local_zodi = local_zodi
         self.midplane_inc_deg = midplane_inc_deg
         self.midplane_position_angle_deg = midplane_position_angle_deg
         self.body_index = (
@@ -248,10 +248,13 @@ class Scene(eqx.Module):
         if self.valid.shape != (*self.batch_shape, count):
             raise ValueError("valid must have shape B + (K,)")
         if self.batch_shape and (
-            len(self.planets) != 1 or self.disk is not None or self.zodi is not None
+            len(self.planets) != 1
+            or self.disk is not None
+            or self.local_zodi is not None
         ):
             raise ValueError(
-                "Batched scenes require one stacked Planet group, no disk and no zodi"
+                "Batched scenes require one stacked Planet group, no disk and no "
+                "local zodi"
             )
         if (
             len(self.body_index) != count
@@ -337,12 +340,14 @@ class Scene(eqx.Module):
         M0_rad,
         epoch_d=0.0,
         epoch=_DEFAULT_EPOCH,
+        ra_deg=None,
+        dec_deg=None,
         order=None,
         valid=None,
         disk=None,
         midplane_inc_deg=0.0,
         midplane_position_angle_deg=0.0,
-        zodi=None,
+        local_zodi=None,
     ):
         """Build a Jacobi chain from elements and masses in scene planet order.
 
@@ -353,7 +358,9 @@ class Scene(eqx.Module):
         flattened planet count. ``epoch_d`` and observation ``time_d`` are
         days from the scene epoch. ``epoch`` is host-side SkyFrame metadata;
         convert absolute dates once with ``scene.epoch.days(...)`` before
-        transferring the resulting offsets to JAX.
+        transferring the resulting offsets to JAX. ``ra_deg`` and ``dec_deg``
+        place the scene on the sky (ICRS degrees, both or neither); without
+        them the scene is unplaced.
         """
         planets = (planets,) if isinstance(planets, Planet) else tuple(planets)
         count = sum(p.n_planets for p in planets)
@@ -389,7 +396,10 @@ class Scene(eqx.Module):
             indices
         ]
         dynamics = DynamicsSystem.from_classical(
-            Body(star_mass_Msun), Body(masses), SkyFrame(dist_pc, epoch), **elements
+            Body(star_mass_Msun),
+            Body(masses),
+            SkyFrame(dist_pc, epoch, ra_deg, dec_deg),
+            **elements,
         )
         inverse = tuple(order.index(i) for i in range(count))
         return cls(
@@ -399,7 +409,7 @@ class Scene(eqx.Module):
             disk,
             midplane_inc_deg,
             midplane_position_angle_deg,
-            zodi=zodi,
+            local_zodi=local_zodi,
             body_index=inverse,
             valid=valid,
         )
@@ -413,6 +423,16 @@ class Scene(eqx.Module):
     def epoch(self) -> Epoch:
         """Host-side scene epoch, owned by the dynamics sky frame."""
         return self.dynamics.frame.epoch
+
+    @property
+    def ra_deg(self):
+        """Right ascension [deg, ICRS], or None for an unplaced scene."""
+        return self.dynamics.frame.ra_deg
+
+    @property
+    def dec_deg(self):
+        """Declination [deg, ICRS], or None for an unplaced scene."""
+        return self.dynamics.frame.dec_deg
 
     @property
     def star_mass_Msun(self):
@@ -566,12 +586,12 @@ class Scene(eqx.Module):
         )
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Union of stellar, planetary, disk and zodi wavelength breaks [nm]."""
+        """Union of stellar, planetary, disk and local-zodi wavelength breaks [nm]."""
         models = (self.star, *self.planets)
         if self.disk is not None:
             models = (*models, self.disk)
-        if self.zodi is not None:
-            models = (*models, self.zodi)
+        if self.local_zodi is not None:
+            models = (*models, self.local_zodi)
         return spectral_breaks(*models)
 
     @_batch_method
@@ -698,8 +718,8 @@ class Scene(eqx.Module):
             lines.append(indent("disk: " + repr(self.disk)))
         else:
             lines.append("  disk: None")
-        if self.zodi is not None:
-            lines.append(indent("zodi: " + repr(self.zodi)))
+        if self.local_zodi is not None:
+            lines.append(indent("local_zodi: " + repr(self.local_zodi)))
         else:
-            lines.append("  zodi: None")
+            lines.append("  local_zodi: None")
         return "\n".join(lines)

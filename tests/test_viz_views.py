@@ -260,7 +260,7 @@ def test_views_accept_a_scene_with_zodi():
     from zodi.jax import AYOZodi
 
     scene = eqx.tree_at(
-        lambda s: s.zodi, make_system(), AYOZodi(), is_leaf=lambda x: x is None
+        lambda s: s.local_zodi, make_system(), AYOZodi(), is_leaf=lambda x: x is None
     )
     viz.plot_system(scene, 0.0)
     viz.plot_disk_radiance(scene, wavelength_nm=550.0, grid=_DISK_GRID)

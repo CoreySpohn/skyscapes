@@ -42,11 +42,15 @@ class Scene(eqx.Module):
     planets: tuple[Planet, ...]
     dynamics: orbix.system.System
     disk: AbstractDisk | None = None  # the only exozodi
-    zodi: AbstractLocalZodi | None = None
+    local_zodi: AbstractLocalZodi | None = None
     midplane_inc_deg: float = 0.0
     midplane_position_angle_deg: float = 0.0
     ...
 ```
+
+The sky position is not a star property: `scene.ra_deg` and `scene.dec_deg` read the
+`dynamics.frame` (ICRS degrees, set with `Scene.from_classical(..., ra_deg=, dec_deg=)`),
+and are `None` for an unplaced scene.
 
 Every level is an `eqx.Module`, which means: PyTree-registered for
 JAX, fields are checked at construction, and `eqx.tree_at` works
@@ -414,8 +418,8 @@ zodi = PrecomputedZodi(
     radiance_phot_per_s_m2_nm_sr=...,
 )
 
-scene = eqx.tree_at(lambda s: s.zodi, scene, zodi, is_leaf=lambda x: x is None)
-# or pass zodi=zodi to Scene(...) / Scene.from_classical(...)
+scene = eqx.tree_at(lambda s: s.local_zodi, scene, zodi, is_leaf=lambda x: x is None)
+# or pass local_zodi=zodi to Scene(...) / Scene.from_classical(...)
 ```
 
 The `AbstractLocalZodi` base class covers all three:
@@ -456,7 +460,9 @@ jax.config.update("jax_enable_x64", True)
 scene = from_exovista("system.fits", planet_spectra="auto")
 
 # Or programmatically
-scene = Scene(star=star, planets=(planet,), dynamics=dynamics, disk=disk, zodi=zodi)
+scene = Scene(
+    star=star, planets=(planet,), dynamics=dynamics, disk=disk, local_zodi=zodi
+)
 
 # Downstream usage
 from coronagraphoto import system_readout

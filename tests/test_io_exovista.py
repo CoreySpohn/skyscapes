@@ -76,17 +76,23 @@ def test_from_exovista_zodi_default_custom_and_none(fits_fixture):
     from zodi.jax import AYOZodi, LeinertZodi
 
     default = from_exovista(fits_fixture, load_disk=False)
-    assert isinstance(default.zodi, AYOZodi)
-    assert default.zodi.surface_brightness_mag_arcsec2 == 22.0
+    assert isinstance(default.local_zodi, AYOZodi)
+    assert default.local_zodi.surface_brightness_mag_arcsec2 == 22.0
     custom = from_exovista(
-        fits_fixture, load_disk=False, zodi=AYOZodi(surface_brightness_mag_arcsec2=21.5)
+        fits_fixture,
+        load_disk=False,
+        local_zodi=AYOZodi(surface_brightness_mag_arcsec2=21.5),
     )
-    assert custom.zodi.surface_brightness_mag_arcsec2 == 21.5
+    assert custom.local_zodi.surface_brightness_mag_arcsec2 == 21.5
     assert isinstance(
-        from_exovista(fits_fixture, load_disk=False, zodi=LeinertZodi()).zodi,
+        from_exovista(
+            fits_fixture, load_disk=False, local_zodi=LeinertZodi()
+        ).local_zodi,
         LeinertZodi,
     )
-    assert from_exovista(fits_fixture, load_disk=False, zodi=None).zodi is None
+    assert (
+        from_exovista(fits_fixture, load_disk=False, local_zodi=None).local_zodi is None
+    )
     assert default.disk is None
     assert isinstance(from_exovista(fits_fixture).disk, ExovistaDisk)
 

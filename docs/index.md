@@ -99,7 +99,7 @@ scene = Scene.from_classical(
     i_rad=jnp.array([jnp.pi / 3]),
     w_rad=jnp.array([0.0]),
     M0_rad=jnp.array([0.0]),
-    zodi=zodi,
+    local_zodi=zodi,
 )
 ```
 

@@ -116,7 +116,7 @@ jax.config.update("jax_enable_x64", True)
 
 from skyscapes import from_exovista
 
-# A Scene: star, planets and disk, plus a default AYOZodi (scene.zodi)
+# A Scene: star, planets and disk, plus a default AYOZodi (scene.local_zodi)
 scene = from_exovista("path/to/exovista_system.fits", planet_spectra="auto")
 ```
 
@@ -197,7 +197,7 @@ scene = Scene.from_classical(
     i_rad=jnp.array([jnp.pi / 3]),
     w_rad=jnp.array([0.0]),
     M0_rad=jnp.array([0.0]),
-    zodi=zodi,
+    local_zodi=zodi,
 )
 ```
 

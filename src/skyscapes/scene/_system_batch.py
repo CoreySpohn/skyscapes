@@ -1,5 +1,7 @@
 """Host packing and fixed padding for Scene pytrees."""
 
+import dataclasses
+
 import equinox as eqx
 import jax
 import numpy as np
@@ -95,8 +97,12 @@ def from_scenes(cls, systems, *, capacity=None, batch_shape=None):
         raise ValueError("systems must be nonempty")
     if any(s.batch_shape for s in systems):
         raise ValueError("from_scenes requires unbatched systems")
-    if any(s.disk is not None or s.zodi is not None for s in systems):
-        raise ValueError("Scenes with a disk or zodi cannot enter a batch")
+    if any(s.disk is not None or s.local_zodi is not None for s in systems):
+        raise ValueError("Scenes with a disk or local zodi cannot enter a batch")
+    if len({s.ra_deg is None for s in systems}) > 1:
+        raise ValueError(
+            "Scenes must all be placed on the sky (ra_deg and dec_deg) or all unplaced"
+        )
     if any(s.epoch != systems[0].epoch for s in systems):
         raise ValueError("Scenes must share one epoch")
     star_classes = {type(s.star) for s in systems}
@@ -299,7 +305,8 @@ def from_table(cls, table, *, template):
     epoch = Epoch(
         float(table["epoch_jd1"]), float(table["epoch_jd2"]), str(table["epoch_scale"])
     )
-    frame = type(skeleton.dynamics.frame)(skeleton.dist_pc, epoch)
+    # epoch is a static field, so it is replaced on the frame, keeping the position.
+    frame = dataclasses.replace(skeleton.dynamics.frame, epoch=epoch)
     skeleton = eqx.tree_at(lambda s: s.dynamics.frame, skeleton, frame)
     paths, definition = jax.tree_util.tree_flatten_with_path(skeleton)
     restored = jax.tree.unflatten(

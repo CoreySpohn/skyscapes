@@ -166,8 +166,6 @@ def from_phoenix(
     radius_m: float,
     mh: float = 0.0,
     wavelength_range_nm: tuple[float, float] | None = (100.0, 30000.0),
-    ra_deg: float = 0.0,
-    dec_deg: float = 0.0,
     fetch: Callable[[int], str] = fetch_phoenix,
 ) -> Star:
     """Build a static-spectrum ``Star`` from a PHOENIX model atmosphere.
@@ -186,8 +184,6 @@ def from_phoenix(
         mh: Metallicity [M/H] in dex. Only 0.0 is registered.
         wavelength_range_nm: Crop of the model grid in nm, or ``None`` for the
             full 1.3 nm to 77.6 micron range.
-        ra_deg: Right ascension in degrees, carried on the ``Star``.
-        dec_deg: Declination in degrees, carried on the ``Star``.
         fetch: Callable mapping a node Teff in kelvin to a local FITS path.
 
     Returns:
@@ -204,8 +200,6 @@ def from_phoenix(
         dist_pc=dist_pc,
         radius_m=radius_m,
         wavelength_range_nm=wavelength_range_nm,
-        ra_deg=ra_deg,
-        dec_deg=dec_deg,
         source="PHOENIX BT-Settl (STScI cdbs phoenixm00)",
     )
 
@@ -220,8 +214,6 @@ def _from_surface_flux(
     dist_pc,
     radius_m,
     wavelength_range_nm,
-    ra_deg,
-    dec_deg,
     source,
 ):
     """Dilute an atmosphere surface spectrum and construct its linear Star."""
@@ -238,8 +230,6 @@ def _from_surface_flux(
         wavelengths_nm=jnp.asarray(wavelength_nm),
         times_d=jnp.zeros(1),
         flux_density_jy=jnp.asarray(flux_jy)[:, None],
-        ra_deg=ra_deg,
-        dec_deg=dec_deg,
         fixed_diameter_arcsec=angular_diameter_arcsec(radius_m, dist_pc),
         luminosity_Lsun=(radius_m / Rsun2m) ** 2 * (teff_K / _TEFF_SUN_K) ** 4,
         metadata={

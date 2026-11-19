@@ -248,13 +248,9 @@ def _load_star(hdul: fits.HDUList, epoch: Epoch, fits_ext: int = 4) -> Star:
     flux_density_jy = jnp.asarray(np.asarray(spectra).T.astype(np.float32))
 
     fixed_diameter_arcsec = _angular_diameter_arcsec(obj_header)
-    ra_deg = obj_header.get("RA", 0.0)
-    dec_deg = obj_header.get("DEC", 0.0)
     luminosity_Lsun = obj_header.get("LSTAR", 1.0)
 
     return Star(
-        ra_deg=ra_deg,
-        dec_deg=dec_deg,
         fixed_diameter_arcsec=fixed_diameter_arcsec,
         luminosity_Lsun=luminosity_Lsun,
         wavelengths_nm=wavelengths_nm,
@@ -499,7 +495,7 @@ def from_exovista(
     *,
     planet_spectra: Literal["auto", "time", "phase"] = "auto",
     epoch: Epoch | None = None,
-    zodi: AbstractLocalZodi | None = AYOZodi(),  # noqa: B008
+    local_zodi: AbstractLocalZodi | None = AYOZodi(),  # noqa: B008
 ) -> Scene:
     """Load an ExoVista FITS file into a ``Scene``.
 
@@ -533,12 +529,14 @@ def from_exovista(
         epoch: Scene epoch that stored and observation times are measured
             from. ``None`` uses the first stellar timestamp. Pass a shared
             epoch to place several scenes on one clock.
-        zodi: Local zodi model stored on the scene. The default is
+        local_zodi: Local zodi model stored on the scene. The default is
             :class:`~zodi.jax.AYOZodi` (22 mag per square arcsecond); ``None``
             stores no zodi.
 
     Returns:
         ``Scene`` with star, planets (tuple), disk, and midplane metadata.
+        The scene is placed on the sky from the stellar header ``RA`` and
+        ``DEC`` (degrees); a header without them gives an unplaced scene.
 
     Raises:
         ValueError: JAX float64 is disabled, the FITS layout or spot records
@@ -613,5 +611,7 @@ def from_exovista(
         disk=disk,
         midplane_inc_deg=midplane_inc_deg,
         midplane_position_angle_deg=midplane_position_angle_deg,
-        zodi=zodi,
+        local_zodi=local_zodi,
+        ra_deg=star_header.get("RA"),
+        dec_deg=star_header.get("DEC"),
     )
