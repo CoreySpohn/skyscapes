@@ -390,7 +390,7 @@ planetary system itself. Local zodiacal-light models are supplied by
 `zodi.jax` and attached to the skyscapes `Scene`.
 
 Three variants implement `AbstractLocalZodi.photon_radiance(wavelength_nm, *,
-ecliptic_latitude_deg, solar_longitude_deg)`, returning ph/s/m^2/nm/sr:
+ecliptic_latitude_deg, helioecliptic_longitude_deg)`, returning ph/s/m^2/nm/sr:
 
 | Class | What it is |
 |---|---|

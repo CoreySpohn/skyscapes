@@ -106,7 +106,7 @@ def disk_radii_AU(disk):
     return None
 
 
-def zodi_sightline(ecliptic_lat_deg, solar_lon_deg):
+def zodi_sightline(ecliptic_latitude_deg, helioecliptic_longitude_deg):
     """Look direction for the two Leinert inputs, observer-centered.
 
     The frame is ecliptic with ``+x`` pointing from the Sun to the
@@ -115,15 +115,15 @@ def zodi_sightline(ecliptic_lat_deg, solar_lon_deg):
     ``+y``; the Leinert table is symmetric in its sign.
 
     Args:
-        ecliptic_lat_deg: Ecliptic latitude of the look direction [deg].
-        solar_lon_deg: Helio-ecliptic longitude difference between the look
-            direction and the Sun [deg], 0 toward the Sun.
+        ecliptic_latitude_deg: Ecliptic latitude of the look direction [deg].
+        helioecliptic_longitude_deg: Helio-ecliptic longitude difference
+            between the look direction and the Sun [deg], 0 toward the Sun.
 
     Returns:
         Unit look vector, shape ``(3,)``.
     """
-    beta = np.radians(ecliptic_lat_deg)
-    dlon = np.radians(solar_lon_deg)
+    beta = np.radians(ecliptic_latitude_deg)
+    dlon = np.radians(helioecliptic_longitude_deg)
     return np.array(
         [
             -np.cos(beta) * np.cos(dlon),

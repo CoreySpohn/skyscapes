@@ -628,8 +628,11 @@ def test_pre_rendered_disk_draws_no_invented_outline():
         (lambda s: viz.plot_disk_radiance(s.disk), "wavelength_nm"),
         (lambda s: viz.plot_disk_radiance(np.ones(4), pixel_scale_arcsec=0.1), "2D"),
         (lambda s: viz.plot_disk_geometry(s, incl_deg=200.0), "incl_deg"),
-        (lambda s: viz.plot_local_zodi_geometry(95.0, 10.0), "ecliptic_lat"),
-        (lambda s: viz.plot_local_zodi_geometry(10.0, 190.0), "solar_lon"),
+        (lambda s: viz.plot_local_zodi_geometry(95.0, 10.0), "ecliptic_latitude"),
+        (
+            lambda s: viz.plot_local_zodi_geometry(10.0, 190.0),
+            "helioecliptic_longitude",
+        ),
         (lambda s: viz.plot_local_zodi_geometry(10.0, 10.0, view="x"), "view"),
     ],
 )

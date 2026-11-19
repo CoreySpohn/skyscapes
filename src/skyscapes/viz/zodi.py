@@ -51,14 +51,17 @@ _LOOK_LABELS = {
 }
 
 
-def _check(ecliptic_lat_deg, solar_lon_deg):
+def _check(ecliptic_latitude_deg, helioecliptic_longitude_deg):
     """Reject angles outside the domain the Leinert inputs are defined on."""
-    if not -90.0 <= float(ecliptic_lat_deg) <= 90.0:
+    if not -90.0 <= float(ecliptic_latitude_deg) <= 90.0:
         raise ValueError(
-            f"ecliptic_lat_deg must lie in [-90, 90], got {ecliptic_lat_deg}"
+            f"ecliptic_latitude_deg must lie in [-90, 90], got {ecliptic_latitude_deg}"
         )
-    if not 0.0 <= float(solar_lon_deg) <= 180.0:
-        raise ValueError(f"solar_lon_deg must lie in [0, 180], got {solar_lon_deg}")
+    if not 0.0 <= float(helioecliptic_longitude_deg) <= 180.0:
+        raise ValueError(
+            "helioecliptic_longitude_deg must lie in [0, 180], "
+            f"got {helioecliptic_longitude_deg}"
+        )
 
 
 class _ZodiPanel:
@@ -226,10 +229,12 @@ class _ZodiPanel:
             "inset": [None if self.inset is None else self.inset.ax],
         }
 
-    def place(self, ecliptic_lat_deg, solar_lon_deg):
+    def place(self, ecliptic_latitude_deg, helioecliptic_longitude_deg):
         """Put every look-dependent artist where the two angles put it."""
         R = self.R
-        look = _geometry.zodi_sightline(ecliptic_lat_deg, solar_lon_deg)
+        look = _geometry.zodi_sightline(
+            ecliptic_latitude_deg, helioecliptic_longitude_deg
+        )
         observer3 = np.array([R, 0.0, 0.0])
         grains3 = observer3 + np.outer(self.grain_distances, look)
         grain3 = grains3[0]
@@ -265,9 +270,13 @@ class _ZodiPanel:
                     obs,
                     sun_dir[:2],
                     proj,
-                    float(solar_lon_deg),
+                    float(helioecliptic_longitude_deg),
                     placement=_top_label_placement(
-                        obs, proj, grain, self.look_radius, float(solar_lon_deg)
+                        obs,
+                        proj,
+                        grain,
+                        self.look_radius,
+                        float(helioecliptic_longitude_deg),
                     ),
                 )
             else:
@@ -275,8 +284,8 @@ class _ZodiPanel:
             out_2d = back if np.linalg.norm(back[:2]) > 0.0 else np.array([1.0, 0.0])
             in_2d = k_in
         else:
-            beta = np.radians(ecliptic_lat_deg)
-            dlon = np.radians(solar_lon_deg)
+            beta = np.radians(ecliptic_latitude_deg)
+            dlon = np.radians(helioecliptic_longitude_deg)
             direction = np.array([np.cos(beta), np.sin(beta)])
             end = self.ray_length * direction
             self.ray.set_data([0.0, end[0]], [0.0, end[1]])
@@ -292,7 +301,7 @@ class _ZodiPanel:
                 np.zeros(2),
                 np.array([1.0, 0.0]),
                 direction,
-                float(ecliptic_lat_deg),
+                float(ecliptic_latitude_deg),
                 1.9,
             )
             out_2d = -direction
@@ -306,8 +315,9 @@ class _ZodiPanel:
             flat = self.view == "top" and np.linalg.norm(look[:2]) <= 1e-9
             self.ray_label.set_text("sightline, to the pole" if flat else "sightline")
         self.readout.set_text(
-            rf"$\beta$ = {float(ecliptic_lat_deg):.0f}{DEGREE}, "
-            rf"$\Delta\lambda_\odot$ = {float(solar_lon_deg):.0f}{DEGREE}, "
+            rf"$\beta$ = {float(ecliptic_latitude_deg):.0f}{DEGREE}, "
+            rf"$\Delta\lambda_\odot$ = "
+            f"{float(helioecliptic_longitude_deg):.0f}{DEGREE}, "
             f"solar elongation = {elongation:.0f}{DEGREE}"
         )
         if self.inset is not None:
@@ -370,7 +380,7 @@ class _ZodiPanel:
         return out
 
 
-def _top_label_placement(observer, proj, grain, radius, solar_lon_deg):
+def _top_label_placement(observer, proj, grain, radius, helioecliptic_longitude_deg):
     """Where the top view's longitude label goes, clear of the rays.
 
     Everything the top view draws near the observer lies on the ``+y``
@@ -388,14 +398,14 @@ def _top_label_placement(observer, proj, grain, radius, solar_lon_deg):
         proj: The sightline's projected direction, shape ``(2,)``.
         grain: The marked grain's projected position, shape ``(2,)``.
         radius: The arc's radius.
-        solar_lon_deg: The longitude difference [deg].
+        helioecliptic_longitude_deg: The longitude difference [deg].
 
     Returns:
         ``(direction, distance, ha, va)``: the label's direction and
         distance from the vertex and its text alignment.
     """
     sun_side = np.array([-1.0, 0.0])
-    if solar_lon_deg <= 60.0:
+    if helioecliptic_longitude_deg <= 60.0:
         turn = np.radians(-30.0)
         c, s = np.cos(turn), np.sin(turn)
         direction = np.array([c * proj[0] - s * proj[1], s * proj[0] + c * proj[1]])
@@ -411,7 +421,7 @@ def _top_label_placement(observer, proj, grain, radius, solar_lon_deg):
     return direction, max(1.25 * radius, distance + 0.3 * radius), "right", "bottom"
 
 
-def _default_inset(view, ecliptic_lat_deg, solar_lon_deg):
+def _default_inset(view, ecliptic_latitude_deg, helioecliptic_longitude_deg):
     """An inset corner clear of the sightline and the Sun.
 
     The top view's sightline always leaves toward ``+y`` and the Sun sits at
@@ -423,14 +433,14 @@ def _default_inset(view, ecliptic_lat_deg, solar_lon_deg):
     """
     if view == "top":
         return (0.02, 0.1, 0.34, 0.34)
-    x0 = 0.64 if np.cos(np.radians(float(solar_lon_deg))) < 0.0 else 0.02
-    y0 = 0.1 if float(ecliptic_lat_deg) >= 0.0 else 0.56
+    x0 = 0.64 if np.cos(np.radians(float(helioecliptic_longitude_deg))) < 0.0 else 0.02
+    y0 = 0.1 if float(ecliptic_latitude_deg) >= 0.0 else 0.56
     return (x0, y0, 0.34, 0.34)
 
 
 def plot_local_zodi_geometry(
-    ecliptic_lat_deg,
-    solar_lon_deg,
+    ecliptic_latitude_deg,
+    helioecliptic_longitude_deg,
     *,
     view="top",
     observer_distance_AU=1.0,
@@ -475,9 +485,9 @@ def plot_local_zodi_geometry(
     table of the integrated brightness, not a density model.
 
     Args:
-        ecliptic_lat_deg: Ecliptic latitude of the look direction [deg],
+        ecliptic_latitude_deg: Ecliptic latitude of the look direction [deg],
             in ``[-90, 90]``.
-        solar_lon_deg: Helio-ecliptic longitude difference [deg], in
+        helioecliptic_longitude_deg: Helio-ecliptic longitude difference [deg], in
             ``[0, 180]``.
         view: ``"top"`` or ``"side"``.
         observer_distance_AU: Observer's distance from the Sun [AU].
@@ -542,8 +552,8 @@ def plot_local_zodi_geometry(
         ``inset/``. Every artist carries a ``gid``; with several grains,
         ``grain`` holds them all in order, and the rays of grain ``k > 0``
         are ``incident/k`` and ``scattered/k``.
-        ``update(ecliptic_lat_deg, solar_lon_deg)`` moves the sightline,
-        grain, rays, arcs and readout, leaving the observer, the
+        ``update(ecliptic_latitude_deg, helioecliptic_longitude_deg)`` moves
+        the sightline, grain, rays, arcs and readout, leaving the observer, the
         observer's orbit and the fixed labels untouched, for a sweep over
         the year. At ``beta = +/-90`` the top view has no longitude
         difference to draw, and its arc is emptied.
@@ -559,7 +569,7 @@ def plot_local_zodi_geometry(
 
     if view not in _VIEWS:
         raise ValueError(f"view must be one of {_VIEWS}, got {view!r}")
-    _check(ecliptic_lat_deg, solar_lon_deg)
+    _check(ecliptic_latitude_deg, helioecliptic_longitude_deg)
     shown = resolve_show(show, PARTS, GROUPS)
     if look_angle_radius_AU is not None and not float(look_angle_radius_AU) > 0.0:
         raise ValueError(
@@ -583,7 +593,9 @@ def plot_local_zodi_geometry(
     ray_length = 1.6 * R if ray_length_AU is None else ray_length_AU
 
     if inset_bounds is None:
-        inset_bounds = _default_inset(view, ecliptic_lat_deg, solar_lon_deg)
+        inset_bounds = _default_inset(
+            view, ecliptic_latitude_deg, helioecliptic_longitude_deg
+        )
 
     if ax is None:
         _, ax = plt.subplots(layout="constrained")
@@ -600,7 +612,7 @@ def plot_local_zodi_geometry(
         look_radius=look_angle_radius_AU,
         look_label_at=look_angle_label_at,
     )
-    panel.place(float(ecliptic_lat_deg), float(solar_lon_deg))
+    panel.place(float(ecliptic_latitude_deg), float(helioecliptic_longitude_deg))
     hide(panel.parts(), shown)
 
     reach = R + ray_length
@@ -618,9 +630,9 @@ def plot_local_zodi_geometry(
         ax.set_ylabel("height above the ecliptic [AU]")
     ax.set_aspect("equal")
 
-    def update(ecliptic_lat_deg, solar_lon_deg):
+    def update(ecliptic_latitude_deg, helioecliptic_longitude_deg):
         """Move the look-dependent artists to a new pair of angles."""
-        _check(ecliptic_lat_deg, solar_lon_deg)
-        panel.place(float(ecliptic_lat_deg), float(solar_lon_deg))
+        _check(ecliptic_latitude_deg, helioecliptic_longitude_deg)
+        panel.place(float(ecliptic_latitude_deg), float(helioecliptic_longitude_deg))
 
     return ep.PlotResult(ax=ax, artists=panel.artists(), update=update)

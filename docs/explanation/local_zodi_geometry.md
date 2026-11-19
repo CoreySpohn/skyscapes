@@ -16,7 +16,7 @@ Sun. For a moving observer pointing at a fixed sky target, neither angle
 is constant in any straightforward way, and the two are easy to confuse
 because they coincide along the ecliptic plane but diverge elsewhere on
 the sky. This page walks through the computation of those two angles
-using `orbix.observatory.ObservatoryL2Halo`, the common ways the geometry
+using `orbix.observatory.ecliptic_pointing`, the common ways the geometry
 goes wrong, and the conventions `zodi.jax.LeinertZodi`
 expects.
 
@@ -24,10 +24,10 @@ expects.
 
 The position-dependent factor in Leinert+1998 Table 17 depends on the
 ecliptic latitude of the look vector, written `β_⊙` in Leinert and
-exposed as the `ecliptic_lat_deg` argument to
+exposed as the `ecliptic_latitude_deg` argument to
 `LeinertZodi.photon_radiance`, and on the helio-ecliptic
 longitude difference between the look vector and the Sun, written
-`Δλ_⊙` in Leinert and exposed as `solar_lon_deg`. The ecliptic latitude
+`Δλ_⊙` in Leinert and exposed as `helioecliptic_longitude_deg`. The ecliptic latitude
 is essentially time-invariant for a fixed sky target because stellar
 parallax is negligible at typical mission distances and obliquity drift
 is sub-arcsecond per year. By contrast, the helio-ecliptic longitude
@@ -35,40 +35,30 @@ difference sweeps the full range from 0° (target behind the Sun) to
 180° (target opposite the Sun) and back over the course of one year as
 the Sun's apparent ecliptic longitude rotates through 360°.
 
-Both angles are read off the L2-halo geometry by
-{class}`orbix.observatory.ObservatoryL2Halo`, which exposes them as
-methods with consistent `(mjd, ra_rad, dec_rad)` argument order:
+Both angles come from one function,
+{func}`orbix.observatory.ecliptic_pointing`, which takes the target's
+right ascension and declination in degrees, the reference `Epoch` and a
+time in days from it. A scene that carries a sky position supplies the
+first three: `scene.ra_deg` and `scene.dec_deg` come from its `SkyFrame`,
+and so does `scene.epoch`.
 
-Requires user-supplied target coordinates, epochs, and wavelengths.
+Requires user-supplied target coordinates, times, and wavelengths.
 
 ```python notest
-from orbix.observatory import ObservatoryL2Halo
+from orbix.observatory import ecliptic_pointing
 from zodi.jax import LeinertZodi
 
-obs = ObservatoryL2Halo.from_default()
 zodi = LeinertZodi()
 
-ecl_lat = obs.ecliptic_latitude_deg(mjd, ra_rad, dec_rad)  # ~constant in time
-helio_lon = obs.helio_ecliptic_longitude_deg(
-    mjd, ra_rad, dec_rad
-)  # sweeps 0 -> 180 per year
+ecl_lat, helio_lon = ecliptic_pointing(
+    scene.ra_deg, scene.dec_deg, scene.epoch, time_d
+)  # ecl_lat ~constant in time; helio_lon sweeps 0 -> 180 per year
 
 flux = zodi.photon_radiance(
     wavelength_nm,
     ecliptic_latitude_deg=ecl_lat,
-    solar_longitude_deg=helio_lon,
+    helioecliptic_longitude_deg=helio_lon,
 )
-```
-
-A scene that carries a sky position gives both angles without an
-observatory object: `scene.ra_deg` and `scene.dec_deg` come from its
-`SkyFrame`, and {func}`orbix.observatory.ecliptic_pointing` turns them
-and a time in days from the scene epoch into the same two angles.
-
-```python notest
-from orbix.observatory import ecliptic_pointing
-
-ecl_lat, helio_lon = ecliptic_pointing(scene.ra_deg, scene.dec_deg, scene.epoch, time_d)
 ```
 
 {func}`skyscapes.viz.plot_local_zodi_geometry` draws what the two inputs
@@ -151,7 +141,7 @@ Leinert paper.
 
 ## Why the 3D solar elongation is not the Leinert input
 
-The observatory module also exposes `solar_elongation_deg`, which
+The observatory also exposes `ObservatoryL2Halo.solar_elongation_deg`, which
 returns the great-circle angular distance between the Sun and the target
 as seen from the observer. That quantity is what telescope field-of-regard
 keep-out logic actually wants, but it is not the Leinert table input.
@@ -169,10 +159,10 @@ returns the wrong brightness.
 | (RA=0°, Dec=+60°) | +53° | 119° | 145° | **no** |
 | (RA=0°, Dec=+80°) | +65° | 99°  | 113° | **no** |
 
-Always use `helio_ecliptic_longitude_deg` for Leinert lookups. The
-explicit naming distinction is the reason the orbix API exposes both
-methods rather than a single ambiguously-named one, and following that
-convention at every call site keeps the Leinert lookup correct.
+Always use the helio-ecliptic longitude from `ecliptic_pointing` for
+Leinert lookups. The keyword `helioecliptic_longitude_deg` names that
+quantity and no other, which keeps the Leinert lookup correct at every
+call site.
 
 ## The obliquity gotcha
 
@@ -210,8 +200,9 @@ keepout geometry must decide whether the target can be observed.
 
 The `coronagraphoto` doc *Simulating zodi with a telescope orbit* shows
 how to thread these two angles through the per-frame detector
-simulation. {class}`orbix.observatory.ObservatoryL2Halo` documents the
-L2 halo orbit interpolator and the sky-geometry helpers used above.
+simulation. {func}`orbix.observatory.ecliptic_pointing` documents the sky geometry
+used above, and {class}`orbix.observatory.ObservatoryL2Halo` the L2 halo
+orbit.
 [Leinert+1998 A&A] contains the original tabulation, and the EXOSIMS
 documentation provides an equivalent description of the table indexing
 convention.
