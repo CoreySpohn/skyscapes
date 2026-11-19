@@ -474,7 +474,7 @@ class Scene(eqx.Module):
 
     @_batch_method
     def positions(self, time_d: Array, *, ephemeris=None) -> Array:
-        """Star-relative on-sky positions, shape ``(2, K_total, T)``.
+        """Star-relative (east, north) offsets in arcsec, north up, ``(2, K_total, T)``.
 
         ``time_d`` is days from the scene epoch.
         """
