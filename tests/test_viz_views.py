@@ -631,7 +631,11 @@ def test_pre_rendered_disk_draws_no_invented_outline():
         (lambda s: viz.plot_local_zodi_geometry(95.0, 10.0), "ecliptic_latitude"),
         (
             lambda s: viz.plot_local_zodi_geometry(10.0, 190.0),
-            "helioecliptic_longitude",
+            r"\[-180, 180\]",
+        ),
+        (
+            lambda s: viz.plot_local_zodi_geometry(10.0, -190.0),
+            r"\[-180, 180\]",
         ),
         (lambda s: viz.plot_local_zodi_geometry(10.0, 10.0, view="x"), "view"),
     ],
@@ -1434,3 +1438,13 @@ def test_disk_side_observer_and_scattered_light_point_to_negative_z():
     assert artists["observer"].xy[0] < 0
     assert arrow_vector(artists["observer"])[0] < 0
     assert arrow_vector(artists["scattered"])[0] < 0
+
+
+def test_zodi_geometry_longitude_sign_is_symmetric():
+    """The pointing's signed longitude draws the same figure as its absolute value."""
+    pos = viz.plot_local_zodi_geometry(30.0, 135.0)
+    neg = viz.plot_local_zodi_geometry(30.0, -135.0)
+    for gid, artist in by_gid(pos).items():
+        other = by_gid(neg)[gid]
+        if hasattr(artist, "get_xydata"):
+            np.testing.assert_allclose(artist.get_xydata(), other.get_xydata())

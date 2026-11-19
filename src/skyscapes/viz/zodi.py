@@ -57,9 +57,9 @@ def _check(ecliptic_latitude_deg, helioecliptic_longitude_deg):
         raise ValueError(
             f"ecliptic_latitude_deg must lie in [-90, 90], got {ecliptic_latitude_deg}"
         )
-    if not 0.0 <= float(helioecliptic_longitude_deg) <= 180.0:
+    if not -180.0 <= float(helioecliptic_longitude_deg) <= 180.0:
         raise ValueError(
-            "helioecliptic_longitude_deg must lie in [0, 180], "
+            "helioecliptic_longitude_deg must lie in [-180, 180], "
             f"got {helioecliptic_longitude_deg}"
         )
 
@@ -230,8 +230,13 @@ class _ZodiPanel:
         }
 
     def place(self, ecliptic_latitude_deg, helioecliptic_longitude_deg):
-        """Put every look-dependent artist where the two angles put it."""
+        """Put every look-dependent artist where the two angles put it.
+
+        The figure is symmetric about the Sun line, so the longitude enters
+        through its absolute value.
+        """
         R = self.R
+        helioecliptic_longitude_deg = abs(helioecliptic_longitude_deg)
         look = _geometry.zodi_sightline(
             ecliptic_latitude_deg, helioecliptic_longitude_deg
         )
@@ -488,7 +493,9 @@ def plot_local_zodi_geometry(
         ecliptic_latitude_deg: Ecliptic latitude of the look direction [deg],
             in ``[-90, 90]``.
         helioecliptic_longitude_deg: Helio-ecliptic longitude difference [deg], in
-            ``[0, 180]``.
+            ``[-180, 180]`` (the range ``orbix.observatory.ecliptic_pointing``
+            returns); the figure is symmetric about the Sun line, so only its
+            absolute value matters.
         view: ``"top"`` or ``"side"``.
         observer_distance_AU: Observer's distance from the Sun [AU].
         grain_distance_AU: Distance of the marked grain along the

@@ -52,7 +52,7 @@ zodi = LeinertZodi()
 
 ecl_lat, helio_lon = ecliptic_pointing(
     scene.ra_deg, scene.dec_deg, scene.epoch, time_d
-)  # ecl_lat ~constant in time; helio_lon sweeps 0 -> 180 per year
+)  # ecl_lat ~constant in time; helio_lon sweeps -180 to 180 through the year; the models use its absolute value
 
 flux = zodi.photon_radiance(
     wavelength_nm,
