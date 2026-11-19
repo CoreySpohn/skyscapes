@@ -374,8 +374,8 @@ def test_earth_modern_a_band_resolution_converges():
         T_alpha=jnp.array([0.07]),
         log_surface_albedo=jnp.array([np.log10(0.1)]),
         log_gravity_cgs=jnp.array([np.log10(981.0)]),
-        wavelength_min_nm=750.0,
-        wavelength_max_nm=780.0,
+        low_nm=750.0,
+        high_nm=780.0,
         n_layers=30,
         databases_dir=str(databases_dir),
     )

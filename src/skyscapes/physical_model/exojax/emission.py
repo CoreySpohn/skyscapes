@@ -111,8 +111,8 @@ def log_gravity_cgs_from_mass_radius(mass_Mearth: Array, radius_Rearth: Array) -
 def build_exojax_emission_engines(
     *,
     molecules: tuple[str, ...] = DEFAULT_EMISSION_MOLECULES,
-    wavelength_min_nm: float = 4000.0,
-    wavelength_max_nm: float = 18500.0,
+    low_nm: float = 4000.0,
+    high_nm: float = 18500.0,
     n_wavenumbers: int = 6000,
     n_layers: int = 100,
     pressure_top_bar: float = 1.0e-4,
@@ -135,8 +135,8 @@ def build_exojax_emission_engines(
 
     Args:
         molecules: Molecule names, keys of ``MOLECULE_RECIPES``.
-        wavelength_min_nm: Short-wavelength end of the range [nm].
-        wavelength_max_nm: Long-wavelength end of the range [nm].
+        low_nm: Short-wavelength end of the range [nm].
+        high_nm: Long-wavelength end of the range [nm].
         n_wavenumbers: Points in the wavenumber grid, rounded up to even
             as required by ExoJAX premodit.
         n_layers: Number of atmospheric layers.
@@ -167,8 +167,8 @@ def build_exojax_emission_engines(
         databases_dir = str(Path.home() / ".cache" / "skyscapes" / "exojax")
     Path(databases_dir).mkdir(parents=True, exist_ok=True)
 
-    nu_max = nm_to_wavenumber_cm(wavelength_min_nm)
-    nu_min = nm_to_wavenumber_cm(wavelength_max_nm)
+    nu_max = nm_to_wavenumber_cm(low_nm)
+    nu_min = nm_to_wavenumber_cm(high_nm)
     n_wavenumbers += n_wavenumbers % 2
     nu_grid, _, _ = wavenumber_grid(
         nu_min, nu_max, n_wavenumbers, xsmode="premodit", unit="cm-1"
@@ -282,8 +282,8 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         surface_emissivity: Array | None = None,
         surface_emissivity_spectrum: Array | None = None,
         molecules: tuple[str, ...] | None = None,
-        wavelength_min_nm: float = 4000.0,
-        wavelength_max_nm: float = 18500.0,
+        low_nm: float = 4000.0,
+        high_nm: float = 18500.0,
         n_wavenumbers: int = 6000,
         n_layers: int = 100,
         pressure_top_bar: float = 1.0e-4,
@@ -313,8 +313,8 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
                 Defaults to flat ones.
             molecules: Override the molecule list (default: the keys of
                 ``log_mmrs``).
-            wavelength_min_nm: See :func:`build_exojax_emission_engines`.
-            wavelength_max_nm: See :func:`build_exojax_emission_engines`.
+            low_nm: See :func:`build_exojax_emission_engines`.
+            high_nm: See :func:`build_exojax_emission_engines`.
             n_wavenumbers: See :func:`build_exojax_emission_engines`.
             n_layers: See :func:`build_exojax_emission_engines`.
             pressure_top_bar: See :func:`build_exojax_emission_engines`.
@@ -337,8 +337,8 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
             molecules = tuple(log_mmrs.keys())
         engines = build_exojax_emission_engines(
             molecules=molecules,
-            wavelength_min_nm=wavelength_min_nm,
-            wavelength_max_nm=wavelength_max_nm,
+            low_nm=low_nm,
+            high_nm=high_nm,
             n_wavenumbers=n_wavenumbers,
             n_layers=n_layers,
             pressure_top_bar=pressure_top_bar,

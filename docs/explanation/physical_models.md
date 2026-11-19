@@ -219,8 +219,8 @@ model = ExoJaxPhysicalModel.from_default_setup(
     T_alpha=jnp.array([0.0]),
     log_surface_albedo=jnp.array([-1.0]),
     log_gravity_cgs=jnp.array([2.99]),
-    wavelength_min_nm=400.0,
-    wavelength_max_nm=1000.0,
+    low_nm=400.0,
+    high_nm=1000.0,
 )
 ```
 
@@ -276,7 +276,7 @@ over 750-780 nm with identical R=140 bins and atmosphere at both samplings.
 
 Memory and opacity evaluation time grow with `n_layers * n_wavenumbers` per
 absorbing species; premodit also stores line-density tables. Prefer a narrow
-wavelength window, for example `wavelength_min_nm=750, wavelength_max_nm=780`,
+wavelength window, for example `low_nm=750, high_nm=780`,
 to retain line accuracy at lower cost. To choose speed explicitly, pass
 `n_wavenumbers=2000`; an explicit count overrides `resolving_power` and is
 rounded up to even. Line-list models emit a `UserWarning` below

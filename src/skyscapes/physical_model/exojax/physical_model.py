@@ -107,8 +107,8 @@ def build_exojax_engines(
     *,
     molecules: tuple[str, ...] = DEFAULT_MOLECULES,
     bulk_gas: str | None = "N2",
-    wavelength_min_nm: float = 400.0,
-    wavelength_max_nm: float = 1000.0,
+    low_nm: float = 400.0,
+    high_nm: float = 1000.0,
     n_wavenumbers: int | None = None,
     resolving_power: float | None = 1.5e5,
     n_layers: int = 100,
@@ -138,8 +138,8 @@ def build_exojax_engines(
         bulk_gas: Implicit residual gas name (``"N2"``, ``"H2"``,
             ``"He"``), or ``None`` to disable the bulk-gas Rayleigh
             contribution. Default ``"N2"`` for terrestrial atmospheres.
-        wavelength_min_nm: Short-wavelength end of the spectral range [nm].
-        wavelength_max_nm: Long-wavelength end of the spectral range [nm].
+        low_nm: Short-wavelength end of the spectral range [nm].
+        high_nm: Long-wavelength end of the spectral range [nm].
         n_wavenumbers: Explicit grid point count, overriding
             ``resolving_power``. Rounded up to even for ExoJAX premodit.
         resolving_power: Grid sampling resolving power, default 150000.
@@ -166,8 +166,8 @@ def build_exojax_engines(
         databases_dir = str(Path.home() / ".cache" / "skyscapes" / "exojax")
     Path(databases_dir).mkdir(parents=True, exist_ok=True)
 
-    nu_max = nm_to_wavenumber_cm(wavelength_min_nm)
-    nu_min = nm_to_wavenumber_cm(wavelength_max_nm)
+    nu_max = nm_to_wavenumber_cm(low_nm)
+    nu_min = nm_to_wavenumber_cm(high_nm)
     if n_wavenumbers is None:
         if (
             resolving_power is None
@@ -461,8 +461,8 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
         surface_albedo_spectrum: Array | None = None,
         molecules: tuple[str, ...] | None = None,
         bulk_gas: str | None = "N2",
-        wavelength_min_nm: float = 400.0,
-        wavelength_max_nm: float = 1000.0,
+        low_nm: float = 400.0,
+        high_nm: float = 1000.0,
         n_wavenumbers: int | None = None,
         resolving_power: float | None = 1.5e5,
         n_layers: int = 100,
@@ -493,8 +493,8 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
             molecules: Override molecule list (default: derived from
                 ``log_mmrs.keys()``).
             bulk_gas: Implicit residual gas (default ``"N2"``).
-            wavelength_min_nm: See :func:`build_exojax_engines`.
-            wavelength_max_nm: See :func:`build_exojax_engines`.
+            low_nm: See :func:`build_exojax_engines`.
+            high_nm: See :func:`build_exojax_engines`.
             n_wavenumbers: See :func:`build_exojax_engines`.
             resolving_power: See :func:`build_exojax_engines`.
             n_layers: See :func:`build_exojax_engines`.
@@ -508,8 +508,8 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
         engines = build_exojax_engines(
             molecules=molecules,
             bulk_gas=bulk_gas,
-            wavelength_min_nm=wavelength_min_nm,
-            wavelength_max_nm=wavelength_max_nm,
+            low_nm=low_nm,
+            high_nm=high_nm,
             n_wavenumbers=n_wavenumbers,
             resolving_power=resolving_power,
             n_layers=n_layers,
@@ -577,8 +577,8 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
         surface_albedo_spectrum: Array | None = None,
         molecules: tuple[str, ...] | None = None,
         bulk_gas: str | None = "N2",
-        wavelength_min_nm: float = 400.0,
-        wavelength_max_nm: float = 1000.0,
+        low_nm: float = 400.0,
+        high_nm: float = 1000.0,
         n_wavenumbers: int | None = None,
         resolving_power: float | None = 1.5e5,
         n_layers: int = 100,
@@ -615,8 +615,8 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
             surface_albedo_spectrum: See :meth:`from_default_setup`.
             molecules: See :meth:`from_default_setup`.
             bulk_gas: See :meth:`from_default_setup`.
-            wavelength_min_nm: See :meth:`from_default_setup`.
-            wavelength_max_nm: See :meth:`from_default_setup`.
+            low_nm: See :meth:`from_default_setup`.
+            high_nm: See :meth:`from_default_setup`.
             n_wavenumbers: See :meth:`from_default_setup`.
             resolving_power: See :meth:`from_default_setup`.
             n_layers: See :meth:`from_default_setup`.
@@ -640,8 +640,8 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
             "surface_albedo_spectrum": surface_albedo_spectrum,
             "molecules": molecules,
             "bulk_gas": bulk_gas,
-            "wavelength_min_nm": wavelength_min_nm,
-            "wavelength_max_nm": wavelength_max_nm,
+            "low_nm": low_nm,
+            "high_nm": high_nm,
             "n_wavenumbers": n_wavenumbers,
             "resolving_power": resolving_power,
             "n_layers": n_layers,

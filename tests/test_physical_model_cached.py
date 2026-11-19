@@ -128,7 +128,7 @@ def test_cache_key_is_stable_and_input_sensitive():
     base_kwargs = {
         "log_mmrs": {"H2O": jnp.full((1,), -2.5)},
         "T_eq_K": jnp.full((1,), 288.0),
-        "wavelength_min_nm": 400.0,
+        "low_nm": 400.0,
         "n_layers": 100,
     }
     key1 = _cache_key(**base_kwargs)
@@ -215,8 +215,8 @@ def test_cached_setup_roundtrip_using_fake_engines(tmp_path, monkeypatch):
         T_alpha=jnp.full((K,), 0.07),
         log_surface_albedo=jnp.full((K,), jnp.log10(0.3)),
         log_gravity_cgs=jnp.full((K,), jnp.log10(981.0)),
-        wavelength_min_nm=400.0,
-        wavelength_max_nm=1000.0,
+        low_nm=400.0,
+        high_nm=1000.0,
         n_layers=20,
         cache_dir=tmp_path,
     )

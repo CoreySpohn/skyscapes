@@ -125,7 +125,7 @@ separate and add where their edges overlap.
 wavelength first. Multiplying by the stellar flux density in Jy puts reflected
 and thermal light on one axis. Both models accept wavelengths from the
 ultraviolet to the infrared when built over that range
-(`wavelength_min_nm` and `wavelength_max_nm`); a single reflected model
+(`low_nm` and `high_nm`); a single reflected model
 spans 200 to 2000 nm.
 
 ## What is left out
