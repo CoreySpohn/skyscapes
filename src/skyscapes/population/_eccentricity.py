@@ -12,26 +12,31 @@ def kipping_eccentricity(e_max=None):
     Args:
         e_max: Upper cut of the eccentricity, or ``None`` for no cut. A cut
             conditions the Beta law on ``e <= e_max`` through
-            `priorities.Truncated`.
+            `priorities.TruncatedDistribution`.
 
     Returns:
-        A `priorities.Beta`, or a `priorities.Truncated` of it when `e_max` is given.
+        A `priorities.Beta`, or a `priorities.TruncatedDistribution` of it when
+        `e_max` is given.
     """
     beta = priorities.Beta(_KIPPING_A, _KIPPING_B)
-    return beta if e_max is None else priorities.Truncated(beta, high=e_max)
+    return beta if e_max is None else priorities.TruncatedDistribution(beta, high=e_max)
 
 
-def rayleigh_eccentricity(sigma, e_max=None):
-    """Rayleigh eccentricity distribution of mode `sigma`.
+def rayleigh_eccentricity(scale, e_max=None):
+    """Rayleigh eccentricity distribution of mode `scale`.
 
     Args:
-        sigma: Mode of the density (0.049 is the Van Eylen et al. 2019 value
+        scale: Mode of the density (0.049 is the Van Eylen et al. 2019 value
             for compact multi-planet systems).
         e_max: Upper cut of the eccentricity, or ``None`` for no cut.
 
     Returns:
-        A `priorities.Rayleigh`, or a `priorities.Truncated` of it when `e_max`
-        is given.
+        A `priorities.Rayleigh`, or a `priorities.TruncatedDistribution` of it
+        when `e_max` is given.
     """
-    rayleigh = priorities.Rayleigh(sigma)
-    return rayleigh if e_max is None else priorities.Truncated(rayleigh, high=e_max)
+    rayleigh = priorities.Rayleigh(scale)
+    return (
+        rayleigh
+        if e_max is None
+        else priorities.TruncatedDistribution(rayleigh, high=e_max)
+    )

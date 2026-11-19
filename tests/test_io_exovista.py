@@ -71,18 +71,23 @@ def test_from_exovista_load_disk_false_skips_disk(fits_fixture):
     assert sys_obj.disk is None
 
 
-def test_from_exovista_returns_scene_with_default_zodi_and_honours_load_disk(
-    fits_fixture,
-):
-    """from_exovista returns a Scene with an AYOZodi background."""
-    from zodi.jax import AYOZodi
+def test_from_exovista_zodi_default_custom_and_none(fits_fixture):
+    """The zodi keyword defaults to AYOZodi, takes any local zodi, or None."""
+    from zodi.jax import AYOZodi, LeinertZodi
 
-    scene = from_exovista(
-        fits_fixture, load_disk=False, zodi_surface_brightness_mag=21.5
+    default = from_exovista(fits_fixture, load_disk=False)
+    assert isinstance(default.zodi, AYOZodi)
+    assert default.zodi.surface_brightness_mag_arcsec2 == 22.0
+    custom = from_exovista(
+        fits_fixture, load_disk=False, zodi=AYOZodi(surface_brightness_mag_arcsec2=21.5)
     )
-    assert isinstance(scene.zodi, AYOZodi)
-    assert scene.zodi.surface_brightness_mag_arcsec2 == 21.5
-    assert scene.disk is None
+    assert custom.zodi.surface_brightness_mag_arcsec2 == 21.5
+    assert isinstance(
+        from_exovista(fits_fixture, load_disk=False, zodi=LeinertZodi()).zodi,
+        LeinertZodi,
+    )
+    assert from_exovista(fits_fixture, load_disk=False, zodi=None).zodi is None
+    assert default.disk is None
     assert isinstance(from_exovista(fits_fixture).disk, ExovistaDisk)
 
 

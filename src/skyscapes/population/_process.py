@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import priorities
 from hwoutils.constants import Mearth2kg, Msun2kg
 from hwoutils.epoch import Epoch
-from orbix.system import Body, SkyFrame, isotropic_orientation
+from orbix.system import Body, SkyFrame
 from orbix.system import System as DynamicsSystem
 from orbix.system.core import GM_SUN_AU3_PER_D2, enclosed_mu, jacobi_to_barycentric
 from orbix.system.frame_orbit import FrameOrbit
@@ -18,7 +18,9 @@ from ..scene import Planet, Scene
 from ..scene.scene import _mask_dynamics
 from ..scene.star import AbstractStar
 from ._draw import (
+    _ANGLE,
     _EARTH_MASSES_PER_SUN,
+    _ISOTROPIC_INCLINATION,
     PopulationConfig,
     _draw_tilt,
     _remove_unstable,
@@ -158,13 +160,12 @@ class OccurrencePopulation(eqx.Module):
         a_edges, m_edges = self.occurrence.a_edges_AU, self.occurrence.mass_edges_Mearth
         a_scaled = priorities.LogUniform(a_edges[ia], a_edges[ia + 1]).sample(keys[1])
         mass = priorities.LogUniform(m_edges[im], m_edges[im + 1]).sample(keys[2])
-        iso_inc, angle, _, _ = isotropic_orientation()
         node, peri, anomaly = (
-            angle.sample(k, (n,)) for k in jax.random.split(keys[3], 3)
+            _ANGLE.sample(k, (n,)) for k in jax.random.split(keys[3], 3)
         )
         ecc = self.config.eccentricity
         e = jnp.zeros(n) if ecc is None else ecc.sample(keys[4], (n,))
-        inc = iso_inc.sample(keys[5], (n,))
+        inc = _ISOTROPIC_INCLINATION.sample(keys[5], (n,))
         types = _sample_types(
             keys[6],
             self.types,
@@ -269,9 +270,8 @@ class OccurrencePopulation(eqx.Module):
         take = selected[jnp.minimum(jnp.arange(k), capacity - 1)]
         valid = jnp.arange(k) < jnp.sum(alive)
         marks = jax.tree.map(lambda x: x[take], marks)
-        iso_inc, angle, _, _ = isotropic_orientation()
         k_inc, k_pa = jax.random.split(plane_key)
-        mid_inc, mid_pa = iso_inc.sample(k_inc), angle.sample(k_pa)
+        mid_inc, mid_pa = _ISOTROPIC_INCLINATION.sample(k_inc), _ANGLE.sample(k_pa)
         # Orient surviving marks about a common isotropic system midplane.
         # Tilt is drawn per candidate so selecting K cannot change it.
         tilt = _draw_tilt(self.config, tilt_key, (capacity,))[order][take]

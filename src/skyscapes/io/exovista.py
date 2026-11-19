@@ -42,7 +42,7 @@ from hwoutils.epoch import Epoch
 from optixstuff.grids import PixelGrid, SkyOrientation
 from orbix.equations.orbit import state_vector_to_keplerian
 from orbix.system import FrameOrbit, phase_angle_rad
-from zodi.jax import AYOZodi
+from zodi.jax import AbstractLocalZodi, AYOZodi
 
 from ..disk import ExovistaDisk
 from ..physical_model import GridPhysicalModel, TimeSeriesPhysicalModel
@@ -491,7 +491,7 @@ def get_earth_like_planet_indices(fits_file: str) -> list[int]:
         return _earth_like_planet_indices_from_hdul(hdul)
 
 
-def _scene_from_exovista(
+def from_exovista(
     fits_file: str,
     planet_indices: Sequence[int] | None = None,
     only_earths: bool = False,
@@ -499,9 +499,9 @@ def _scene_from_exovista(
     *,
     planet_spectra: Literal["auto", "time", "phase"] = "auto",
     epoch: Epoch | None = None,
-    zodi=None,
+    zodi: AbstractLocalZodi | None = AYOZodi(),  # noqa: B008
 ) -> Scene:
-    """Load an ExoVista FITS file into a ``Scene`` with the given local zodi.
+    """Load an ExoVista FITS file into a ``Scene``.
 
     State vectors are already on-sky; their (west, north, toward) axes
     are converted to orbix's (east, north, away) axes. The FITS star
@@ -533,7 +533,9 @@ def _scene_from_exovista(
         epoch: Scene epoch that stored and observation times are measured
             from. ``None`` uses the first stellar timestamp. Pass a shared
             epoch to place several scenes on one clock.
-        zodi: Local zodi model stored on the scene (``None`` for none).
+        zodi: Local zodi model stored on the scene. The default is
+            :class:`~zodi.jax.AYOZodi` (22 mag per square arcsecond); ``None``
+            stores no zodi.
 
     Returns:
         ``Scene`` with star, planets (tuple), disk, and midplane metadata.
@@ -612,50 +614,4 @@ def _scene_from_exovista(
         midplane_inc_deg=midplane_inc_deg,
         midplane_position_angle_deg=midplane_position_angle_deg,
         zodi=zodi,
-    )
-
-
-def from_exovista(
-    fits_file: str,
-    planet_indices: Sequence[int] | None = None,
-    only_earths: bool = False,
-    load_disk: bool = True,
-    zodi_surface_brightness_mag: float = 22.0,
-    *,
-    planet_spectra: Literal["auto", "time", "phase"] = "auto",
-    epoch: Epoch | None = None,
-) -> Scene:
-    """Load an ExoVista FITS file into a ``Scene`` with a default zodi.
-
-    Builds the ``Scene`` (star, planets, disk, midplane metadata) with an
-    :class:`~zodi.jax.AYOZodi` as its local zodi. Raises ``ValueError`` unless
-    ``jax_enable_x64`` is set (orbital states need float64), and for an
-    invalid FITS layout, planet selection or spectra mode.
-
-    Args:
-        fits_file: Path to ExoVista FITS file.
-        planet_indices: Planet indices to load (0-based). ``None`` = all.
-        only_earths: If True and *planet_indices* is None, auto-filter Earths.
-        load_disk: If False, skip the disk and set ``Scene.disk`` to ``None``.
-        zodi_surface_brightness_mag: V-band surface brightness of the default
-            zodi background in mag per square arcsecond (22.0 is the AYO
-            standard).
-        planet_spectra: ``auto`` preserves time-dependent contrasts in
-            v2.5+ scenes and the phase model for older scenes; ``time`` keeps
-            the recorded spectra at their epochs; ``phase`` assumes contrast
-            depends on phase alone.
-        epoch: Scene epoch that stored times are measured from. ``None``
-            uses the first stellar timestamp.
-
-    Returns:
-        ``Scene`` with the loaded star, planets and disk and an ``AYOZodi``.
-    """
-    return _scene_from_exovista(
-        fits_file,
-        planet_indices=planet_indices,
-        only_earths=only_earths,
-        load_disk=load_disk,
-        planet_spectra=planet_spectra,
-        epoch=epoch,
-        zodi=AYOZodi(surface_brightness_mag_arcsec2=zodi_surface_brightness_mag),
     )

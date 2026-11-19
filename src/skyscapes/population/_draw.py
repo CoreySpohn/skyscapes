@@ -33,7 +33,7 @@ import jax.numpy as jnp
 import priorities
 from hwoutils.constants import AU2m, G, G_si, Mearth2kg, Msun2kg, d2s, deg2rad
 from orbix.equations.orbit import state_vector_to_keplerian
-from orbix.system import FrameOrbit, isotropic_orientation
+from orbix.system import FrameOrbit, IsotropicInclination
 from orbix.system.rotation import from_axis_angle, rotate
 
 from ..habitable_zone import HZ_INNER_EEID, HZ_OUTER_EEID
@@ -42,6 +42,8 @@ from ._tables import mass_to_radius
 _ABSENT_A = 1.0e20  # sort key of an empty slot
 _EARTH_MASSES_PER_SUN = 333000.0  # the generator's mass ratio for the Hill criterion
 _NEW_PER_STAR = 48  # most planets one star can receive in one refill pass
+_ISOTROPIC_INCLINATION = IsotropicInclination()  # radians, density sin(i)/2
+_ANGLE = priorities.Uniform(0.0, 2 * math.pi)  # node, argument, anomaly [rad]
 
 
 class PopulationConfig(eqx.Module):
@@ -53,9 +55,10 @@ class PopulationConfig(eqx.Module):
             ``None`` for circular orbits (the ExoVista default).
         inclination: Distribution of the planet inclination to the system midplane
             in radians, a scalar `priorities.AbstractDistribution` such as
-            ``priorities.Truncated(orbix.system.IsotropicInclination(), high=0.1)``,
-            or ``None`` for coplanar orbits. The default is the ExoVista generator's,
-            uniform on 0 to 5 degrees.
+            ``priorities.TruncatedDistribution(IsotropicInclination(), high=0.1)``
+            with `orbix.system.IsotropicInclination`, or ``None`` for coplanar
+            orbits. The default is the ExoVista generator's, uniform on 0 to 5
+            degrees.
         earth_candidate_probability: Probability that a planet inside the exoEarth
             candidate box is an exoEarth-candidate type.
         mutual_hill_min: Smallest allowed separation in mutual Hill radii.
@@ -250,9 +253,8 @@ def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=N
     m_edges = occurrence.mass_edges_Mearth
 
     key, k_pa, k_inc, k_flip, k_bin = jax.random.split(key, 5)
-    iso_inc, angle, _, _ = isotropic_orientation()
-    midplane_pa = jnp.degrees(angle.sample(k_pa, (n_stars,)))
-    midplane_inc = jnp.degrees(iso_inc.sample(k_inc, (n_stars,)))
+    midplane_pa = jnp.degrees(_ANGLE.sample(k_pa, (n_stars,)))
+    midplane_inc = jnp.degrees(_ISOTROPIC_INCLINATION.sample(k_inc, (n_stars,)))
     midplane_inc = jnp.where(
         jax.random.uniform(k_flip, (n_stars,)) < 0.5, midplane_inc - 180.0, midplane_inc
     )
@@ -341,9 +343,9 @@ def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=N
                 else config.eccentricity.sample(k_e, (cap,))
             ),
             "inc_deg": jnp.degrees(_draw_tilt(config, k_i, (cap,))),
-            "node_deg": jnp.degrees(angle.sample(k_node, (cap,))),
-            "argperi_deg": jnp.degrees(angle.sample(k_peri, (cap,))),
-            "mean_anomaly_deg": jnp.degrees(angle.sample(k_anom, (cap,))),
+            "node_deg": jnp.degrees(_ANGLE.sample(k_node, (cap,))),
+            "argperi_deg": jnp.degrees(_ANGLE.sample(k_peri, (cap,))),
+            "mean_anomaly_deg": jnp.degrees(_ANGLE.sample(k_anom, (cap,))),
             "cell": cell.astype(jnp.int32),
         }
         # Rank of each new planet among those landing on the same star.
