@@ -1,13 +1,28 @@
 """Blackbody thermal emission: a planet that shines by its own temperature."""
 
-import jax
 import jax.numpy as jnp
-from hwoutils.constants import Rearth2m, pc2m
+from hwoutils.constants import Rearth2m, c, h, k_B, nm2um, pc2m, um2m
 from hwoutils.planck import planck_photon_radiance
 from jaxtyping import Array
 
 from .._repr import fmt_scalar_or_array
 from .base import AbstractPhysicalModel
+
+# Second radiation constant in micrometer kelvin, as in hwoutils.planck.
+_EXPONENT_UM_K = h * c / (k_B * um2m)
+
+
+def _log_occupation(wavelength_nm, temperature_k):
+    """Log of the Planck occupation factor exp(-x) / (1 - exp(-x)).
+
+    ``x = hc / (lambda k T)``. Two Planck radiances at one wavelength differ
+    only by this factor, so their ratio is the exponential of a difference of
+    these logs, which stays representable in float32 at any temperature.
+    """
+    exponent = _EXPONENT_UM_K / (
+        jnp.asarray(wavelength_nm) * nm2um * jnp.asarray(temperature_k)
+    )
+    return -exponent - jnp.log(-jnp.expm1(-exponent))
 
 
 class BlackbodyPhysicalModel(AbstractPhysicalModel):
@@ -98,15 +113,13 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
         if star is None:
             raise ValueError("BlackbodyPhysicalModel needs the host star")
         if isinstance(star, BlackbodyStar):
-            # Cancel the shared dilution before division to retain numerical range.
+            # Cancel the shared dilution and Planck prefactor before division,
+            # so the ratio and its adjoints stay representable in float32.
             area = (Rp_Rearth * Rearth2m / star.radius_m) ** 2
-            planet_radiance = planck_photon_radiance(wavelength_nm, self.teff_K)
-            star_radiance = planck_photon_radiance(wavelength_nm, star.teff_K)
-            # A common scale cancels, keeping reciprocal adjoints representable.
-            scale = jax.lax.stop_gradient(star_radiance)
-            ratio = (area * (planet_radiance / scale) / (star_radiance / scale))[
-                :, None
-            ]
+            log_ratio = _log_occupation(wavelength_nm, self.teff_K) - _log_occupation(
+                wavelength_nm, star.teff_K
+            )
+            ratio = (area * jnp.exp(log_ratio))[:, None]
             return ratio * jnp.ones_like(phase_angle_rad)
         flux = self._photon_flux_density(
             wavelength_nm,
