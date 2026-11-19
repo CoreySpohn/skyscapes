@@ -20,10 +20,10 @@ from ..scene.star import AbstractStar
 from ._draw import (
     _EARTH_MASSES_PER_SUN,
     PopulationConfig,
+    _draw_tilt,
     _remove_unstable,
     _sample_types,
     _sky_elements_one,
-    _tilt_distribution,
     _type_weights,
     earth_like,
 )
@@ -274,9 +274,7 @@ class OccurrencePopulation(eqx.Module):
         mid_inc, mid_pa = iso_inc.sample(k_inc), angle.sample(k_pa)
         # Orient surviving marks about a common isotropic system midplane.
         # Tilt is drawn per candidate so selecting K cannot change it.
-        tilt = _tilt_distribution(self.config).sample(tilt_key, (capacity,))[order][
-            take
-        ]
+        tilt = _draw_tilt(self.config, tilt_key, (capacity,))[order][take]
         e, inc, node, peri, anomaly, _ = jax.vmap(
             _sky_elements_one, in_axes=(0, 0, 0, 0, 0, 0, 0, None, None, None)
         )(

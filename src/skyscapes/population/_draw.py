@@ -54,7 +54,8 @@ class PopulationConfig(eqx.Module):
         inclination: Distribution of the planet inclination to the system midplane
             in radians, a scalar `priorities.AbstractDistribution` such as
             ``priorities.Truncated(orbix.system.IsotropicInclination(), high=0.1)``,
-            or ``None`` for the ExoVista default, uniform on 0 to 5 degrees.
+            or ``None`` for coplanar orbits. The default is the ExoVista generator's,
+            uniform on 0 to 5 degrees.
         earth_candidate_probability: Probability that a planet inside the exoEarth
             candidate box is an exoEarth-candidate type.
         mutual_hill_min: Smallest allowed separation in mutual Hill radii.
@@ -64,7 +65,9 @@ class PopulationConfig(eqx.Module):
     """
 
     eccentricity: priorities.AbstractDistribution | None = None
-    inclination: priorities.AbstractDistribution | None = None
+    inclination: priorities.AbstractDistribution | None = eqx.field(
+        default_factory=lambda: priorities.Uniform(0.0, 5.0 * deg2rad)
+    )
     earth_candidate_probability: float = 1.0
     mutual_hill_min: float = 6.0
     max_planets: int = eqx.field(static=True, default=30)
@@ -72,12 +75,11 @@ class PopulationConfig(eqx.Module):
     max_stalled: int = eqx.field(static=True, default=50)
 
 
-_DEFAULT_TILT = priorities.Uniform(0.0, 5.0 * deg2rad)
-
-
-def _tilt_distribution(config):
-    """The configured planet inclination to the midplane, or the ExoVista default."""
-    return _DEFAULT_TILT if config.inclination is None else config.inclination
+def _draw_tilt(config, key, shape):
+    """Draw planet inclinations to the midplane [rad]; zero when coplanar."""
+    if config.inclination is None:
+        return jnp.zeros(shape)
+    return config.inclination.sample(key, shape)
 
 
 class PlanetPopulation(eqx.Module):
@@ -338,7 +340,7 @@ def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=N
                 if config.eccentricity is None
                 else config.eccentricity.sample(k_e, (cap,))
             ),
-            "inc_deg": jnp.degrees(_tilt_distribution(config).sample(k_i, (cap,))),
+            "inc_deg": jnp.degrees(_draw_tilt(config, k_i, (cap,))),
             "node_deg": jnp.degrees(angle.sample(k_node, (cap,))),
             "argperi_deg": jnp.degrees(angle.sample(k_peri, (cap,))),
             "mean_anomaly_deg": jnp.degrees(angle.sample(k_anom, (cap,))),

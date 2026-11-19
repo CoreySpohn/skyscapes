@@ -294,11 +294,9 @@ def test_support_errors_and_type_photometry(process, marks):
         degenerate.mark_log_density(scene, host)
     with pytest.raises(ValueError, match=r"eccentricity is None"):
         eqx.filter_jit(degenerate.mark_log_density)(scene, host)
-    narrow = eqx.tree_at(
-        lambda p: p.config.inclination, process, priorities.Uniform(0.0, 1e-3)
-    )
+    coplanar = eqx.tree_at(lambda p: p.config.inclination, process, None)
     np.testing.assert_array_equal(
-        narrow.mark_log_density(scene, host), process.mark_log_density(scene, host)
+        coplanar.mark_log_density(scene, host), process.mark_log_density(scene, host)
     )
     single = jax.tree.map(lambda x: x[0], scene)
     assert process.log_intensity(single, host).shape == (1,)
