@@ -274,7 +274,7 @@ class Scene(eqx.Module):
         return self.dynamics.planets.mass_Msun.shape[-1]
 
     @classmethod
-    def from_systems(cls, systems, *, capacity=None, batch_shape=None):
+    def from_scenes(cls, systems, *, capacity=None, batch_shape=None):
         """Pack same-class scenes into NumPy float64 leaves, sorted inner to outer.
 
         The default batch shape is (len(systems),); capacity defaults to the
@@ -283,13 +283,13 @@ class Scene(eqx.Module):
         empty group is sufficient. Host layout data restores source group
         boundaries and scene order when unpacking.
         """
-        return _system_batch.from_systems(
+        return _system_batch.from_scenes(
             cls, systems, capacity=capacity, batch_shape=batch_shape
         )
 
-    def to_systems(self):
+    def to_scenes(self):
         """Return unpadded host scenes in row-major batch order."""
-        return _system_batch.to_systems(self)
+        return _system_batch.to_scenes(self)
 
     def to_table(self) -> dict[str, np.ndarray]:
         """Return all leaves by JAX key path, plus scalar K and epoch parts."""

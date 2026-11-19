@@ -46,8 +46,8 @@ def test_zodi_defaults_to_none_and_is_stored():
 def test_batches_reject_zodi():
     """A zodi has no batch axes, so packing or batching a zodi scene fails."""
     with pytest.raises(ValueError, match="disk or zodi"):
-        Scene.from_systems([_scene(zodi=AYOZodi())])
-    batch = Scene.from_systems([_scene()])
+        Scene.from_scenes([_scene(zodi=AYOZodi())])
+    batch = Scene.from_scenes([_scene()])
     with pytest.raises(ValueError, match="no zodi"):
         Scene(
             batch.star,

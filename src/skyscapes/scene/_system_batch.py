@@ -88,13 +88,13 @@ def _planet_group(system, model_template):
     )
 
 
-def from_systems(cls, systems, *, capacity=None, batch_shape=None):
+def from_scenes(cls, systems, *, capacity=None, batch_shape=None):
     """Pack unbatched systems, sorted by semi-major axis, on the host."""
     systems = list(systems)
     if not systems:
         raise ValueError("systems must be nonempty")
     if any(s.batch_shape for s in systems):
-        raise ValueError("from_systems requires unbatched systems")
+        raise ValueError("from_scenes requires unbatched systems")
     if any(s.disk is not None or s.zodi is not None for s in systems):
         raise ValueError("Scenes with a disk or zodi cannot enter a batch")
     if any(s.epoch != systems[0].epoch for s in systems):
@@ -195,7 +195,7 @@ def from_systems(cls, systems, *, capacity=None, batch_shape=None):
     )
 
 
-def to_systems(system):
+def to_scenes(system):
     """Unpack host scenes, discarding padding and restoring source leaf order."""
     if (
         not system.batch_shape

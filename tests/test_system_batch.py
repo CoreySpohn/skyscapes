@@ -57,8 +57,8 @@ def test_round_trips():
     )
     empty = Scene(scenes[0].star, (), scenes[0].dynamics)
     scenes.extend((split, empty))
-    batch = Scene.from_systems(scenes)
-    for actual, expected in zip(batch.to_systems(), scenes, strict=True):
+    batch = Scene.from_scenes(scenes)
+    for actual, expected in zip(batch.to_scenes(), scenes, strict=True):
         _equal(actual, expected)
         assert actual.body_index == expected.body_index
         restored = Scene.from_table(expected.to_table(), template=expected)
@@ -76,7 +76,7 @@ def test_round_trips():
         body_index=split.body_index,
     )
     stacked = jax.tree.map(lambda x: np.stack([x]), single)
-    restored = stacked.to_systems()[0]
+    restored = stacked.to_scenes()[0]
     _equal(restored, single)
     assert restored.body_index == single.body_index
     table = batch.to_table()
@@ -118,8 +118,8 @@ def test_parity_and_padding(count):
     """
     scene = _scene(count)
     times = jnp.array([17.0, 230.0])
-    small = Scene.from_systems([scene], capacity=6)
-    large = Scene.from_systems([scene], capacity=11)
+    small = Scene.from_scenes([scene], capacity=6)
+    large = Scene.from_scenes([scene], capacity=11)
     truth = _read_jit(scene, times)
     a, b = _read_jit(small, times), _read_jit(large, times)
     for name, expected in truth.items():
@@ -160,7 +160,7 @@ def test_masked_gradients():
     Zero derivatives follow exact mask algebra; finite real derivatives must
     survive at circular, face-on padding, including geometry and dMag.
     """
-    batch = Scene.from_systems([_scene(1)], capacity=3)
+    batch = Scene.from_scenes([_scene(1)], capacity=3)
     times = jnp.array([17.0, 230.0])
 
     def loss(s):
@@ -189,7 +189,7 @@ def test_take_vmap_times_and_compile():
     2 ULP for CPU vector math at the float64 rounding floor.
     """
     scenes = [_scene(k) for k in (0, 1, 3, 6, 1, 3)]
-    batch = Scene.from_systems(scenes, batch_shape=(2, 3))
+    batch = Scene.from_scenes(scenes, batch_shape=(2, 3))
     times = jnp.array([17.0, 230.0])
     direct = Scene(FlatStar(1e9), batch.planets[0], batch.dynamics, valid=batch.valid)
     np.testing.assert_array_equal(
@@ -212,14 +212,14 @@ def test_take_vmap_times_and_compile():
 def test_shared_times_and_one_compile():
     """Fails if equal time rows differ or valid counts retrace; exact mask algebra."""
     scenes = [_scene(k) for k in (0, 1, 3, 6, 1, 3)]
-    batch = Scene.from_systems(scenes, batch_shape=(2, 3))
+    batch = Scene.from_scenes(scenes, batch_shape=(2, 3))
     times = jnp.array([17.0, 230.0])
     _equal(
         _read_jit(batch, times), _read_jit(batch, jnp.broadcast_to(times, (2, 3, 2)))
     )
     compiled = jax.jit(lambda s: s.positions(times))
     compiled(batch).block_until_ready()
-    changed = Scene.from_systems(list(reversed(scenes)), batch_shape=(2, 3))
+    changed = Scene.from_scenes(list(reversed(scenes)), batch_shape=(2, 3))
     compiled(changed).block_until_ready()
     assert compiled._cache_size() == 1
 
@@ -230,7 +230,7 @@ def test_precision():
     Float32 uses 1e-5 relative tolerance for accumulated orbital-phase roundoff;
     float64 output dtype and host packing preservation are exact requirements.
     """
-    batch = Scene.from_systems([_scene(3)], capacity=6)
+    batch = Scene.from_scenes([_scene(3)], capacity=6)
     times = jnp.array([123.0, 777.0, 1500.0, 1826.25])
     truth = _read_jit(batch, times)
     assert all(x.dtype == np.float64 for x in jax.tree.leaves(truth))
@@ -239,7 +239,7 @@ def test_precision():
             lambda x: x.astype(np.float32) if x.dtype != bool else x, batch
         )
         actual = _read_jit(single, times.astype(jnp.float32))
-        rebuilt = Scene.from_systems(batch.to_systems(), capacity=6)
+        rebuilt = Scene.from_scenes(batch.to_scenes(), capacity=6)
     _equal(rebuilt, batch)
     # A sky coordinate crosses zero; compare relative vector error there.
     delta = np.linalg.norm(actual["positions"] - truth["positions"], axis=-3)
@@ -292,7 +292,7 @@ def test_invalid_batches(kind):
             is_leaf=lambda x: x is None,
         )
     with pytest.raises(ValueError):
-        Scene.from_systems([a, b], **options)
+        Scene.from_scenes([a, b], **options)
 
 
 @pytest.mark.parametrize("kind", ["grid", "cached", "thermal", "time"])
@@ -326,8 +326,8 @@ def test_other_model_padding(kind):
             waves, jnp.array([0.0]), jnp.full((3, 3, 1), 1e-9)
         )
     source = eqx.tree_at(lambda s: s.planets[0].physical_model, source, model)
-    batch = Scene.from_systems([source], capacity=6)
-    _equal(batch.to_systems()[0], source)
+    batch = Scene.from_scenes([source], capacity=6)
+    _equal(batch.to_scenes()[0], source)
     _equal(Scene.from_table(batch.to_table(), template=batch), batch)
     times = jnp.array([17.0, 230.0])
     values = _read_jit(batch, times)
@@ -359,9 +359,9 @@ def test_atmosphere_shared_axes():
     )
     model = eqx.tree_at(lambda m: m.absorption, model, absorption)
     source = eqx.tree_at(lambda s: s.planets[0].physical_model, _scene(3), model)
-    batch = Scene.from_systems([source], capacity=6)
+    batch = Scene.from_scenes([source], capacity=6)
     packed = batch.planets[0].physical_model
     assert packed.surface.spectrum.shape == (1, 3)
     assert packed.species[0].rayleigh_xs.shape == (1, 3)
     assert packed.absorption.xsmatrix_per_species[0].shape == (1, 3, 3)
-    _equal(batch.to_systems()[0], source)
+    _equal(batch.to_scenes()[0], source)

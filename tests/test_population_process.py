@@ -453,8 +453,8 @@ def test_structure_padding_and_compile(process, marks):
 
     host, singles = marks
     single = jax.tree.map(lambda x: x[0], singles)
-    packed = Scene.from_systems([single], capacity=3)
-    restored = packed.to_systems()[0]
+    packed = Scene.from_scenes([single], capacity=3)
+    restored = packed.to_scenes()[0]
     _equal(restored, single)
     density = eqx.filter_jit(process.mark_log_density)
     np.testing.assert_allclose(
