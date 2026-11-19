@@ -154,9 +154,9 @@ geometry does not yet provide resolved stellar-surface propagation or
 asymmetric stellar leakage through a coronagraph. System contrast methods call
 `contrast_at_time(..., time_d=..., star=..., dist_pc=...)`; phase-dependent models inherit
 a default hook that delegates to `contrast`. `System.planet_flux_densities`
-calls the model's `spec_flux_density(wavelength_nm, phase_angle_rad=...,
-star_planet_distance_AU=..., Rp_Rearth=..., time_d=..., star=..., dist_pc=...)`, returning `(K, T)`
-photon flux in ph/s/m²/nm. Thermal models evaluate flux directly;
+calls the model's `photon_flux_density(wavelength_nm, time_d, *,
+phase_angle_rad=..., star_planet_distance_AU=..., Rp_Rearth=..., star=...,
+dist_pc=...)`, returning `(K, T)` plus the wavelength shape, in ph/s/m²/nm. Thermal models evaluate flux directly;
 `SumPhysicalModel` adds component fluxes, including through bin integration.
 
 Building one from scratch:
@@ -180,10 +180,7 @@ planet = Planet(
     physical_model=physical_model,
 )
 
-zodi = AYOZodi(
-    wavelengths_nm=jnp.linspace(400, 1000, 60),
-    surface_brightness_mag=22.0,
-)
+zodi = AYOZodi(surface_brightness_mag_arcsec2=22.0)
 
 system = System.from_classical(
     star=star,
