@@ -9,7 +9,8 @@ al. (2020) occurrence rates and prunes by mutual Hill stability:
 2. Each planet gets a scaled semi-major axis (log-uniform in its cell, times
    ``sqrt(L)`` of the host), a mass (log-uniform in its cell), a radius from the
    Chen and Kipping (2017) mean relation, a random host star, and uniform orbital
-   angles; eccentricity and inclination are uniform in a configured range.
+   angles; eccentricity follows the configured distribution (circular when none)
+   and inclination is uniform in a configured range.
 3. Planets of a star are sorted by semi-major axis. Wherever two neighbors are
    closer than `mutual_hill_min` mutual Hill radii the lighter one is removed
    (repeated until none is), then cells left short of their expected count are
@@ -29,6 +30,7 @@ import math
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import priorities
 from hwoutils.constants import AU2m, G, G_si, Mearth2kg, Msun2kg, d2s, deg2rad
 from orbix.equations.orbit import state_vector_to_keplerian
 from orbix.system import FrameOrbit
@@ -46,8 +48,9 @@ class PopulationConfig(eqx.Module):
     """Settings of the draw; the defaults are the ExoVista generator's.
 
     Attributes:
-        e_min: Lower eccentricity bound (uniform draw).
-        e_max: Upper eccentricity bound.
+        eccentricity: Eccentricity distribution of the planets, a
+            `priorities.AbstractDistribution` such as `kipping_eccentricity()`, or
+            ``None`` for circular orbits (the ExoVista default).
         inc_min_deg: Lower bound of the planet inclination to the system midplane.
         inc_max_deg: Upper bound of the planet inclination to the midplane.
         earth_candidate_probability: Probability that a planet inside the exoEarth
@@ -58,8 +61,7 @@ class PopulationConfig(eqx.Module):
         max_stalled: Passes without a gain in stable planets before it stops.
     """
 
-    e_min: float = 0.0
-    e_max: float = 0.0
+    eccentricity: priorities.AbstractDistribution | None = None
     inc_min_deg: float = 0.0
     inc_max_deg: float = 5.0
     earth_candidate_probability: float = 1.0
@@ -237,8 +239,8 @@ def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=N
     cap = math.ceil(1.25 * occurrence.total_rate * n_stars) + 64
     sqrt_l = jnp.sqrt(luminosity_Lsun)
     three_ms = 3.0 * jnp.asarray(mass_Msun, float) * _EARTH_MASSES_PER_SUN
-    log_a = jnp.log(occurrence.a_edges_AU)
-    log_m = jnp.log(occurrence.mass_edges_Mearth)
+    a_edges = occurrence.a_edges_AU
+    m_edges = occurrence.mass_edges_Mearth
 
     key, k_pa, k_inc, k_flip, k_bin = jax.random.split(key, 5)
     midplane_pa = jax.random.uniform(k_pa, (n_stars,)) * 360.0
@@ -320,13 +322,17 @@ def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=N
             0,
             n_stars - 1,
         )
-        a_scaled = jnp.exp(_uniform_between(k_a, log_a[ia], log_a[ia + 1], (cap,)))
-        mass = jnp.exp(_uniform_between(k_m, log_m[im], log_m[im + 1], (cap,)))
+        a_scaled = priorities.LogUniform(a_edges[ia], a_edges[ia + 1]).sample(k_a)
+        mass = priorities.LogUniform(m_edges[im], m_edges[im + 1]).sample(k_m)
         new = {
             "a_AU": a_scaled * sqrt_l[star],
             "mass_Mearth": mass,
             "radius_Rearth": mass_to_radius(mass),
-            "e": _uniform_between(k_e, config.e_min, config.e_max, (cap,)),
+            "e": (
+                jnp.zeros(cap)
+                if config.eccentricity is None
+                else config.eccentricity.sample(k_e, (cap,))
+            ),
             "inc_deg": _uniform_between(
                 k_i, config.inc_min_deg, config.inc_max_deg, (cap,)
             ),

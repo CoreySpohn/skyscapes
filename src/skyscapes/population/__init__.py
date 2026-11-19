@@ -12,6 +12,8 @@ Public API:
 - :func:`draw_population`, :func:`draw_populations`, :class:`PopulationConfig`,
   :class:`PlanetPopulation` --
   the draw, a pure function of a PRNG key and the host stars.
+- :func:`kipping_eccentricity`, :func:`rayleigh_eccentricity` -- eccentricity
+  distributions (`priorities` records) for ``PopulationConfig.eccentricity``.
 - :func:`sky_elements` -- sky-frame Keplerian elements of a drawn population.
 - :func:`earth_like` -- the exoEarth-candidate box of ``get_earth_like_planet_indices``.
 """
@@ -25,6 +27,7 @@ from ._draw import (
     earth_like,
     sky_elements,
 )
+from ._eccentricity import kipping_eccentricity, rayleigh_eccentricity
 from ._process import HostStars, OccurrencePopulation
 from ._tables import (
     OccurrenceTable,
@@ -47,10 +50,12 @@ __all__ = [
     "draw_population",
     "draw_populations",
     "earth_like",
+    "kipping_eccentricity",
     "load_occurrence_table",
     "load_planet_types",
     "mass_to_radius",
     "occurrence_table_from_grid",
     "radius_to_mass",
+    "rayleigh_eccentricity",
     "sky_elements",
 ]

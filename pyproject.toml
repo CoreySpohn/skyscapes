@@ -29,6 +29,7 @@ dependencies = [
     "optixstuff>=5.0.0",
     "orbix>=4.2.0",
     "pooch>=1.8",
+    "priorities",
     "scipy>=1.13",
     "zodi[jax]>=1.1.0",
     # exojax -> radis 0.17 -> vaex-core. vaex-core 4.19 has Linux py3.12

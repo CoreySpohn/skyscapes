@@ -5,6 +5,7 @@ import math
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import priorities
 from hwoutils.constants import Mearth2kg, Msun2kg
 from hwoutils.epoch import Epoch
 from orbix.system import Body, SkyFrame
@@ -101,7 +102,8 @@ class OccurrencePopulation(eqx.Module):
     Each cell has an independent Poisson count of mean occurrence.rate;
     cells with bin_id < 0 are excluded, as in the replica. This replaces
     the replica's joint fixed-total rule. Marks are log-uniform in cell
-    scaled separation and mass, uniform in eccentricity and orbital angles,
+    scaled separation and mass, uniform in orbital angles, with eccentricity drawn
+    from config.eccentricity (circular when None),
     with the replica's conditional type probabilities and mass-radius law.
 
     sample prunes each host alone, without refill, then keeps the innermost
@@ -152,20 +154,12 @@ class OccurrencePopulation(eqx.Module):
             cell // self.occurrence.rate.shape[1],
             cell % self.occurrence.rate.shape[1],
         )
-        la, lm = (
-            jnp.log(self.occurrence.a_edges_AU),
-            jnp.log(self.occurrence.mass_edges_Mearth),
-        )
-        a_scaled = jnp.exp(
-            la[ia] + jax.random.uniform(keys[1], (n,)) * (la[ia + 1] - la[ia])
-        )
-        mass = jnp.exp(
-            lm[im] + jax.random.uniform(keys[2], (n,)) * (lm[im + 1] - lm[im])
-        )
+        a_edges, m_edges = self.occurrence.a_edges_AU, self.occurrence.mass_edges_Mearth
+        a_scaled = priorities.LogUniform(a_edges[ia], a_edges[ia + 1]).sample(keys[1])
+        mass = priorities.LogUniform(m_edges[im], m_edges[im + 1]).sample(keys[2])
         angles = jax.random.uniform(keys[3], (n, 3)) * (2 * jnp.pi)
-        e = self.config.e_min + jax.random.uniform(keys[4], (n,)) * (
-            self.config.e_max - self.config.e_min
-        )
+        ecc = self.config.eccentricity
+        e = jnp.zeros(n) if ecc is None else ecc.sample(keys[4], (n,))
         inc = jnp.arccos(2 * jax.random.uniform(keys[5], (n,)) - 1)
         types = _sample_types(
             keys[6],
@@ -461,13 +455,13 @@ class OccurrencePopulation(eqx.Module):
         prob = jnp.where(
             total > 0, prob / jnp.where(total > 0, total, 1.0), index == fallback
         )
+        ecc_logp = self.config.eccentricity.log_prob(eccentricity)
         support = (
             in_grid
             & (cell > 0)
             & (m > 0)
             & (energy > 0)
-            & (eccentricity >= self.config.e_min)
-            & (eccentricity <= self.config.e_max)
+            & jnp.isfinite(ecc_logp)
             & (index == index.astype(jnp.int32))
             & (index >= 0)
             & (index < len(self.types.names))
@@ -480,7 +474,7 @@ class OccurrencePopulation(eqx.Module):
             - jnp.log(widths)
             - jnp.log(safe_m)
             - jnp.log(safe_e)
-            - jnp.log(self.config.e_max - self.config.e_min)
+            + jnp.where(jnp.isfinite(ecc_logp), ecc_logp, 0.0)
             - jnp.log(2 * (2 * jnp.pi) ** 3)
             + jnp.log(jnp.where(prob > 0, prob, 1.0))
         )
@@ -491,7 +485,8 @@ class OccurrencePopulation(eqx.Module):
 
         dnu is the reference measure of ClassicalChart.log_volume with its
         documented omitted constant: unnormalized Haar times dex dey dln(a).
-        Write da=ln(a_hi/a_lo), dm=ln(m_hi/m_lo), de=e_max-e_min, p_t=type prob.
+        Write da=ln(a_hi/a_lo), dm=ln(m_hi/m_lo), de=1/p_e with p_e the
+        eccentricity density, p_t=type prob.
         q(ln a,e,c,W,w,M,m,t) = (rate_cell/rate)*p_t/[da*dm*m*de*2*(2*pi)^3].
         For x=(ln a,logit e,atanh c,W,w,M), q_x=q*e*(1-e)*(1-c*c).
         exp(ClassicalChart.log_volume(x))=e*e*(1-e)*(1-c*c).
@@ -504,18 +499,17 @@ class OccurrencePopulation(eqx.Module):
         on the sphere is uniform. Uniform periapsis and anomaly supply the
         remaining independent angles. This proof includes any fixed tilt,
         so inc_min_deg == inc_max_deg does not make this marginal singular.
-        The defaults e_min=e_max=0 DO make it singular: set e_max>e_min.
-        Degenerate eccentricity raises ValueError on the host, also at trace
-        construction; keep these configuration bounds host scalars.
+        Circular orbits (config.eccentricity None) make it singular and raise
+        ValueError on the host, also at trace construction.
 
         stars has length S matching the last batch axis, or length one to
         broadcast a single host across B. Padded slots return zero. Radius
         is the deterministic mass-radius image, not an independent coordinate.
         """
-        if self.config.e_max <= self.config.e_min:
+        if self.config.eccentricity is None:
             raise ValueError(
-                "e_max must exceed e_min for a full-dimensional density; "
-                "defaults e_min=e_max=0 are degenerate"
+                "config.eccentricity is None (circular orbits), which has no "
+                "full-dimensional density; set an eccentricity distribution"
             )
         luminosity = (
             jnp.broadcast_to(stars.luminosity_Lsun, system.batch_shape)

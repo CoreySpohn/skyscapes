@@ -4,6 +4,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+import priorities
 import pytest
 
 from skyscapes.population import (
@@ -98,7 +99,9 @@ def test_orbit_ranges_follow_the_config(draw):
 
     Fails if the config bounds are swapped, ignored or applied in the wrong units.
     """
-    config = PopulationConfig(e_min=0.1, e_max=0.2, inc_min_deg=1.0, inc_max_deg=3.0)
+    config = PopulationConfig(
+        eccentricity=priorities.Uniform(0.1, 0.2), inc_min_deg=1.0, inc_max_deg=3.0
+    )
     p = draw(0, config)
     present = np.asarray(p.present)
     e, inc = np.asarray(p.e)[present], np.asarray(p.inc_deg)[present]

@@ -6,6 +6,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+import priorities
 import pytest
 from hwoutils.epoch import Epoch
 
@@ -62,8 +63,7 @@ def process():
         table,
         types,
         PopulationConfig(
-            e_min=0.1,
-            e_max=0.4,
+            eccentricity=priorities.Uniform(0.1, 0.4),
             max_planets=12,
             mutual_hill_min=0.0,
             earth_candidate_probability=0.4,
@@ -290,9 +290,9 @@ def test_support_errors_and_type_photometry(process, marks):
     np.testing.assert_array_equal(density(padded, host), 0.0)
     np.testing.assert_array_equal(process.log_intensity(padded, host), 0.0)
     degenerate = eqx.tree_at(lambda p: p.config, process, PopulationConfig())
-    with pytest.raises(ValueError, match=r"e_max.*e_min"):
+    with pytest.raises(ValueError, match=r"eccentricity is None"):
         degenerate.mark_log_density(scene, host)
-    with pytest.raises(ValueError, match=r"e_max.*e_min"):
+    with pytest.raises(ValueError, match=r"eccentricity is None"):
         eqx.filter_jit(degenerate.mark_log_density)(scene, host)
     zero_tilt = eqx.tree_at(lambda p: p.config.inc_max_deg, process, 0.0)
     np.testing.assert_array_equal(
