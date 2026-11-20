@@ -11,12 +11,12 @@
 
 JAX-native astrophysical scene modeling for HWO direct imaging.
 
-`System.ephemeris` returns orbix's barycentric (east, north, away)
+`Scene.ephemeris` returns orbix's barycentric (east, north, away)
 states, with scene-order planet indices for relative observables. This
 frame is right-handed: z is positive away from the observer, and dz/dt is positive receding. The standard phase angle
 beta satisfies `cos(beta) = z / r` for the star-relative vector
 (zero at full phase).
-`System.positions` returns rows 0 and 1 as (Delta alpha*, Delta Dec), where
+`Scene.positions` returns rows 0 and 1 as (Delta alpha*, Delta Dec), where
 Delta alpha* = Delta RA cos Dec. ExoVista positions and velocities are
 converted from (west, north, toward) with `(-x, y, -z)` before deriving
 elements; the header midplane mapping remains `(-PA) % 360`.
@@ -31,9 +31,9 @@ like [ExoVista](https://github.com/nasa/ExoVista) feed *into*
 skyscapes through loaders (`from_exovista`); skyscapes does not try to
 replace them.
 
-- A `Scene` is "everything on the sky that the telescope sees" — one
-  `System` (a star with planets and optionally a disk) plus optional
-  background sources (zodiacal light, background galaxies, etc.).
+- A `Scene` is "everything on the sky that the telescope sees" — a
+  star with planets, an optional disk (the exozodi) and optional local
+  zodiacal light, held by one `Scene`.
 - Source models (`Star`, `Planet`, `Disk`, physical models, backgrounds)
   are composable `eqx.Module`s — swap any one without touching the rest,
   or swap the whole class for a higher-fidelity variant.
@@ -52,7 +52,7 @@ science products.
   thin adapter over [ExoJAX](https://github.com/HajimeKawahara/exojax);
   skyscapes does not implement its own RT.
 - **Not an orbit propagator.** Orbital mechanics live in
-  [orbix](https://github.com/CoreySpohn/orbix); `System` holds an
+  [orbix](https://github.com/CoreySpohn/orbix); `Scene` holds an
   `orbix.system.System` for dynamics.
 - **Not a simulator.** Downstream tools
   ([coronagraphoto](https://github.com/CoreySpohn/coronagraphoto),
@@ -64,8 +64,8 @@ science products.
 ```mermaid
 flowchart LR
     src["External sources<br/>ExoVista · spectra · catalogues"]
-    sky(["<b>skyscapes</b><br/>Scene · System · Star · Planet · Disk · PhysicalModel"])
-    opt["<b>optixstuff</b><br/>OpticalPath"]
+    sky(["<b>skyscapes</b><br/>Scene · Star · Planet · Disk · PhysicalModel"])
+    opt["<b>optixstuff</b><br/>Instrument"]
     cor["<b>coronagraphoto</b><br/>2D image simulation"]
     jet["<b>jaxedith</b><br/>Scalar count rates"]
 
@@ -78,14 +78,14 @@ flowchart LR
 
 ## Architecture
 
-A `Scene` composes a `System` (star + planets + optional disk) with an
-optional `zodi.jax.AbstractLocalZodi` background:
+A `Scene` holds a star, planets, an optional disk and an optional
+`zodi.jax.AbstractLocalZodi` background:
 
 - **Stars** — `Star` (wavelength- and time-dependent spectrum, ExoVista-
   backed) and `FlatStar` (constant-flux sandbox). Imported stars retain
   FITS metadata and optional `StarSpots` geometry and temperatures.
 - **Planets** — `Planet` owns radii (`Rp_Rearth`) and an
-  `AbstractPhysicalModel`; `System.dynamics` owns masses, orbital state,
+  `AbstractPhysicalModel`; `Scene.dynamics` owns masses, orbital state,
   and observer distance.
 - **Physical models** — `LambertianPhysicalModel`,
   `GridPhysicalModel` (wavelength/phase contrast tables),
@@ -114,10 +114,10 @@ import jax
 
 jax.config.update("jax_enable_x64", True)
 
-from skyscapes import Scene, from_exovista
+from skyscapes import from_exovista
 
-system = from_exovista("path/to/exovista_system.fits", planet_spectra="auto")
-scene = Scene(system=system)
+# A Scene: star, planets and disk, plus a default AYOZodi (scene.zodi)
+scene = from_exovista("path/to/exovista_system.fits", planet_spectra="auto")
 ```
 
 The importer requires JAX x64 to preserve orbital-state precision. ExoVista's elapsed years map to Julian Dates as
@@ -151,9 +151,9 @@ interpolation by default.
 
 `Star.spots` and `Star.metadata` preserve source records. Loading spot
 geometry does not yet provide resolved stellar-surface propagation or
-asymmetric stellar leakage through a coronagraph. System contrast methods call
+asymmetric stellar leakage through a coronagraph. Scene contrast methods call
 `contrast_at_time(..., time_d=..., star=..., dist_pc=...)`; phase-dependent models inherit
-a default hook that delegates to `contrast`. `System.planet_flux_densities`
+a default hook that delegates to `contrast`. `Scene.planet_flux_densities`
 calls the model's `photon_flux_density(wavelength_nm, time_d, *,
 phase_angle_rad=..., star_planet_distance_AU=..., Rp_Rearth=..., star=...,
 dist_pc=...)`, returning `(K, T)` plus the wavelength shape, in ph/s/m²/nm. Thermal models evaluate flux directly;
@@ -165,7 +165,7 @@ Building one from scratch:
 import jax.numpy as jnp
 from hwoutils.constants import Mearth2kg, Msun2kg
 
-from skyscapes import Scene, System
+from skyscapes import Scene
 from skyscapes.scene import FlatStar, Planet
 from skyscapes.physical_model import LambertianPhysicalModel
 from zodi.jax import AYOZodi
@@ -182,7 +182,7 @@ planet = Planet(
 
 zodi = AYOZodi(surface_brightness_mag_arcsec2=22.0)
 
-system = System.from_classical(
+scene = Scene.from_classical(
     star=star,
     planets=(planet,),
     star_mass_Msun=1.0,
@@ -194,9 +194,6 @@ system = System.from_classical(
     i_rad=jnp.array([jnp.pi / 3]),
     w_rad=jnp.array([0.0]),
     M0_rad=jnp.array([0.0]),
-)
-scene = Scene(
-    system=system,
     zodi=zodi,
 )
 ```

@@ -13,9 +13,9 @@ from orbix.system.core import GM_SUN_AU3_PER_D2, enclosed_mu, jacobi_to_barycent
 from orbix.system.frame_orbit import FrameOrbit
 
 from ..physical_model import AbstractPhysicalModel, LambertianPhysicalModel
-from ..scene import Planet, System
+from ..scene import Planet, Scene
+from ..scene.scene import _mask_dynamics
 from ..scene.star import AbstractStar
-from ..scene.system import _mask_dynamics
 from ._draw import (
     _EARTH_MASSES_PER_SUN,
     PopulationConfig,
@@ -220,7 +220,7 @@ class OccurrencePopulation(eqx.Module):
             self.types.wavelength_nm,
             self.types.albedo,
         )
-        return System(
+        return Scene(
             star,
             Planet(jnp.where(valid, mass_to_radius(marks["mass"]), 0.0), model),
             dynamics,
@@ -331,7 +331,7 @@ class OccurrencePopulation(eqx.Module):
         return jax.lax.map(world, jnp.arange(n_worlds))
 
     def mark_sample(self, key, n, star):
-        """Draw n one-planet Systems, batch (n,), K=1, with no pruning.
+        """Draw n one-planet Scenes, batch (n,), K=1, with no pruning.
 
         star must be a HostStars of length one. Each draw uses the exact
         isotropic single-planet marginal, including for zero midplane tilt.

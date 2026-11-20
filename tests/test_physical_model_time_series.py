@@ -12,7 +12,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from skyscapes import physical_model
-from skyscapes.scene import FlatStar, Planet, System
+from skyscapes.scene import FlatStar, Planet, Scene
 
 from .test_physical_model_emission import _model as emission_model
 from .test_physical_model_emission import engines  # noqa: F401
@@ -225,7 +225,7 @@ def test_time_derivative_matches_piecewise_linear_slope():
 
 @vv.case("planet-phase", "code-verification")
 def test_system_contrast_and_magnitude_forward_physical_time():
-    """System accessors recover tabulated ratios and magnitudes to roundoff."""
+    """Scene accessors recover tabulated ratios and magnitudes to roundoff."""
     model = physical_model.TimeSeriesPhysicalModel(
         wavelengths_nm=[550.0],
         times_d=[0.0, 1.0],
@@ -233,7 +233,7 @@ def test_system_contrast_and_magnitude_forward_physical_time():
     )
     planet = Planet(jnp.ones(1), model)
     star = FlatStar(flux_phot_per_nm_m2=1e9)
-    system = System.from_classical(
+    system = Scene.from_classical(
         star,
         (planet,),
         star_mass_Msun=1.989e30 / Msun2kg,

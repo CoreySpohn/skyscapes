@@ -1,4 +1,4 @@
-"""Host packing and fixed padding for scene System pytrees."""
+"""Host packing and fixed padding for Scene pytrees."""
 
 import equinox as eqx
 import jax
@@ -95,14 +95,14 @@ def from_systems(cls, systems, *, capacity=None, batch_shape=None):
         raise ValueError("systems must be nonempty")
     if any(s.batch_shape for s in systems):
         raise ValueError("from_systems requires unbatched systems")
-    if any(s.disk is not None for s in systems):
-        raise ValueError("Systems with a disk cannot enter a batch")
+    if any(s.disk is not None or s.zodi is not None for s in systems):
+        raise ValueError("Scenes with a disk or zodi cannot enter a batch")
     if any(s.epoch != systems[0].epoch for s in systems):
-        raise ValueError("Systems must share one epoch")
+        raise ValueError("Scenes must share one epoch")
     star_classes = {type(s.star) for s in systems}
     model_classes = {type(p.physical_model) for s in systems for p in s.planets}
     if len(star_classes) != 1 or len(model_classes) != 1:
-        raise ValueError("Systems must share one star class and physical-model class")
+        raise ValueError("Scenes must share one star class and physical-model class")
     model_template = max(
         (p for s in systems for p in s.planets), key=lambda p: p.n_planets
     )
@@ -189,7 +189,7 @@ def from_systems(cls, systems, *, capacity=None, batch_shape=None):
         )
         rows.append(_host(packed))
     if any(jax.tree.structure(row) != jax.tree.structure(rows[0]) for row in rows):
-        raise ValueError("Systems must share model classes and static structure")
+        raise ValueError("Scenes must share model classes and static structure")
     return jax.tree.map(
         lambda *xs: np.stack(xs).reshape((*batch_shape, *np.shape(xs[0]))), *rows
     )

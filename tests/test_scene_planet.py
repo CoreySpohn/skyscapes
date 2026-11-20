@@ -11,13 +11,13 @@ from hwoutils.constants import G, Mearth2kg, Msun2kg, Rearth2AU, pc2AU, rad2arcs
 from orbix.equations.orbit import mean_motion, period_n
 
 from skyscapes.physical_model import LambertianPhysicalModel, lambert_phase
-from skyscapes.scene import FlatStar, Planet, System
+from skyscapes.scene import FlatStar, Planet, Scene
 
 from .conftest import two_body_reference
 
 
 def _single_scene(*, mass=1.0, i_rad=jnp.pi / 3, M0_rad=jnp.pi / 4, W_rad=0.0):
-    return System.from_classical(
+    return Scene.from_classical(
         FlatStar(1e9),
         (Planet(jnp.ones(1), LambertianPhysicalModel(jnp.array([0.3]))),),
         star_mass_Msun=1.989e30 / Msun2kg,
@@ -54,7 +54,7 @@ def test_planet_n_planets_property():
 
 
 def test_planet_position_shape():
-    """System.positions returns shape (2, K, T)."""
+    """Scene.positions returns shape (2, K, T)."""
     p = _single_scene()
     ra_dec = p.positions(jnp.array([0.0]))
     # (2, K, T) per contract
@@ -254,7 +254,7 @@ def test_position_arcsec_is_east_then_north(node_deg, mean_anomaly_deg, east_nor
         expected,
         atol=1e-8,
     )
-    system = System(p.star, p.planets, p.dynamics)
+    system = Scene(p.star, p.planets, p.dynamics)
     np.testing.assert_allclose(system.positions(times)[:, 0, 0], expected, atol=1e-8)
 
 
@@ -344,7 +344,7 @@ def test_scene_mass_and_observables(mass):
         star=p.star,
         dist_pc=p.dist_pc,
     )
-    system = System(p.star, p.planets, p.dynamics)
+    system = Scene(p.star, p.planets, p.dynamics)
     np.testing.assert_allclose(
         system.positions(times), old_position, rtol=3e-13, atol=3e-13
     )
@@ -364,7 +364,7 @@ def test_position_angle_cardinal_anchors(node_deg, expected):
     times = jnp.zeros(1)
     np.testing.assert_allclose(p.position_angles(times), expected, rtol=0, atol=2e-14)
     np.testing.assert_allclose(
-        System(p.star, p.planets, p.dynamics).position_angles(times),
+        Scene(p.star, p.planets, p.dynamics).position_angles(times),
         expected,
         rtol=0,
         atol=2e-14,

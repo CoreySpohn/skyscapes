@@ -9,14 +9,17 @@ from astropy.io import fits
 from hwoutils.epoch import Epoch
 
 from skyscapes.disk import ExovistaDisk
-from skyscapes.io import from_exovista, get_earth_like_planet_indices
-from skyscapes.scene import Planet, Star, System
+from skyscapes.io import (
+    from_exovista,
+    get_earth_like_planet_indices,
+)
+from skyscapes.scene import Planet, Scene, Star
 
 
 def test_from_exovista_returns_scene_system(fits_fixture):
     """from_exovista returns a scene.System instance."""
     sys_obj = from_exovista(fits_fixture)
-    assert isinstance(sys_obj, System)
+    assert isinstance(sys_obj, Scene)
 
 
 def test_from_exovista_star_is_spectrum_star(fits_fixture):
@@ -63,9 +66,24 @@ def test_from_exovista_disk_is_exovista_disk(fits_fixture):
 
 
 def test_from_exovista_load_disk_false_skips_disk(fits_fixture):
-    """load_disk=False leaves System.disk as None."""
+    """load_disk=False leaves Scene.disk as None."""
     sys_obj = from_exovista(fits_fixture, load_disk=False)
     assert sys_obj.disk is None
+
+
+def test_from_exovista_returns_scene_with_default_zodi_and_honours_load_disk(
+    fits_fixture,
+):
+    """from_exovista returns a Scene with an AYOZodi background."""
+    from zodi.jax import AYOZodi
+
+    scene = from_exovista(
+        fits_fixture, load_disk=False, zodi_surface_brightness_mag=21.5
+    )
+    assert isinstance(scene.zodi, AYOZodi)
+    assert scene.zodi.surface_brightness_mag_arcsec2 == 21.5
+    assert scene.disk is None
+    assert isinstance(from_exovista(fits_fixture).disk, ExovistaDisk)
 
 
 def test_from_exovista_only_earths_filters(fits_fixture):
@@ -89,7 +107,7 @@ def test_get_earth_like_planet_indices_returns_list(fits_fixture):
 
 
 def test_from_exovista_positions_runnable(fits_fixture):
-    """Sanity: a System loaded from FITS can be propagated."""
+    """Sanity: a Scene loaded from FITS can be propagated."""
     sys_obj = from_exovista(fits_fixture, planet_indices=[0])
     t0 = sys_obj.dynamics.orbits.epoch_d
     pos = sys_obj.positions(jnp.atleast_1d(t0))

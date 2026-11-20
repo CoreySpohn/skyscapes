@@ -4,12 +4,12 @@ skyscapes represents an astrophysical scene as a tree of `eqx.Module`
 sources. This page covers what each source type is, how they compose,
 and which variant to reach for in a given situation.
 
-`System.ephemeris` returns orbix's barycentric (east, north, away)
+`Scene.ephemeris` returns orbix's barycentric (east, north, away)
 states, with scene-order planet indices for relative observables. This
 frame is right-handed: z is positive away from the observer, and dz/dt is positive receding. The standard phase angle
 beta satisfies `cos(beta) = z / r` for the star-relative vector
 (zero at full phase).
-`System.positions` returns rows 0 and 1 as (Delta alpha*, Delta Dec), where
+`Scene.positions` returns rows 0 and 1 as (Delta alpha*, Delta Dec), where
 Delta alpha* = Delta RA cos Dec. ExoVista positions and velocities are
 converted from (west, north, toward) with `(-x, y, -z)` before deriving
 elements; the header midplane maps to astronomical `(90 + PA) % 360`.
@@ -18,19 +18,17 @@ elements; the header midplane maps to astronomical `(90 + PA) % 360`.
 
 ```mermaid
 flowchart TB
-    Scene["<b>Scene</b><br/>= System + optional local zodi"]
-    System["<b>System</b><br/>= Star + Planets + dynamics + optional Disk"]
+    Scene["<b>Scene</b><br/>= Star + Planets + dynamics + optional Disk + optional local zodi"]
     Star["<b>Star</b><br/>(AbstractStar)"]
     Planet["<b>Planet</b><br/>Rp + physical_model"]
     Disk["<b>AbstractDisk</b><br/>circumstellar dust"]
     Zodi["<b>zodi.jax.AbstractLocalZodi</b><br/>(local-zodi models)"]
     PM["<b>AbstractPhysicalModel</b><br/>photon flux / contrast"]
 
-    Scene --> System
     Scene --> Zodi
-    System --> Star
-    System --> Planet
-    System --> Disk
+    Scene --> Star
+    Scene --> Planet
+    Scene --> Disk
     Planet --> PM
 ```
 
@@ -40,15 +38,11 @@ Interface sketch; the concrete classes are defined in the package.
 
 ```python notest
 class Scene(eqx.Module):
-    system: System  # required
-    zodi: AbstractLocalZodi | None = None  # optional
-
-
-class System(eqx.Module):
     star: AbstractStar
     planets: tuple[Planet, ...]
     dynamics: orbix.system.System
-    disk: AbstractDisk | None = None
+    disk: AbstractDisk | None = None  # the only exozodi
+    zodi: AbstractLocalZodi | None = None
     midplane_inc_deg: float = 0.0
     midplane_position_angle_deg: float = 0.0
     ...
@@ -155,8 +149,8 @@ arrays with shape `(n_times, n_spots)`:
 `Star.metadata` retains the stellar FITS header values under uppercase
 keys, excluding blank, `COMMENT`, and `HISTORY` cards. These records
 preserve the source information, including the original west-based `PA`.
-The system's disk orientation instead uses `System.midplane_inc_deg = I`
-and `System.midplane_position_angle_deg = (90 + PA) % 360` in the east/north chart, for
+The system's disk orientation instead uses `Scene.midplane_inc_deg = I`
+and `Scene.midplane_position_angle_deg = (90 + PA) % 360` in the east/north chart, for
 parametric disks and visualization outlines. The metadata do not supply
 spot evolution or an evaluator for spatially resolved stellar intensity. A downstream
 diameter-only coronagraph response does not acquire asymmetric
@@ -188,10 +182,10 @@ relying on an extension-count header alone.
 
 ExoVista writes barycentric states for the star and each planet. The
 importer converts them to the (east, north, away) chart and builds the
-shared `System.dynamics` Jacobi chain. Dynamics owns the stellar and
+shared `Scene.dynamics` Jacobi chain. Dynamics owns the stellar and
 planetary masses and the observer distance; these are available through
-`System.star_mass_Msun`, `System.planet_mass_Msun`, and `System.dist_pc`.
-`System.ephemeris(time_d)` propagates the shared system with Markley by
+`Scene.star_mass_Msun`, `Scene.planet_mass_Msun`, and `Scene.dist_pc`.
+`Scene.ephemeris(time_d)` propagates the shared system with Markley by
 default. Its barycentric states support star-relative planet geometry,
 stellar reflex motion, and radial velocity without separate orbit solves.
 
@@ -212,7 +206,7 @@ the star's offset to the planet's orbital radius, so it grows toward small
 orbits. The peak depends strongly on which epochs and planets are sampled,
 so the distribution is given. The numbers come from loading the same file twice, once as written and once with
 the star's rows zeroed so that the barycentric states are used as relative
-states, and taking the relative difference of `System.contrasts`.
+states, and taking the relative difference of `Scene.contrasts`.
 `tools/star_reflex_contrast.py` reproduces them and prints the median,
 99th-percentile and maximum change for each planet; run
 `python tools/star_reflex_contrast.py [wavelength_nm]` from the repository
@@ -266,7 +260,7 @@ remain bounded by the wavelength grid. See
 
 `Planet` owns the planet radii (`Rp_Rearth`) and a physical model
 (from `skyscapes.physical_model`). Orbital state, masses, and observer
-distance live on the shared `System.dynamics` object.
+distance live on the shared `Scene.dynamics` object.
 
 ```python
 import jax.numpy as jnp
@@ -286,9 +280,9 @@ physical-model type -- every per-planet field
 (``Rp_Rearth``, model parameters)
 is an array of length `K`. This is the "per-Planet-type batching"
 convention; heterogeneous planets (different physical-model classes)
-go into `System.planets` as a tuple of `Planet` instances.
+go into `Scene.planets` as a tuple of `Planet` instances.
 
-`System.from_classical` takes masses in solar masses and orbital-element
+`Scene.from_classical` takes masses in solar masses and orbital-element
 arrays in flattened scene order. It sorts the Jacobi chain by `a_AU` on
 the host by default; supply an explicit `order` permutation when building
 from traced elements. The scene keeps the original planet order for
@@ -310,7 +304,7 @@ two_planet = Planet(
 )
 ```
 
-`System.planet_flux_densities` delegates to each physical model's
+`Scene.planet_flux_densities` delegates to each physical model's
 photon-flux method, supplying geometry and observer distance.
 `SumPhysicalModel` combines reflected and thermal components for one planet; see [Physical models](physical_models.md) for its common
 `(K, T)` flux and contrast interfaces.
@@ -380,6 +374,14 @@ For retrievals on a real disk, fit `ExovistaParametricDisk` to the
 ExoVista data once, then use the parametric form in the inference
 loop.
 
+### Analytic exozodi
+
+`scene.disk` is the scene's only exozodi. An analytic exozodi is a disk too:
+`AYOExozodiDisk(AYOExozodi(level_zodis=3.0))` wraps `zodi.jax.AYOExozodi`,
+whose radiance depends only on the projected physical separation from the
+star. It ignores time, the star and the midplane angles, and diverges at
+zero separation.
+
 ## Zodi (backgrounds)
 
 Backgrounds are anything in the field of view that is not part of the
@@ -415,7 +417,8 @@ zodi = PrecomputedZodi(
     radiance_phot_per_s_m2_nm_sr=...,
 )
 
-scene = Scene(system=system, zodi=zodi)
+scene = eqx.tree_at(lambda s: s.zodi, scene, zodi, is_leaf=lambda x: x is None)
+# or pass zodi=zodi to Scene(...) / Scene.from_classical(...)
 ```
 
 The `AbstractLocalZodi` base class covers all three:
@@ -447,20 +450,16 @@ Requires a user-supplied FITS file, source models, an `orbix.system.System`
 named `dynamics`, and a configured optical path.
 
 ```python notest
-from skyscapes import Scene, System, from_exovista
+from skyscapes import Scene, from_exovista
 
 # From ExoVista
 import jax
 
 jax.config.update("jax_enable_x64", True)
-system = from_exovista("system.fits", planet_spectra="auto")
-scene = Scene(system=system)
+scene = from_exovista("system.fits", planet_spectra="auto")
 
 # Or programmatically
-scene = Scene(
-    system=System(star=star, planets=(planet,), dynamics=dynamics, disk=disk),
-    zodi=zodi,
-)
+scene = Scene(star=star, planets=(planet,), dynamics=dynamics, disk=disk, zodi=zodi)
 
 # Downstream usage: a noisy coronagraph image
 from coronagraphoto import observe

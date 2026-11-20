@@ -12,7 +12,7 @@ physical epochs with orbital phase.
 
 The planet radius is supplied as a method argument rather than a class
 field -- ``Rp_Rearth`` is a property of the planet, not the physical
-model. ``System`` forwards ``planet.Rp_Rearth`` to the physical
+model. ``Scene`` forwards ``planet.Rp_Rearth`` to the physical
 model at call time.
 """
 
@@ -50,7 +50,7 @@ class AbstractPhysicalModel(eqx.Module):
     ) -> Array:
         """Planet photons [ph s^-1 m^-2 nm^-1], shape (K, T) + wavelength shape.
 
-        Contrast and its spectral parameters belong to this model. System
+        Contrast and its spectral parameters belong to this model. Scene
         supplies orbix star-relative phase and distance, both (K, T), and
         Planet supplies radii (K,). Time is (T,) days from the scene epoch.
         Each wavelength returns stellar photon density times model contrast.
@@ -128,7 +128,7 @@ class AbstractPhysicalModel(eqx.Module):
             phase_angle_rad: Star-planet-observer phase angle ``beta``,
                 shape ``(K, T)`` for K planets and T times.
             star_planet_distance_AU: Star-planet distance, shape ``(K, T)``.
-            wavelength_nm: Scalar wavelength [nm]. Use ``System.contrast_cube``
+            wavelength_nm: Scalar wavelength [nm]. Use ``Scene.contrast_cube``
                 to evaluate an array of wavelengths.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``,
                 supplied by the host ``Planet``.
@@ -163,7 +163,7 @@ class AbstractPhysicalModel(eqx.Module):
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
             time_d: Observation times in days from the scene epoch, shape ``(T,)``.
             dist_pc: Observer distance supplied by the system [pc].
-            star: The host ``AbstractStar``; ``System`` always supplies it.
+            star: The host ``AbstractStar``; ``Scene`` always supplies it.
 
         Returns:
             Planet-to-star flux ratio, shape ``(K, T)``.

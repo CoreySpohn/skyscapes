@@ -27,7 +27,7 @@ from hwoutils.constants import G as G_AU3_PER_KG_D2
 from scipy.integrate import solve_ivp
 
 from skyscapes.io import from_exovista
-from skyscapes.scene import Planet, System
+from skyscapes.scene import Planet, Scene
 
 # The same value of G as the library, in SI units.
 G_SI = G_AU3_PER_KG_D2 * AU2m**3 / d2s**2
@@ -173,7 +173,7 @@ def test_unknown_planet_mass_falls_back_to_the_stellar_mass(jupiter_system):
     """NaN, zero or negative masses add nothing; known masses add G M_planet."""
     system, _ = jupiter_system
     masses = jnp.array([JUPITER_MEARTH, jnp.nan, 0.0, -3.0]) * Mearth2kg / Msun2kg
-    scene = System.from_classical(
+    scene = Scene.from_classical(
         star=system.star,
         planets=(Planet(jnp.ones(4), system.planets[0].physical_model),),
         star_mass_Msun=system.star_mass_Msun,

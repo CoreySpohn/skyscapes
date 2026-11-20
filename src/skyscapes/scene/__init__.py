@@ -1,12 +1,11 @@
-"""Scene hierarchy: AbstractStar + Planet + System + Scene wiring."""
+"""Scene hierarchy: AbstractStar + Planet + the Scene that holds them."""
 
 from __future__ import annotations
 
-from .container import Scene
 from .planet import Planet
+from .scene import Scene
 from .spots import StarSpots
 from .star import AbstractStar, BlackbodyStar, FlatStar, Star
-from .system import System
 
 __all__ = [
     "AbstractStar",
@@ -16,5 +15,4 @@ __all__ = [
     "Scene",
     "Star",
     "StarSpots",
-    "System",
 ]

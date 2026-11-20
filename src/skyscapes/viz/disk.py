@@ -61,8 +61,8 @@ _SIDE_LABELS = (
 
 
 def _resolve_disk(obj, incl_deg, position_angle_deg, dist_pc):
-    """``(disk, incl, pa, dist)`` from a System/Scene, a disk, or neither."""
-    system = getattr(obj, "system", obj)
+    """``(disk, incl, pa, dist)`` from a Scene, a disk, or neither."""
+    system = obj
     if hasattr(system, "midplane_inc_deg") and hasattr(system, "disk"):
         incl = system.midplane_inc_deg if incl_deg is None else incl_deg
         pa = (
@@ -106,7 +106,7 @@ def plot_disk_radiance(
     arrays are north-up photon radiance and require pixel_scale_arcsec.
 
     Args:
-        disk_or_image: A ``System`` or ``Scene`` (its disk, midplane
+        disk_or_image: A ``Scene`` (its disk, midplane
             orientation and distance are used), an ``AbstractDisk``, or a
             bare ``(ny, nx)`` photon radiance map.
         wavelength_nm: Wavelength to render at [nm]. Required for a disk.
@@ -170,7 +170,7 @@ def plot_disk_radiance(
     if incl is not None:
         _check_incl(incl)
     if disk is not None:
-        system = getattr(disk_or_image, "system", disk_or_image)
+        system = disk_or_image
         if star is None:
             star = getattr(system, "star", None)
         if wavelength_nm is None or star is None or grid is None or dist is None:
@@ -184,8 +184,8 @@ def plot_disk_radiance(
             dist_pc=dist,
             grid=grid,
         )
-    elif hasattr(disk_or_image, "midplane_inc_deg") or hasattr(disk_or_image, "system"):
-        raise ValueError("the system has no disk to draw")
+    elif hasattr(disk_or_image, "midplane_inc_deg"):
+        raise ValueError("the scene has no disk to draw")
     else:
         image = disk_or_image
     display = None
@@ -614,7 +614,7 @@ def plot_disk_geometry(
     beside its supplement, the illumination angle.
 
     Args:
-        system_or_disk: A ``System``/``Scene`` (its disk and midplane
+        system_or_disk: A ``Scene`` (its disk and midplane
             orientation are used) or an ``AbstractDisk``.
         incl_deg: Midplane inclination [deg], in ``[0, 180]``; defaults to
             the system's. Above 90 the near half lies below the sky-plane

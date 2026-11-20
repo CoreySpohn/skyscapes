@@ -1,4 +1,4 @@
-"""Photometric scenes with one orbix system owning all dynamical state."""
+"""The Scene: star, planets, disk and zodi, with one orbix system owning dynamics."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from jaxtyping import Array
 from orbix.kepler import Markley
 from orbix.system import Body, Ephemeris, SkyFrame
 from orbix.system import System as DynamicsSystem
+from zodi.jax import AbstractLocalZodi
 
 from .._repr import indent
 from ..disk import AbstractDisk
@@ -112,12 +113,12 @@ def _masked_solve(dynamics, chain_valid, time_d, solver):
     return _mask_dynamics(dynamics, chain_valid).solve(time_d, solver=solver)
 
 
-class System(eqx.Module):
-    """Astrophysical scene: star + tuple of planets + optional disk.
+class Scene(eqx.Module):
+    """Everything in the field of view: star, planets, disk and local zodi.
 
     All ``time_d`` arguments are plain arrays of days from the scene epoch,
     ``dynamics.frame.epoch``. Convert absolute dates on the host with
-    ``system.epoch.days(...)`` before passing offsets to JAX.
+    ``scene.epoch.days(...)`` before passing offsets to JAX.
 
     Attributes:
         star: Host star (``AbstractStar``).
@@ -129,7 +130,11 @@ class System(eqx.Module):
             numeric leaf, including spectral grids, carries the batch axes.
         body_index: Static permutation mapping flattened scene planet indices to
             zero-based chain planet indices. Defaults to the identity.
-        disk: Optional extended-source disk (``AbstractDisk | None``).
+        disk: Optional extended source, the only exozodi (``AbstractDisk | None``):
+            an ExoVista disk, a parametric disk, or an analytic exozodi model
+            such as ``skyscapes.disk.AYOExozodiDisk``.
+        zodi: Optional local (solar-system) zodiacal light, any
+            :mod:`zodi.jax` local-zodi model. Unbatched scenes only.
         midplane_inc_deg: Disk midplane inclination [deg] in [0, 180],
             with 0 face-on (the default). Together with ``midplane_position_angle_deg``,
             orients parametric disks and visualization outlines in the
@@ -146,16 +151,17 @@ class System(eqx.Module):
     valid: Array
     _source_layout: Array | None = None
     disk: AbstractDisk | None = None
+    zodi: AbstractLocalZodi | None = None
     midplane_inc_deg: float = 0.0
     midplane_position_angle_deg: float = 0.0
     body_index: tuple[int, ...] = eqx.field(static=True, default=())
 
     def photon_radiance(self, wavelength_nm, time_d, *, grid):
-        """Disk photon radiance on grid, using the system's midplane angles.
+        """Disk photon radiance on grid, using the scene's midplane angles.
 
         Returns ph s^-1 m^-2 nm^-1 sr^-1 with shape wavelength_nm.shape
-        + grid.shape. A system without a disk returns zero radiance.
-        Batched systems exclude disks.
+        + grid.shape. A scene without a disk returns zero radiance.
+        Batched scenes exclude disks and zodi.
         """
         from ..disk.base import check_sky_grid, radiance_image
 
@@ -207,6 +213,7 @@ class System(eqx.Module):
         midplane_inc_deg=0.0,
         midplane_position_angle_deg=0.0,
         *,
+        zodi=None,
         body_index=None,
         valid=None,
     ):
@@ -226,6 +233,7 @@ class System(eqx.Module):
             else jnp.asarray(valid, dtype=bool)
         )
         self.disk = disk
+        self.zodi = zodi
         self.midplane_inc_deg = midplane_inc_deg
         self.midplane_position_angle_deg = midplane_position_angle_deg
         self.body_index = (
@@ -239,9 +247,11 @@ class System(eqx.Module):
             raise ValueError("Photometric planet count must match dynamics bodies")
         if self.valid.shape != (*self.batch_shape, count):
             raise ValueError("valid must have shape B + (K,)")
-        if self.batch_shape and (len(self.planets) != 1 or self.disk is not None):
+        if self.batch_shape and (
+            len(self.planets) != 1 or self.disk is not None or self.zodi is not None
+        ):
             raise ValueError(
-                "Batched scenes require one stacked Planet group and no disk"
+                "Batched scenes require one stacked Planet group, no disk and no zodi"
             )
         if (
             len(self.body_index) != count
@@ -332,6 +342,7 @@ class System(eqx.Module):
         disk=None,
         midplane_inc_deg=0.0,
         midplane_position_angle_deg=0.0,
+        zodi=None,
     ):
         """Build a Jacobi chain from elements and masses in scene planet order.
 
@@ -341,7 +352,7 @@ class System(eqx.Module):
         nonpositive) planet masses become zero here. Scalars broadcast to the
         flattened planet count. ``epoch_d`` and observation ``time_d`` are
         days from the scene epoch. ``epoch`` is host-side SkyFrame metadata;
-        convert absolute dates once with ``system.epoch.days(...)`` before
+        convert absolute dates once with ``scene.epoch.days(...)`` before
         transferring the resulting offsets to JAX.
         """
         planets = (planets,) if isinstance(planets, Planet) else tuple(planets)
@@ -388,6 +399,7 @@ class System(eqx.Module):
             disk,
             midplane_inc_deg,
             midplane_position_angle_deg,
+            zodi=zodi,
             body_index=inverse,
             valid=valid,
         )
@@ -554,10 +566,12 @@ class System(eqx.Module):
         )
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Union of stellar, planetary and disk wavelength breaks [nm]."""
+        """Union of stellar, planetary, disk and zodi wavelength breaks [nm]."""
         models = (self.star, *self.planets)
         if self.disk is not None:
             models = (*models, self.disk)
+        if self.zodi is not None:
+            models = (*models, self.zodi)
         return spectral_breaks(*models)
 
     @_batch_method
@@ -660,7 +674,7 @@ class System(eqx.Module):
         """Tree-shaped summary: star + planets + disk + midplane geometry."""
         if self.batch_shape:
             return (
-                f"System(batch_shape={self.batch_shape}, capacity={self.capacity}, "
+                f"Scene(batch_shape={self.batch_shape}, capacity={self.capacity}, "
                 f"star={type(self.star).__name__}, "
                 f"model={type(self.planets[0].physical_model).__name__})"
             )
@@ -668,7 +682,7 @@ class System(eqx.Module):
         n_total = self.n_planets
         lines = [
             (
-                f"System(n_planet_modules={n_modules}, "
+                f"Scene(n_planet_modules={n_modules}, "
                 f"K_total={n_total}, "
                 f"midplane: i={self.midplane_inc_deg:.2f} deg, "
                 f"PA={self.midplane_position_angle_deg:.2f} deg)"
@@ -684,4 +698,8 @@ class System(eqx.Module):
             lines.append(indent("disk: " + repr(self.disk)))
         else:
             lines.append("  disk: None")
+        if self.zodi is not None:
+            lines.append(indent("zodi: " + repr(self.zodi)))
+        else:
+            lines.append("  zodi: None")
         return "\n".join(lines)

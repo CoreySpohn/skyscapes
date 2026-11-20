@@ -313,20 +313,20 @@ def test_point_disk_planet_centroid():
 
 
 def test_system_radiance_owns_midplane_override():
-    """Fails if System ignores its angle or multiplies stellar flux a second time.
+    """Fails if Scene ignores its angle or multiplies stellar flux a second time.
 
     The density-normalized solar anchor at zero inclination is independent of
     system plumbing; tolerance 1e-6 is the LOS calibration convergence bound.
     The zero-disk branch and nested composite use the identical requested grid.
     """
     from skyscapes.disk import CompositeDisk
-    from skyscapes.scene import System
+    from skyscapes.scene import Scene
 
     disk = eqx.tree_at(
         lambda d: (d.inclination_deg, d.position_angle_deg), profile(), (75.0, 43.0)
     )
     empty = jnp.empty(0)
-    system = System.from_classical(
+    system = Scene.from_classical(
         solar_star(),
         (),
         star_mass_Msun=1.0,
@@ -364,7 +364,7 @@ def test_system_point_radiance_matches_grid(kind):
     fusion. The rotated target samples the stored cube between native pixels.
     """
     from skyscapes.disk import CompositeDisk
-    from skyscapes.scene import System
+    from skyscapes.scene import Scene
 
     grid = PixelGrid.regular(
         (3, 4),
@@ -389,7 +389,7 @@ def test_system_point_radiance_matches_grid(kind):
     else:
         disk = None if kind is None else profile(kind)
     empty = jnp.empty(0)
-    scene = System.from_classical(
+    scene = Scene.from_classical(
         solar_star(),
         (),
         star_mass_Msun=1.0,

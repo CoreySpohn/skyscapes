@@ -1,4 +1,4 @@
-"""ExoVista FITS loader -- builds a ``skyscapes.scene.System`` directly.
+"""ExoVista FITS loader -- builds a ``skyscapes.scene.Scene`` directly.
 
 Supports legacy and spotted-star layouts. Each planet has a Keplerian
 orbit and either a time-indexed contrast table or a phase-indexed model.
@@ -42,12 +42,13 @@ from hwoutils.epoch import Epoch
 from hwoutils.grids import PixelGrid, SkyOrientation
 from orbix.equations.orbit import state_vector_to_keplerian
 from orbix.system import FrameOrbit, phase_angle_rad
+from zodi.jax import AYOZodi
 
 from ..disk import ExovistaDisk
 from ..physical_model import GridPhysicalModel, TimeSeriesPhysicalModel
 from ..population import earth_like
-from ..scene import Planet, Star, StarSpots, System
-from ..scene.system import _known_planet_mass
+from ..scene import Planet, Scene, Star, StarSpots
+from ..scene.scene import _known_planet_mass
 
 # Area of the quiet-disk limb-darkening mask that the ExoVista v2.5 and v2.6
 # writers multiply into every stellar spectrum, in units of the geometric disk:
@@ -438,8 +439,8 @@ def _load_disk(hdul: fits.HDUList, fits_ext: int) -> ExovistaDisk:
     Column offset = -east / pixel scale.
 
     ``from_exovista`` converts the FITS star header's (I, PA) to
-    (I, 90 + PA modulo 360) on ``System.midplane_inc_deg`` /
-    ``System.midplane_position_angle_deg``. These east/north angles orient parametric
+    (I, 90 + PA modulo 360) on ``Scene.midplane_inc_deg`` /
+    ``Scene.midplane_position_angle_deg``. These east/north angles orient parametric
     disks and outlines; this loaded cube already has its geometry.
     """
     obj_data = hdul[fits_ext].data
@@ -490,7 +491,7 @@ def get_earth_like_planet_indices(fits_file: str) -> list[int]:
         return _earth_like_planet_indices_from_hdul(hdul)
 
 
-def from_exovista(
+def _scene_from_exovista(
     fits_file: str,
     planet_indices: Sequence[int] | None = None,
     only_earths: bool = False,
@@ -498,13 +499,14 @@ def from_exovista(
     *,
     planet_spectra: Literal["auto", "time", "phase"] = "auto",
     epoch: Epoch | None = None,
-) -> System:
-    """Load an ExoVista FITS file into a ``scene.System``.
+    zodi=None,
+) -> Scene:
+    """Load an ExoVista FITS file into a ``Scene`` with the given local zodi.
 
     State vectors are already on-sky; their (west, north, toward) axes
     are converted to orbix's (east, north, away) axes. The FITS star
     header's midplane (I, PA) becomes (I, 90 + PA modulo 360) in the east/north
-    chart on ``System.midplane_*``, used by parametric disks and outlines.
+    chart on ``Scene.midplane_*``, used by parametric disks and outlines.
     These angles are not applied again to the states or loaded image.
     Elapsed simulation years use exactly 365.25 days per year and an
     assigned J2000 origin. By default the first stellar timestamp sets the
@@ -519,7 +521,7 @@ def from_exovista(
         planet_indices: Planet indices to load (0-based). ``None`` = all.
         only_earths: If True and *planet_indices* is None, auto-filter Earths.
         load_disk: If False, skip the disk extension entirely and set
-            ``System.disk`` to ``None``. Useful when the downstream
+            ``Scene.disk`` to ``None``. Useful when the downstream
             pipeline cannot render a disk (e.g. a coronagraph without a
             PSF datacube).
         planet_spectra: ``auto`` preserves time-dependent contrasts in
@@ -531,9 +533,10 @@ def from_exovista(
         epoch: Scene epoch that stored and observation times are measured
             from. ``None`` uses the first stellar timestamp. Pass a shared
             epoch to place several scenes on one clock.
+        zodi: Local zodi model stored on the scene (``None`` for none).
 
     Returns:
-        ``scene.System`` with star, planets (tuple), disk, and midplane metadata.
+        ``Scene`` with star, planets (tuple), disk, and midplane metadata.
 
     Raises:
         ValueError: JAX float64 is disabled, the FITS layout or spot records
@@ -597,7 +600,7 @@ def from_exovista(
 
     keys = ("a_AU", "e", "i_rad", "W_rad", "w_rad", "M0_rad", "epoch_d")
     elements = {key: jnp.asarray([item[1][key] for item in loaded]) for key in keys}
-    return System.from_classical(
+    return Scene.from_classical(
         star=star,
         planets=tuple(item[0] for item in loaded),
         star_mass_Msun=star_mass_Msun,
@@ -608,4 +611,51 @@ def from_exovista(
         disk=disk,
         midplane_inc_deg=midplane_inc_deg,
         midplane_position_angle_deg=midplane_position_angle_deg,
+        zodi=zodi,
+    )
+
+
+def from_exovista(
+    fits_file: str,
+    planet_indices: Sequence[int] | None = None,
+    only_earths: bool = False,
+    load_disk: bool = True,
+    zodi_surface_brightness_mag: float = 22.0,
+    *,
+    planet_spectra: Literal["auto", "time", "phase"] = "auto",
+    epoch: Epoch | None = None,
+) -> Scene:
+    """Load an ExoVista FITS file into a ``Scene`` with a default zodi.
+
+    Builds the ``Scene`` (star, planets, disk, midplane metadata) with an
+    :class:`~zodi.jax.AYOZodi` as its local zodi. Raises ``ValueError`` unless
+    ``jax_enable_x64`` is set (orbital states need float64), and for an
+    invalid FITS layout, planet selection or spectra mode.
+
+    Args:
+        fits_file: Path to ExoVista FITS file.
+        planet_indices: Planet indices to load (0-based). ``None`` = all.
+        only_earths: If True and *planet_indices* is None, auto-filter Earths.
+        load_disk: If False, skip the disk and set ``Scene.disk`` to ``None``.
+        zodi_surface_brightness_mag: V-band surface brightness of the default
+            zodi background in mag per square arcsecond (22.0 is the AYO
+            standard).
+        planet_spectra: ``auto`` preserves time-dependent contrasts in
+            v2.5+ scenes and the phase model for older scenes; ``time`` keeps
+            the recorded spectra at their epochs; ``phase`` assumes contrast
+            depends on phase alone.
+        epoch: Scene epoch that stored times are measured from. ``None``
+            uses the first stellar timestamp.
+
+    Returns:
+        ``Scene`` with the loaded star, planets and disk and an ``AYOZodi``.
+    """
+    return _scene_from_exovista(
+        fits_file,
+        planet_indices=planet_indices,
+        only_earths=only_earths,
+        load_disk=load_disk,
+        planet_spectra=planet_spectra,
+        epoch=epoch,
+        zodi=AYOZodi(surface_brightness_mag_arcsec2=zodi_surface_brightness_mag),
     )

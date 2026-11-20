@@ -100,7 +100,7 @@ def los_integrate_scattered(
 
     Private integration chart: (east, north, toward), with depth ``l_grid``
     positive toward the observer (the negative of public sky z). Sky ``x``
-    is east (from ``System.positions``), and sky ``y`` is north.
+    is east (from ``Scene.positions``), and sky ``y`` is north.
     The line of nodes is (sin(PA), cos(PA)) in (east, north), with
     astronomical position angle PA north through east. The near half for
     inclinations below 90 degrees is (-cos(PA), sin(PA)); above 90 it

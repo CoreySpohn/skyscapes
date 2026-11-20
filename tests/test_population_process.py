@@ -449,11 +449,11 @@ def test_structure_padding_and_compile(process, marks):
         rtol=64 * np.finfo(float).eps,
     )
 
-    from skyscapes.scene import System
+    from skyscapes.scene import Scene
 
     host, singles = marks
     single = jax.tree.map(lambda x: x[0], singles)
-    packed = System.from_systems([single], capacity=3)
+    packed = Scene.from_systems([single], capacity=3)
     restored = packed.to_systems()[0]
     _equal(restored, single)
     density = eqx.filter_jit(process.mark_log_density)
