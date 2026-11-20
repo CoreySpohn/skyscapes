@@ -42,12 +42,11 @@ from hwoutils.epoch import Epoch
 from optixstuff.grids import PixelGrid, SkyOrientation
 from orbix.equations.orbit import state_vector_to_keplerian
 from orbix.system import FrameOrbit, phase_angle_rad
-from zodi.jax import AbstractLocalZodi, AYOZodi
 
 from ..disk import ExovistaDisk
 from ..physical_model import GridPhysicalModel, TimeSeriesPhysicalModel
 from ..population import earth_like
-from ..scene import Planet, Scene, Star, StarSpots
+from ..scene import AbstractLocalZodi, AYOZodi, Planet, Scene, Star, StarSpots
 from ..scene.scene import _known_planet_mass
 
 # Area of the quiet-disk limb-darkening mask that the ExoVista v2.5 and v2.6
@@ -530,7 +529,7 @@ def from_exovista(
             from. ``None`` uses the first stellar timestamp. Pass a shared
             epoch to place several scenes on one clock.
         local_zodi: Local zodi model stored on the scene. The default is
-            :class:`~zodi.jax.AYOZodi` (22 mag per square arcsecond); ``None``
+            :class:`~skyscapes.scene.AYOZodi` (22 mag per square arcsecond); ``None``
             stores no zodi.
 
     Returns:

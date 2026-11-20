@@ -257,7 +257,8 @@ def test_view_creates_a_figure_when_no_axes_is_given(name):
 def test_views_accept_a_scene_with_zodi():
     """Every view draws a Scene that also carries a local zodi."""
     import equinox as eqx
-    from zodi.jax import AYOZodi
+
+    from skyscapes import AYOZodi
 
     scene = eqx.tree_at(
         lambda s: s.local_zodi, make_system(), AYOZodi(), is_leaf=lambda x: x is None

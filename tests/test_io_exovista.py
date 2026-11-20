@@ -73,7 +73,7 @@ def test_from_exovista_load_disk_false_skips_disk(fits_fixture):
 
 def test_from_exovista_zodi_default_custom_and_none(fits_fixture):
     """The zodi keyword defaults to AYOZodi, takes any local zodi, or None."""
-    from zodi.jax import AYOZodi, LeinertZodi
+    from skyscapes import AYOZodi, LeinertZodi
 
     default = from_exovista(fits_fixture, load_disk=False)
     assert isinstance(default.local_zodi, AYOZodi)

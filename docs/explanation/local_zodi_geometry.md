@@ -17,17 +17,16 @@ is constant in any straightforward way, and the two are easy to confuse
 because they coincide along the ecliptic plane but diverge elsewhere on
 the sky. This page walks through the computation of those two angles
 using `orbix.observatory.ecliptic_pointing`, the common ways the geometry
-goes wrong, and the conventions `zodi.jax.LeinertZodi`
+goes wrong, and the conventions `LeinertZodi`
 expects.
 
 ## The two Leinert inputs
 
 The position-dependent factor in Leinert+1998 Table 17 depends on the
 ecliptic latitude of the look vector, written `β_⊙` in Leinert and
-exposed as the `ecliptic_latitude_deg` argument to
-`LeinertZodi.photon_radiance`, and on the helio-ecliptic
+computed by `LeinertZodi.photon_radiance` from its sky frame, and on the helio-ecliptic
 longitude difference between the look vector and the Sun, written
-`Δλ_⊙` in Leinert and exposed as `helioecliptic_longitude_deg`. The ecliptic latitude
+`Δλ_⊙` in Leinert and computed the same way. The ecliptic latitude
 is essentially time-invariant for a fixed sky target because stellar
 parallax is negligible at typical mission distances and obliquity drift
 is sub-arcsecond per year. By contrast, the helio-ecliptic longitude
@@ -39,26 +38,27 @@ Both angles come from one function,
 {func}`orbix.observatory.ecliptic_pointing`, which takes the target's
 right ascension and declination in degrees, the reference `Epoch` and a
 time in days from it. A scene that carries a sky position supplies the
-first three: `scene.ra_deg` and `scene.dec_deg` come from its `SkyFrame`,
-and so does `scene.epoch`.
+first three through `scene.sky_frame`, so a caller never computes the angles:
+`LeinertZodi.photon_radiance(wavelength_nm, sky_frame, time_d)` takes the
+frame and the time and derives both. A scene without a position (`ra_deg` is
+`None`) raises a `ValueError` naming the missing position; `AYOZodi` and
+`PrecomputedZodi` ignore the frame.
 
-Requires user-supplied target coordinates, times, and wavelengths.
-
-```python notest
+```python
+import jax.numpy as jnp
 from orbix.observatory import ecliptic_pointing
-from zodi.jax import LeinertZodi
+from orbix.system import SkyFrame
+
+from skyscapes import LeinertZodi
 
 zodi = LeinertZodi()
+frame = SkyFrame(10.0, ra_deg=100.0, dec_deg=-20.0)
+wavelength_nm = jnp.array([500.0, 600.0])
 
-ecl_lat, helio_lon = ecliptic_pointing(
-    scene.ra_deg, scene.dec_deg, scene.epoch, time_d
-)  # ecl_lat ~constant in time; helio_lon sweeps -180 to 180 through the year; the models use its absolute value
+flux = zodi.photon_radiance(wavelength_nm, frame, 120.0)  # ph/s/m^2/nm/sr
 
-flux = zodi.photon_radiance(
-    wavelength_nm,
-    ecliptic_latitude_deg=ecl_lat,
-    helioecliptic_longitude_deg=helio_lon,
-)
+# The angles the model derives, for a sightline plot or a keep-out check:
+ecl_lat, helio_lon = ecliptic_pointing(frame.ra_deg, frame.dec_deg, frame.epoch, 120.0)
 ```
 
 {func}`skyscapes.viz.plot_local_zodi_geometry` draws what the two inputs

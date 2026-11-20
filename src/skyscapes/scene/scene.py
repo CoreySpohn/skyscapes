@@ -18,12 +18,12 @@ from optixstuff.spectral import Quadrature, spectral_breaks
 from orbix.kepler import Markley
 from orbix.system import Body, Ephemeris, SkyFrame
 from orbix.system import System as DynamicsSystem
-from zodi.jax import AbstractLocalZodi
 
 from .._repr import indent
 from ..disk import AbstractDisk
 from . import _system_batch
 from ._system_batch import _PAD_ORBIT
+from .local_zodi import AbstractLocalZodi
 from .planet import Planet
 from .star import AbstractStar
 
@@ -132,9 +132,9 @@ class Scene(eqx.Module):
             zero-based chain planet indices. Defaults to the identity.
         disk: Optional extended source, the only exozodi (``AbstractDisk | None``):
             an ExoVista disk, a parametric disk, or an analytic exozodi model
-            such as ``skyscapes.disk.AYOExozodiDisk``.
+            such as ``skyscapes.disk.AYOExozodi``.
         local_zodi: Optional local (solar-system) zodiacal light, any
-            :mod:`zodi.jax` local-zodi model. Unbatched scenes only.
+            :class:`~skyscapes.scene.AbstractLocalZodi` model. Unbatched scenes only.
         midplane_inc_deg: Disk midplane inclination [deg] in [0, 180],
             with 0 face-on (the default). Together with ``midplane_position_angle_deg``,
             orients parametric disks and visualization outlines in the
@@ -413,6 +413,11 @@ class Scene(eqx.Module):
             body_index=inverse,
             valid=valid,
         )
+
+    @property
+    def sky_frame(self) -> SkyFrame:
+        """Where and when the scene is seen, owned by the dynamics."""
+        return self.dynamics.frame
 
     @property
     def dist_pc(self):

@@ -79,7 +79,7 @@ flowchart LR
 ## Architecture
 
 A `Scene` holds a star, planets, an optional disk and an optional
-`zodi.jax.AbstractLocalZodi` background:
+`AbstractLocalZodi` background:
 
 - **Stars** — `Star` (wavelength- and time-dependent spectrum, ExoVista-
   backed) and `FlatStar` (constant-flux sandbox). Imported stars retain
@@ -95,9 +95,9 @@ A `Scene` holds a star, planets, an optional disk and an optional
   `BlackbodyPhysicalModel` and `ExoJaxEmissionModel` (thermal emission),
   and `SumPhysicalModel` (additive radiative contributions).
 - **Disks** — `ExovistaDisk`, `ExovistaParametricDisk`, `GraterDisk`,
-  `CompositeDisk`.
-- **Backgrounds** (from `zodi.jax`) — `AYOZodi` (AYO-convention defaults), `LeinertZodi`
-  (full position-dependent Leinert+1998), `PrecomputedZodi` (cached
+  `CompositeDisk`, `AYOExozodi` (the analytic AYO exozodi).
+- **Backgrounds** — `AYOZodi` (AYO-convention defaults), `LeinertZodi`
+  (full sightline-dependent Leinert+1998), `PrecomputedZodi` (cached
   flux array).
 
 Every leaf is an `eqx.Module` PyTree, so JAX transforms (`jit`, `vmap`,
@@ -168,7 +168,7 @@ from hwoutils.constants import Mearth2kg, Msun2kg
 from skyscapes import Scene
 from skyscapes.scene import FlatStar, Planet
 from skyscapes.physical_model import LambertianPhysicalModel
-from zodi.jax import AYOZodi
+from skyscapes import AYOZodi
 
 star = FlatStar(
     flux_phot_per_nm_m2=1e9,

@@ -61,7 +61,7 @@ scene = from_exovista("path/to/exovista_system.fits")  # with a default AYOZodi
 
 Building one from scratch is a little more involved -- a `Scene`
 holds a star, planets, an optional disk and an optional
-`zodi.jax.AbstractLocalZodi`. `Planet` owns its radii and physical model, while
+`AbstractLocalZodi`. `Planet` owns its radii and physical model, while
 `Scene.dynamics` owns masses, orbital state, and observer distance:
 
 ```python
@@ -71,7 +71,7 @@ from hwoutils.constants import Mearth2kg, Msun2kg
 from skyscapes import Scene
 from skyscapes.scene import FlatStar, Planet
 from skyscapes.physical_model import LambertianPhysicalModel
-from zodi.jax import AYOZodi
+from skyscapes import AYOZodi
 
 star = FlatStar(
     flux_phot_per_nm_m2=1e9,
@@ -121,7 +121,7 @@ pip install skyscapes
   `ExoJaxEmissionModel` ([how-to](how-to/thermal_emission)),
   `GridPhysicalModel`, `BlackbodyPhysicalModel`, `SumPhysicalModel`, ...;
   all expose observer photon flux through `photon_flux_density`.
-- [`zodi.jax`](explanation/source_models) -- `AbstractLocalZodi`
+- [local zodi](explanation/source_models) -- `AbstractLocalZodi`
   (base class), `AYOZodi`, `LeinertZodi`, `PrecomputedZodi`
 
 **Views** (the `viz` extra, `pip install 'skyscapes[viz]'`):

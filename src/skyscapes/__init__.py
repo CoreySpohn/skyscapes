@@ -3,7 +3,7 @@
 Public API:
 
 - :mod:`skyscapes.scene` -- star + planet hierarchy and the ``Scene`` that
-  holds star, planets, disk and zodi.
+  holds star, planets, disk and local zodi.
 - :mod:`skyscapes.disk` -- extended-source surface brightness maps.
 - :mod:`skyscapes.physical_model` -- planet photon flux and planet-to-star
   contrast (reflective, emissive, and additive models).
@@ -13,12 +13,12 @@ Public API:
 - :mod:`skyscapes.datasets` -- cached reference and example data.
 - :mod:`skyscapes.viz` -- optional plotting with lazily loaded dependencies.
 
-For convenience, ``Scene`` and ``from_exovista`` are hoisted to
-the top level, so common flows can write
+For convenience, ``Scene``, the local-zodi models and ``from_exovista`` are
+hoisted to the top level, so common flows can write
 ``from skyscapes import Scene, from_exovista``.
 Mix-and-match construction goes through the submodules
 (``skyscapes.disk.ExovistaDisk``, ``skyscapes.physical_model.GridPhysicalModel``,
-``zodi.jax.AYOZodi``, ...).
+``skyscapes.AYOZodi``, ...).
 """
 
 from __future__ import annotations
@@ -39,9 +39,13 @@ from . import (
     viz,
 )
 from .io import from_exovista
-from .scene import Scene
+from .scene import AbstractLocalZodi, AYOZodi, LeinertZodi, PrecomputedZodi, Scene
 
 __all__ = [
+    "AYOZodi",
+    "AbstractLocalZodi",
+    "LeinertZodi",
+    "PrecomputedZodi",
     "Scene",
     "__version__",
     "datasets",

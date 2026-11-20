@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from zodi.jax import AYOExozodi, AYOZodi
 
-from skyscapes import Scene
-from skyscapes.disk import AYOExozodiDisk
+from skyscapes import AYOZodi, Scene
+from skyscapes.disk import AYOExozodi
 from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.scene import FlatStar, Planet
 
@@ -58,24 +58,60 @@ def test_batches_reject_zodi():
         )
 
 
-def test_ayo_exozodi_disk_matches_the_scalar_model():
-    """The disk adapter evaluates AYOExozodi at the projected separation."""
-    model = AYOExozodi(level_zodis=2.0)
-    disk = AYOExozodiDisk(model)
-    wave = jnp.array([500.0, 700.0])
-    east = jnp.array([0.2, -0.3, 0.05])
-    north = jnp.array([0.1, 0.4, 0.0])
-    got = disk.photon_radiance_at(wave, 0.0, east, north, star=None, dist_pc=10.0)
-    want = model.photon_radiance(
-        wave[:, None], separation_au=10.0 * jnp.hypot(east, north)
+def test_ayo_exozodi_units():
+    """Check AB normalization and photon units from SI primitives.
+
+    A 1e-12 relative tolerance allows float64 unit arithmetic. The separation
+    is one AU, a distance of 10 pc seeing 0.1 arcsec.
+    """
+    disk = AYOExozodi()
+    np.testing.assert_array_equal(disk.spectral_breaks_nm(), np.empty(0))
+    waves = jnp.array([450.0, 550.0, 750.0])
+    zero_jy = 10 ** (-0.4 * 48.60) * 1e4 / 1e7 / 1e-26
+    expected = zero_jy * 1e-26 / (6.62607015e-34 * np.asarray(waves))
+    expected *= 3 * 10 ** (-0.4 * 22) / (np.pi / (180 * 3600)) ** 2
+    got = disk.photon_radiance_at(waves, 0.0, 0.1, 0.0, star=None, dist_pc=10.0)
+    np.testing.assert_allclose(got, expected, rtol=1e-12, atol=0)
+    got = AYOExozodi(6.0, 23.0).photon_radiance_at(
+        waves, 0.0, 0.0, 0.1, star=None, dist_pc=10.0
     )
-    assert got.shape == (2, 3)
-    np.testing.assert_array_equal(got, want)
+    np.testing.assert_allclose(got, expected * 2 * 10 ** (-0.4), rtol=1e-12, atol=0)
+
+
+def test_ayo_exozodi_projected_separation_law():
+    """Check r^-2 with physical separation = distance_pc * angle_arcsec.
+
+    Exact powers of two set the ratios; 1e-12 allows JIT rounding.
+    """
+    disk = AYOExozodi()
+    distances = jnp.array([10.0, 20.0, 10.0, 20.0])
+    separations = jnp.array([0.1, 0.1, 0.2, 0.05])
+
+    def read(distance, separation):
+        return disk.photon_radiance_at(
+            550.0, 0.0, separation, 0.0, star=None, dist_pc=distance
+        )
+
+    base = (
+        10 ** (-0.4 * 48.60)
+        * 1e-3
+        / (6.62607015e-34 * 550)
+        * 3
+        * 10 ** (-0.4 * 22)
+        / (np.pi / (180 * 3600)) ** 2
+    )
+    expected = jnp.array([1.0, 0.25, 0.25, 1.0]) * base
+    np.testing.assert_allclose(
+        jax.vmap(read)(distances, separations), expected, rtol=1e-12, atol=0
+    )
+    np.testing.assert_allclose(
+        jax.jit(jax.vmap(read))(distances, separations), expected, rtol=1e-12, atol=0
+    )
 
 
 def test_ayo_exozodi_disk_on_a_grid_and_in_a_scene():
     """Wavelength axes lead the sky grid, and Scene forwards to the disk."""
-    scene = _scene(disk=AYOExozodiDisk())
+    scene = _scene(disk=AYOExozodi())
     east = jnp.linspace(0.1, 0.5, 4)[:, None]
     north = jnp.linspace(0.1, 0.3, 3)[None, :]
     wave = jnp.array([500.0, 600.0, 700.0])
@@ -112,3 +148,11 @@ def test_table_round_trip_keeps_the_sky_position():
     np.testing.assert_allclose(back.ra_deg, [100.0, 100.0])
     np.testing.assert_allclose(back.dec_deg, [-20.0, -20.0])
     assert back.epoch == batch.epoch
+
+
+def test_scene_sky_frame_is_the_dynamics_frame():
+    """Scene.sky_frame is the frame the dynamics own, placed or not."""
+    scene = _scene(ra_deg=100.0, dec_deg=-20.0)
+    assert scene.sky_frame is scene.dynamics.frame
+    assert scene.sky_frame.ra_deg is scene.ra_deg
+    assert _scene().sky_frame.ra_deg is None

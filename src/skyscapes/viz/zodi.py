@@ -1,6 +1,6 @@
 """The local zodiacal-light geometry: an observer inside the Solar-system cloud.
 
-``zodi.jax.LeinertZodi`` reads its brightness off two angles of the look direction,
+``skyscapes.LeinertZodi`` reads its brightness off two angles of the look direction,
 its ecliptic latitude and its helio-ecliptic longitude difference from the
 Sun. This view draws what those two inputs mean: the Sun, the observer
 inside the cloud, the half-ray the brightness integrates along, and, for
@@ -463,7 +463,7 @@ def plot_local_zodi_geometry(
 ):
     """Draw the geometry behind a local zodiacal-light lookup.
 
-    The two inputs are those of ``LeinertZodi.photon_radiance``: the
+    The two inputs are the angles ``LeinertZodi`` derives from its sky frame: the
     look direction's ecliptic latitude ``beta`` and its helio-ecliptic
     longitude difference from the Sun ``Delta lambda`` (0 toward the Sun,
     180 away from it). The observer sits inside the cloud at

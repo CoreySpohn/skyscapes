@@ -22,7 +22,7 @@ flowchart TB
     Star["<b>Star</b><br/>(AbstractStar)"]
     Planet["<b>Planet</b><br/>Rp + physical_model"]
     Disk["<b>AbstractDisk</b><br/>circumstellar dust"]
-    Zodi["<b>zodi.jax.AbstractLocalZodi</b><br/>(local-zodi models)"]
+    Zodi["<b>AbstractLocalZodi</b><br/>(local-zodi models)"]
     PM["<b>AbstractPhysicalModel</b><br/>photon flux / contrast"]
 
     Scene --> Zodi
@@ -381,30 +381,30 @@ loop.
 ### Analytic exozodi
 
 `scene.disk` is the scene's only exozodi. An analytic exozodi is a disk too:
-`AYOExozodiDisk(AYOExozodi(level_zodis=3.0))` wraps `zodi.jax.AYOExozodi`,
-whose radiance depends only on the projected physical separation from the
+`AYOExozodi(level_zodis=3.0)` is the AYO analytic exozodi, whose radiance depends only on the projected physical separation from the
 star. It ignores time, the star and the midplane angles, and diverges at
 zero separation.
 
 ## Zodi (backgrounds)
 
 Backgrounds are anything in the field of view that is not part of the
-planetary system itself. Local zodiacal-light models are supplied by
-`zodi.jax` and attached to the skyscapes `Scene`.
+planetary system itself. Local zodiacal-light models live in skyscapes and
+are attached to the `Scene`; the `zodi` library supplies their physics.
 
-Three variants implement `AbstractLocalZodi.photon_radiance(wavelength_nm, *,
-ecliptic_latitude_deg, helioecliptic_longitude_deg)`, returning ph/s/m^2/nm/sr:
+Three variants implement `AbstractLocalZodi.photon_radiance(wavelength_nm,
+sky_frame, time_d)`, returning ph/s/m^2/nm/sr. The model is given the scene's
+`SkyFrame` and the time in days from its epoch, and derives what it needs:
 
 | Class | What it is |
 |---|---|
-| `AYOZodi` | AYO-convention defaults: fixed V-band magnitude × Leinert wavelength-dependent colour correction. Position-independent; both pointing keywords are ignored. |
-| `LeinertZodi` | Full Leinert+1998 position-dependent model: surface brightness varies with ecliptic latitude and solar longitude. Use when telescope-orbit geometry matters. |
-| `PrecomputedZodi` | Wraps an externally computed photon-radiance array in per-steradian units (e.g. from EXOSIMS) for fast lookup. Position arguments accepted but ignored. |
+| `AYOZodi` | AYO-convention defaults: fixed V-band magnitude × Leinert wavelength-dependent colour correction. Sightline-independent; the frame and time are ignored. |
+| `LeinertZodi` | Full Leinert+1998 position-dependent model: surface brightness varies with ecliptic latitude and solar longitude, which it derives from the frame's position and the time. Raises when the scene has no sky position. |
+| `PrecomputedZodi` | Wraps an externally computed photon-radiance array in per-steradian units (e.g. from EXOSIMS) for fast lookup. The frame and time are accepted but ignored. |
 
 Requires user-supplied zodiacal flux arrays and a configured system.
 
 ```python notest
-from zodi.jax import AYOZodi, LeinertZodi, PrecomputedZodi
+from skyscapes import AYOZodi, LeinertZodi, PrecomputedZodi
 import jax.numpy as jnp
 
 # Sandbox / AYO-compatible
@@ -428,7 +428,7 @@ scene = eqx.tree_at(lambda s: s.local_zodi, scene, zodi, is_leaf=lambda x: x is 
 The `AbstractLocalZodi` base class covers all three:
 
 ```python
-from zodi.jax import AbstractLocalZodi
+from skyscapes import AbstractLocalZodi
 
 
 def my_function(zodi: AbstractLocalZodi):
@@ -436,8 +436,8 @@ def my_function(zodi: AbstractLocalZodi):
     ...
 ```
 
-For the geometry inputs that `LeinertZodi.photon_radiance` requires
-(ecliptic latitude, solar longitude), see
+For the geometry `LeinertZodi` derives (ecliptic latitude, helioecliptic
+longitude), see
 [local zodi + telescope geometry](local_zodi_geometry).
 
 ## Physical models
@@ -470,16 +470,7 @@ scene = Scene(
 # Downstream usage: a noisy coronagraph image
 from coronagraphoto import observe
 
-image = observe(
-    key,
-    scene.system,
-    optical_path,
-    quadrature,
-    plan,
-    time_d=0.0,
-    pointing=pointing,
-    zodi=scene.zodi,
-)
+image = observe(key, scene, instrument, exposure)
 ```
 
 ## See also

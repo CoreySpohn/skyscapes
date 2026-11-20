@@ -7,7 +7,7 @@ from .amplitude import (
     surface_brightness_level,
     zero_magnitude_photon_flux_density,
 )
-from .ayo_exozodi import AYOExozodiDisk
+from .ayo_exozodi import AYOExozodi
 from .base import AbstractDisk
 from .composite import CompositeDisk
 from .exovista import ExovistaDisk
@@ -15,7 +15,7 @@ from .exovista_parametric import ExovistaParametricDisk
 from .grater import GraterDisk
 
 __all__ = [
-    "AYOExozodiDisk",
+    "AYOExozodi",
     "AbstractDisk",
     "CompositeDisk",
     "ExovistaDisk",
