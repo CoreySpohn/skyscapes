@@ -13,7 +13,6 @@ from hwoutils.conversions import um_to_nm
 from jax import Array
 from orbix.observatory import ecliptic_pointing
 from orbix.system import SkyFrame
-from zodi._interp import interp1d_clamped
 from zodi.tables import TABLE19_WAVELENGTH_UM
 from zodi.units import intensity_from_ab_mag_arcsec2, power_to_photon_intensity
 
@@ -144,8 +143,10 @@ class PrecomputedZodi(AbstractLocalZodi):
     ) -> Array:
         """Photon radiance per sr; the sightline is ignored, wavelength-shaped."""
         wave = jnp.asarray(wavelength_nm)
-        radiance = interp1d_clamped(
-            self.wavelengths_nm, self.radiance_phot_per_s_m2_nm_sr, wave
+        return jnp.interp(
+            wave,
+            self.wavelengths_nm,
+            self.radiance_phot_per_s_m2_nm_sr,
+            left=jnp.nan,
+            right=jnp.nan,
         )
-        supported = (wave >= self.wavelengths_nm[0]) & (wave <= self.wavelengths_nm[-1])
-        return jnp.where(supported, radiance, jnp.nan)
