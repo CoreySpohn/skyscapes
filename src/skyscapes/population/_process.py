@@ -476,7 +476,7 @@ class OccurrencePopulation(eqx.Module):
             - jnp.log(safe_m)
             - jnp.log(safe_e)
             + jnp.where(jnp.isfinite(ecc_logp), ecc_logp, 0.0)
-            - jnp.log(2 * (2 * jnp.pi) ** 3)
+            - jnp.log(2 * jnp.pi)
             + jnp.log(jnp.where(prob > 0, prob, 1.0))
         )
         return jnp.where(system.valid, jnp.where(support, logp, -jnp.inf), 0.0)
@@ -484,16 +484,17 @@ class OccurrencePopulation(eqx.Module):
     def mark_log_density(self, system, stars):
         """Log mark density, B + (K,), against dnu dMearth and type counting.
 
-        dnu is the reference measure of ClassicalChart.log_volume with its
-        documented omitted constant: unnormalized Haar times dex dey dln(a).
+        dnu is the reference measure of ClassicalChart.log_volume: normalized
+        Haar orientation measure times dex dey dln(a), no constant omitted.
         Write da=ln(a_hi/a_lo), dm=ln(m_hi/m_lo), de=1/p_e with p_e the
         eccentricity density, p_t=type prob.
         q(ln a,e,c,W,w,M,m,t) = (rate_cell/rate)*p_t/[da*dm*m*de*2*(2*pi)^3].
         For x=(ln a,logit e,atanh c,W,w,M), q_x=q*e*(1-e)*(1-c*c).
-        exp(ClassicalChart.log_volume(x))=e*e*(1-e)*(1-c*c).
-        Thus log p_nu=log q_x-log_volume=log q-log e, evaluated on the
+        exp(ClassicalChart.log_volume(x))=e*e*(1-e)*(1-c*c)/(8*pi^2), the
+        factor being the normalized Haar volume.
+        Thus log p_nu=log q_x-log_volume=log q-log e+log(8*pi^2), which the
+        code writes as the single term -log(2*pi). It is evaluated on the
         star-relative epoch orbit with mu=G*(system star mass + planet mass).
-        For normalized Haar instead, add log(8*pi*pi) to this log density.
 
         An isotropic midplane followed by an azimuthally uniform tilt has
         a rotation-invariant normal distribution; the unique invariant law

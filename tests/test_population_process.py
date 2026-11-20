@@ -601,3 +601,44 @@ def test_earth_like_flags(process, worlds):
     np.testing.assert_array_equal(flag, expected)
     assert flag.shape == valid.shape and flag.any() and not flag[~valid].any()
     assert (valid & ~flag).any()
+
+
+def test_mark_density_equals_orbit_law(process):
+    """Fails if the orientation measure of the mark density drifts from orbix.
+
+    On a one-cell, one-type table the mark density is the orbix orbit law
+    plus the log-uniform mass law; both sides share the reference measure, so
+    the only slack is float64 rounding in the orbit read-back.
+    """
+    from hwoutils.constants import Mearth2kg, Msun2kg
+    from orbix.system.laws import OrbitLaw
+
+    table = occurrence_table_from_grid([[0.7]], [0.5, 2.0], [0.5, 8.0], [[0]])
+    types = PlanetTypes(
+        names=("only",),
+        radius_min_Rearth=jnp.array([0.0]),
+        radius_max_Rearth=jnp.array([100.0]),
+        a_min_AU=jnp.array([0.0]),
+        a_max_AU=jnp.array([100.0]),
+        weight=jnp.array([1.0]),
+        earth_candidate=jnp.array([False]),
+        wavelength_nm=jnp.array([400.0, 800.0]),
+        albedo=jnp.array([[0.2, 0.3]]),
+    )
+    one = OccurrencePopulation(table, types, process.config, Epoch())
+    host = jax.tree.map(lambda x: x[:1], _hosts())
+    scene = eqx.filter_jit(one.mark_sample)(jax.random.key(3), 64, host)
+    mass = np.asarray(scene.dynamics.planets.mass_Msun) * Msun2kg / Mearth2kg
+    law = OrbitLaw(
+        eccentricity=priorities.Uniform(0.1, 0.4),
+        a_AU=priorities.LogUniform(0.5, 2.0),
+    )
+    expected = law.log_prob(scene.dynamics.orbits) + priorities.LogUniform(
+        0.5, 8.0
+    ).log_prob(mass)
+    density = eqx.filter_jit(one.mark_log_density)(scene, host)
+    valid = np.asarray(scene.valid)
+    assert valid.any()
+    np.testing.assert_allclose(
+        np.asarray(density)[valid], np.asarray(expected)[valid], atol=1e-10, rtol=0
+    )
