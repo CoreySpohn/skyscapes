@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.1.0](https://github.com/CoreySpohn/skyscapes/compare/v5.0.0...v5.1.0) (2026-11-20)
+
+
+### Miscellaneous Chores
+
+* release 5.1.0 ([703f790](https://github.com/CoreySpohn/skyscapes/commit/703f7903dd1e46fe59539436e21fe72fd7b5b88d))
+
 ## [5.0.0](https://github.com/CoreySpohn/skyscapes/compare/v4.1.0...v5.0.0) (2026-11-19)
 
 
