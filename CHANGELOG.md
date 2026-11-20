@@ -1,50 +1,54 @@
 # Changelog
 
-## Unreleased
+## [5.1.0](https://github.com/CoreySpohn/skyscapes/compare/v5.0.0...v5.1.0) (2026-11-20)
+
+
+### Miscellaneous Chores
+
+* release 5.1.0 ([703f790](https://github.com/CoreySpohn/skyscapes/commit/703f7903dd1e46fe59539436e21fe72fd7b5b88d))
+
+## [5.0.0](https://github.com/CoreySpohn/skyscapes/compare/v4.1.0...v5.0.0) (2026-11-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* declare disk radiance as a per-steradian density
+* declare spectral breaks on every scene model and read band contrasts from one quadrature
+* rename dist_AU to star_planet_distance_AU across physical models and scene
+* one reflected-light projection, public reflectivity(), star_planet_distance_AU keyword
+* put angular diameter on the stellar interface and query disk radiance at sky positions
+* read band transmissions, conversions and colours from hwoutils and eyepiece
+* Planck radiance and band centres come from hwoutils
+* local-zodi models come from zodi.jax and skyscapes.background is gone
+* one Lambert phase and reflected contrast, orbit mechanics from orbix, Legendre-only disk sightlines and no opacity alias
+* disks return a photon radiance image on a caller grid from a calibrated dust amplitude, in astronomical position angle
+* stars, planets and local zodi return photon quantities as functions of wavelength
+
+### Features
+
+* declare spectral breaks on every scene model and read band contrasts from one quadrature ([a024600](https://github.com/CoreySpohn/skyscapes/commit/a02460082c73eb8d5088b1e648b3ec68b8702e7d))
+* disks return a photon radiance image on a caller grid from a calibrated dust amplitude, in astronomical position angle ([07ef2a3](https://github.com/CoreySpohn/skyscapes/commit/07ef2a368ee6412918bf72f3c8893472e6d65676))
+* **population:** exoEarth-candidate flag for the planets of a scene ([ac988b1](https://github.com/CoreySpohn/skyscapes/commit/ac988b10b093b001ee1e62d9882373b2248835ee))
+* **population:** read a one-planet mark to coordinates and rebuild the system from them ([b5cd835](https://github.com/CoreySpohn/skyscapes/commit/b5cd8354441ebf7795607867aad12e85a1b2bd11))
+* put angular diameter on the stellar interface and query disk radiance at sky positions ([d9ba388](https://github.com/CoreySpohn/skyscapes/commit/d9ba388c42bf94f2742486d88ac2b005beec181a))
+* stars, planets and local zodi return photon quantities as functions of wavelength ([c55c3b1](https://github.com/CoreySpohn/skyscapes/commit/c55c3b1976d9720514ab2ffcacc6416b8bdb3f04))
+* **zodi:** declare the Table 19 colour breakpoints for band quadrature ([4c8b2ef](https://github.com/CoreySpohn/skyscapes/commit/4c8b2ef5573e6458f80e6f2a194b6f3f7813b888))
+
 
 ### Bug Fixes
 
-* **disk, viz:** Images follow the FITS display convention: +column west,
-  north up and east left with `origin="lower"`. Parametric disk images are
-  mirrored left-right compared with earlier releases. ExoVista cubes are
-  used as written, unchanged from 2.0.0. `plot_disk_image` no longer inverts
-  the x axis separately; its descending extent sets the orientation.
+* declare disk radiance as a per-steradian density ([141a067](https://github.com/CoreySpohn/skyscapes/commit/141a0678c94fb0c262a93f9295ee83989de51ad3))
+* **physical_model:** form the blackbody contrast from log occupation factors, which keeps the star-temperature gradient under jit ([4724737](https://github.com/CoreySpohn/skyscapes/commit/47247375d5e941a5a551a9a2c7000fd03e425d7c))
 
-* **io:** ExoVista scenes now match the true sky. In 2.0.0, planet RA offsets
-  were labelled east but were west-positive; their east offsets now change
-  sign. The cube was already used as written (+column west, east left), but
-  `plot_disk_image` inverted the x axis assuming +column east; its displayed
-  orientation now changes. `System.midplane_pa_deg` becomes (-PA) mod 360,
-  so parametric disks and outlines built from `System.midplane_*` match the
-  loaded image. Code placing planets with the old sign must be updated.
 
-* **io:** ExoVista planet states are now made star-relative before conversion
-  to orbital elements. Earlier releases used barycentric states, which biased
-  the elements of massive planets.
+### Code Refactoring
 
-* **io:** ExoVista planet positions and velocities are now converted from
-  ExoVista's (west, north, toward) axes to (east, north, away) at load
-  with the proper rotation (-x, y, -z). Earlier releases kept ExoVista's axes, so
-  loaded elements (Omega, i, omega) followed a different convention, though
-  the raw FITS state values round-tripped. Time-indexed contrast light
-  curves are preserved. Phase-indexed contrasts are regridded on the
-  star-relative phase, so they can differ slightly from earlier releases.
-
-* **scene:** `Planet.position_arcsec` now returns (Delta alpha*, Delta Dec) =
-  (east, north), where Delta alpha* = Delta RA cos Dec. `Planet.propagate`
-  returns orbix's (east, north, away) positions unchanged: right-handed,
-  z positive away and dz/dt positive receding, with the standard phase
-  cos(beta) = z/r. This requires orbix>=3.0.0. Earlier releases returned
-  raw orbix rows (north, east, away) re-labelled as east/north, swapping
-  sky axes for planets built from orbital elements;
-  ExoVista planets instead had west-positive offsets. In 1.6.1 and 2.0.0,
-  element-built planets also had inverted phases (crescent and gibbous exchanged), changing
-  `alpha_dMag`, `contrast` and `spec_flux_density`. ExoVista phase grids use
-  the same standard angle at construction and evaluation.
-
-* **viz:** Side views in `plot_system` and `plot_disk_geometry` place the
-  observer on the left at -z, with z labelled away from the observer. The
-  scattering diagram labels the illumination angle beta.
+* local-zodi models come from zodi.jax and skyscapes.background is gone ([9703858](https://github.com/CoreySpohn/skyscapes/commit/9703858047193884caa6b236bbf309611160287c))
+* one Lambert phase and reflected contrast, orbit mechanics from orbix, Legendre-only disk sightlines and no opacity alias ([823cf14](https://github.com/CoreySpohn/skyscapes/commit/823cf14f5db4ccb401992d37626a86b9c0553a00))
+* one reflected-light projection, public reflectivity(), star_planet_distance_AU keyword ([adb3fe7](https://github.com/CoreySpohn/skyscapes/commit/adb3fe742d6ea2abdb85e874671b5dfd790b5142))
+* Planck radiance and band centres come from hwoutils ([e590fe6](https://github.com/CoreySpohn/skyscapes/commit/e590fe621b62d415608892efe77b2faccd86f34c))
+* read band transmissions, conversions and colours from hwoutils and eyepiece ([aa1cddc](https://github.com/CoreySpohn/skyscapes/commit/aa1cddce7a5c38e5f16cd3a3d7e2a489a05d9f40))
+* rename dist_AU to star_planet_distance_AU across physical models and scene ([52cc018](https://github.com/CoreySpohn/skyscapes/commit/52cc018528bb5de0baa08307a63067762a74d847))
 
 ## [4.1.0](https://github.com/CoreySpohn/skyscapes/compare/v4.0.1...v4.1.0) (2026-11-16)
 
@@ -157,6 +161,50 @@
 * **skyscapes:** read x64 configuration through the public API ([adc5456](https://github.com/CoreySpohn/skyscapes/commit/adc54563531fd2f91b58b867393e54fffbda9130))
 * **skyscapes:** support single-epoch ExoVista phase models ([b42b230](https://github.com/CoreySpohn/skyscapes/commit/b42b2304277cafc4d54fcc5365ca8ea79f0d2f97))
 * **viz:** label the illumination angle beta and scope the changelog history claims ([3782e86](https://github.com/CoreySpohn/skyscapes/commit/3782e86451814838ae5a86e65d71db0e4617bc83))
+
+### Migration notes
+
+* **disk, viz:** Images follow the FITS display convention: +column west,
+  north up and east left with `origin="lower"`. Parametric disk images are
+  mirrored left-right compared with earlier releases. ExoVista cubes are
+  used as written, unchanged from 2.0.0. `plot_disk_image` no longer inverts
+  the x axis separately; its descending extent sets the orientation.
+
+* **io:** ExoVista scenes now match the true sky. In 2.0.0, planet RA offsets
+  were labelled east but were west-positive; their east offsets now change
+  sign. The cube was already used as written (+column west, east left), but
+  `plot_disk_image` inverted the x axis assuming +column east; its displayed
+  orientation now changes. `System.midplane_pa_deg` becomes (-PA) mod 360,
+  so parametric disks and outlines built from `System.midplane_*` match the
+  loaded image. Code placing planets with the old sign must be updated.
+
+* **io:** ExoVista planet states are now made star-relative before conversion
+  to orbital elements. Earlier releases used barycentric states, which biased
+  the elements of massive planets.
+
+* **io:** ExoVista planet positions and velocities are now converted from
+  ExoVista's (west, north, toward) axes to (east, north, away) at load
+  with the proper rotation (-x, y, -z). Earlier releases kept ExoVista's axes, so
+  loaded elements (Omega, i, omega) followed a different convention, though
+  the raw FITS state values round-tripped. Time-indexed contrast light
+  curves are preserved. Phase-indexed contrasts are regridded on the
+  star-relative phase, so they can differ slightly from earlier releases.
+
+* **scene:** `Planet.position_arcsec` now returns (Delta alpha*, Delta Dec) =
+  (east, north), where Delta alpha* = Delta RA cos Dec. `Planet.propagate`
+  returns orbix's (east, north, away) positions unchanged: right-handed,
+  z positive away and dz/dt positive receding, with the standard phase
+  cos(beta) = z/r. This requires orbix>=3.0.0. Earlier releases returned
+  raw orbix rows (north, east, away) re-labelled as east/north, swapping
+  sky axes for planets built from orbital elements;
+  ExoVista planets instead had west-positive offsets. In 1.6.1 and 2.0.0,
+  element-built planets also had inverted phases (crescent and gibbous exchanged), changing
+  `alpha_dMag`, `contrast` and `spec_flux_density`. ExoVista phase grids use
+  the same standard angle at construction and evaluation.
+
+* **viz:** Side views in `plot_system` and `plot_disk_geometry` place the
+  observer on the left at -z, with z labelled away from the observer. The
+  scattering diagram labels the illumination angle beta.
 
 ## [2.0.0](https://github.com/CoreySpohn/skyscapes/compare/v1.6.1...v2.0.0) (2026-10-13)
 

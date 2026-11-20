@@ -124,8 +124,7 @@ and `jax.vmap` over wavelength are supported.
 `flux_density_jy` is the observer's disk-integrated spectral flux
 density, shape `(n_wl, n_time)`. `Star` converts this table once to photon
 density at construction. `photon_flux_density` interpolates that photon table
-and returns photons/s/m^2/nm. It replaces `spec_flux_density` by a rename
-only, with the same unit; the old method is removed.
+and returns photons/s/m^2/nm.
 `spectral_breaks_nm()` exposes table breakpoints for every interpolation method.
 A Gauss-Legendre rule split at the knots integrates a linear photon table
 exactly, even at order one. Direct construction uses cubic interpolation by
@@ -339,9 +338,13 @@ A system overrides the parametric angles with its midplane angles. Stored
 cubes retain their native sky geometry. No detector handedness is implicit.
 
 ```python
+import jax.numpy as jnp
 from zodi import SurfaceBrightnessDust
 from optixstuff.grids import PixelGrid, SkyOrientation
 from skyscapes.disk import GraterDisk
+from skyscapes.scene import FlatStar
+
+star = FlatStar(flux_phot_per_nm_m2=1e9)
 
 disk = GraterDisk(
     sma_AU=1.0,
@@ -464,12 +467,19 @@ scene = Scene(
     star=star, planets=(planet,), dynamics=dynamics, disk=disk, local_zodi=zodi
 )
 
-# Downstream usage
-from coronagraphoto import system_readout
-from jaxedith import compute_etc  # hypothetical API
+# Downstream usage: a noisy coronagraph image
+from coronagraphoto import observe
 
-image = system_readout(scene, optical_path, key, ...)
-exposure_time_s = compute_etc(scene, optical_path, target_snr=7.0)
+image = observe(
+    key,
+    scene.system,
+    optical_path,
+    quadrature,
+    plan,
+    time_d=0.0,
+    pointing=pointing,
+    zodi=scene.zodi,
+)
 ```
 
 ## See also

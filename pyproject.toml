@@ -20,18 +20,18 @@ dependencies = [
     "astropy>=6.1",
     "equinox>=0.13.2",
     "exojax>=2.2",
-    "hwoutils[jax]>=1.15.0",
+    "hwoutils[jax]>=2.0.0",
     "interpax>=0.3.13",
     "jax>=0.8.1",
     "jaxlib>=0.8.1",
     "jaxtyping>=0.3.3",
     "numpy>=2.1.2",
-    "optixstuff>=5.0.0",
-    "orbix>=4.2.0",
+    "optixstuff>=6.1.0",
+    "orbix>=5.0.0",
     "pooch>=1.8",
     "priorities",
     "scipy>=1.13",
-    "zodi[jax]>=1.1.0",
+    "zodi[jax]>=2.0.0",
     # exojax -> radis 0.17 -> vaex-core. vaex-core 4.19 has Linux py3.12
     # wheels but requires pandas<3; without this pin uv falls back to
     # vaex-core 4.17.1, which ships no py3.12 wheel and fails to build
@@ -64,7 +64,7 @@ test = [
     "pytest-timeout>=1.3.1",
     "pytest-fail-slow>=0.1.0",
     "packaging>=24.2",
-    "orbix>=4.2.0",
+    "orbix>=5.0.0",
     "eyepiece>=0.4.0",
     "hwostyle>=1.4.0",
     "matplotlib>=3.11",
@@ -150,7 +150,9 @@ optional_dependencies_dev_groups = ["dev", "docs", "test"]
 [tool.deptry.per_rule_ignores]
 # JAX loads its compiled backend; keep the explicit minimum version constraint.
 # vaex-core is constrained for exojax's transitive dependency to have Python 3.12 wheels.
-DEP002 = ["jaxlib", "vaex-core"]
+# hwostyle is a user-facing floor in the viz extra: the docs examples and tests import it
+# to read brand colors, while skyscapes.viz reaches it only through eyepiece.
+DEP002 = ["hwostyle", "jaxlib", "vaex-core"]
 
 [tool.ty.environment]
 python-version = "3.11"

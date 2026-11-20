@@ -228,6 +228,7 @@ viz.plot_disk_geometry(
 )
 viz.plot_disk_radiance(
     system,
+    grid=grid,
     wavelength_nm=550.0,
     grain_radius_AU=3.0,
     show=("star", "outline"),
