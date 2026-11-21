@@ -494,6 +494,6 @@ def green_band_contrasts(system, time_d):
     return system.band_contrasts(rule, time_d, transmission=response)
 ```
 
-`skyscapes.io.bandpass_from_table(path)` also returns a `Transmission`.
+`skyscapes.io.transmission_from_table(path)` also returns a `Transmission`.
 Quadrature splits at the response and system spectral breaks. The result has
-shape `(bands, planets, times)`. Omit `bandpass` for a unit photon response.
+shape `(bands, planets, times)`. Omit `transmission` for a unit photon response.

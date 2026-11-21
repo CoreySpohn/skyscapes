@@ -1,4 +1,4 @@
-"""Local two-column photon-counting bandpass tables."""
+"""Local two-column photon-counting transmission tables."""
 
 from pathlib import Path
 
@@ -6,7 +6,7 @@ import numpy as np
 from optixstuff.spectral import Transmission
 
 
-def bandpass_from_table(path, *, wavelength_unit="nm") -> Transmission:
+def transmission_from_table(path, *, wavelength_unit="nm") -> Transmission:
     """Read wavelength and transmission columns from a local text file.
 
     Accept whitespace or comma separators and ``#`` comments. Wavelength
