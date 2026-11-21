@@ -24,18 +24,18 @@ elements; the header midplane mapping remains `(-PA) % 360`.
 ## What skyscapes is
 
 `skyscapes` provides the **scene representation** that downstream HWO
-simulation tools consume — a forward model that runs at variable
+simulation tools consume -- a forward model that runs at variable
 fidelity, from analytic sandbox models for fast iteration up to
 research-grade physics for retrievals. High-fidelity scene generators
 like [ExoVista](https://github.com/nasa/ExoVista) feed *into*
 skyscapes through loaders (`from_exovista`); skyscapes does not try to
 replace them.
 
-- A `Scene` is "everything on the sky that the telescope sees" — a
+- A `Scene` is "everything on the sky that the telescope sees" -- a
   star with planets, an optional disk (the exozodi) and optional local
   zodiacal light, held by one `Scene`.
 - Source models (`Star`, `Planet`, `Disk`, physical models, backgrounds)
-  are composable `eqx.Module`s — swap any one without touching the rest,
+  are composable `eqx.Module`s -- swap any one without touching the rest,
   or swap the whole class for a higher-fidelity variant.
 - Loaders bridge external simulation outputs (ExoVista FITS) into the
   workspace via `from_exovista(...)`.
@@ -81,24 +81,26 @@ flowchart LR
 A `Scene` holds a star, planets, an optional disk and an optional
 `AbstractLocalZodi` background:
 
-- **Stars** — `Star` (wavelength- and time-dependent spectrum, ExoVista-
+- **Stars** -- `Star` (wavelength- and time-dependent spectrum, ExoVista-
   backed) and `FlatStar` (constant-flux sandbox). Imported stars retain
   FITS metadata and optional `StarSpots` geometry and temperatures.
-- **Planets** — `Planet` owns radii (`Rp_Rearth`) and an
+- **Planets** -- `Planet` owns radii (`Rp_Rearth`) and an
   `AbstractPhysicalModel`; `Scene.dynamics` owns masses, orbital state,
   and observer distance.
-- **Physical models** — `LambertianPhysicalModel`,
+- **Physical models** -- `LambertianPhysicalModel`,
   `GridPhysicalModel` (wavelength/phase contrast tables),
   `TimeSeriesPhysicalModel` (wavelength/time-offset contrast tables),
   `PrecomputedPhysicalModel` (cached reflectivity for hot loops),
   `ExoJaxPhysicalModel` (full 2-stream RT via ExoJAX),
   `BlackbodyPhysicalModel` and `ExoJaxEmissionModel` (thermal emission),
   and `SumPhysicalModel` (additive radiative contributions).
-- **Disks** — `ExovistaDisk`, `ExovistaParametricDisk`, `GraterDisk`,
+- **Disks** -- `ExovistaDisk`, `ExovistaParametricDisk`, `GraterDisk`,
   `CompositeDisk`, `AYOExozodi` (the analytic AYO exozodi).
-- **Backgrounds** — `AYOZodi` (AYO-convention defaults), `LeinertZodi`
+- **Backgrounds** -- `AYOZodi` (AYO-convention defaults), `LeinertZodi`
   (full sightline-dependent Leinert+1998), `PrecomputedZodi` (cached
   flux array).
+- **Populations** -- `draw_population` and `OccurrencePopulation` draw planets
+  around a target list from occurrence rates.
 
 Every leaf is an `eqx.Module` PyTree, so JAX transforms (`jit`, `vmap`,
 `grad`) compose end-to-end.

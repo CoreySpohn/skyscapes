@@ -134,6 +134,10 @@ pip install skyscapes
 - [`from_phoenix`](how-to/phoenix_star) -- a `Star` from a PHOENIX model
   atmosphere by Teff and `logg`
 
+**Populations**:
+- [`skyscapes.population`](how-to/draw_a_population) -- `draw_population`,
+  `PopulationConfig`, `OccurrencePopulation`: planets drawn from occurrence rates
+
 **Habitable zone**:
 - [`skyscapes.habitable_zone`](how-to/habitable_zone) -- `eeid_AU`,
   `habitable_zone_AU`, `kopparapu_habitable_zone_AU`
@@ -165,6 +169,7 @@ explanation/scene_geometry
 :hidden:
 
 how-to/habitable_zone
+how-to/draw_a_population
 how-to/phoenix_star
 how-to/thermal_emission
 ```
