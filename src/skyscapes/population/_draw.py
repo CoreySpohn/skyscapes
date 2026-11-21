@@ -33,8 +33,7 @@ import jax.numpy as jnp
 import priorities
 from hwoutils.constants import AU2m, G, G_si, Mearth2kg, Msun2kg, d2s, deg2rad
 from orbix.equations.orbit import state_vector_to_keplerian
-from orbix.system import FrameOrbit, IsotropicInclination
-from orbix.system.rotation import from_axis_angle, rotate
+from orbix.system import FrameOrbit, IsotropicInclination, from_axis_angle, rotate
 
 from ..habitable_zone import HZ_INNER_EEID, HZ_OUTER_EEID
 from ._tables import mass_to_radius

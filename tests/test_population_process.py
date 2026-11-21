@@ -24,7 +24,7 @@ def _star_relative_a(s):
     from skyscapes.population._process import _relative_orbits
 
     r, v, mass = _relative_orbits(s)
-    from orbix.system.core import GM_SUN_AU3_PER_D2
+    from hwoutils.constants import GM_SUN_AU3_PER_D2
 
     mu = GM_SUN_AU3_PER_D2 * (s.star_mass_Msun + mass)
     return 1 / (2 / jnp.linalg.norm(r, axis=-1) - jnp.sum(v * v, axis=-1) / mu)
@@ -107,9 +107,8 @@ def test_mark_marginals_and_normalization(process, marks):
     uniform-classical-box importance estimate uses its measured 4-sigma
     standard error (not the sampler itself as a proposal).
     """
-    from hwoutils.constants import Mearth2kg, Msun2kg
+    from hwoutils.constants import GM_SUN_AU3_PER_D2, Mearth2kg, Msun2kg
     from orbix.system.charts import ClassicalChart
-    from orbix.system.core import GM_SUN_AU3_PER_D2
     from orbix.system.frame_orbit import FrameOrbit
     from scipy.stats import chi2
 
@@ -417,7 +416,7 @@ def test_structure_padding_and_compile(process, marks):
     assert np.all(np.diff(valid.astype(int), axis=-1) <= 0)
     a = np.asarray(scene.dynamics.orbits.a_AU)
     assert np.all(np.diff(a, axis=-1)[valid[..., 1:]] > 0)
-    from orbix.system.rotation import rotate
+    from orbix.system import rotate
 
     normal = np.asarray(rotate(scene.dynamics.orbits.quat, jnp.array([0.0, 0.0, 1.0])))
     dots = np.einsum("...ik,...jk->...ij", normal, normal)
@@ -441,7 +440,7 @@ def test_structure_padding_and_compile(process, marks):
     enclosed = scene.star_mass_Msun[..., None] + jnp.cumsum(
         scene.dynamics.planets.mass_Msun, axis=-1
     )
-    from orbix.system.core import GM_SUN_AU3_PER_D2
+    from hwoutils.constants import GM_SUN_AU3_PER_D2
 
     np.testing.assert_allclose(
         np.asarray(scene.dynamics.orbits.mu_AU3_per_d2)[valid],

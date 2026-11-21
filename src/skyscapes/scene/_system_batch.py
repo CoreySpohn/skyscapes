@@ -5,8 +5,8 @@ import dataclasses
 import equinox as eqx
 import jax
 import numpy as np
+from hwoutils.constants import GM_SUN_AU3_PER_D2
 from hwoutils.epoch import Epoch
-from orbix.system.core import GM_SUN_AU3_PER_D2
 
 from .planet import Planet
 

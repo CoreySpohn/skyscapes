@@ -6,11 +6,10 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import priorities
-from hwoutils.constants import Mearth2kg, Msun2kg
+from hwoutils.constants import GM_SUN_AU3_PER_D2, Mearth2kg, Msun2kg
 from hwoutils.epoch import Epoch
-from orbix.system import Body, SkyFrame
+from orbix.system import Body, SkyFrame, enclosed_mu, jacobi_to_barycentric
 from orbix.system import System as DynamicsSystem
-from orbix.system.core import GM_SUN_AU3_PER_D2, enclosed_mu, jacobi_to_barycentric
 from orbix.system.frame_orbit import FrameOrbit
 
 from ..physical_model import AbstractPhysicalModel, LambertianPhysicalModel
