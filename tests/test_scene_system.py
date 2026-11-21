@@ -277,9 +277,9 @@ def test_band_contrasts_resolves_planetary_break():
     point = Quadrature.monochromatic(530.0)
     np.testing.assert_array_equal(dark.band_contrasts(point, jnp.zeros(1)), 1.0)
     np.testing.assert_array_equal(
-        dark.band_contrasts(point, jnp.zeros(1), bandpass=lambda w: 0.3), 1.0
+        dark.band_contrasts(point, jnp.zeros(1), transmission=lambda w: 0.3), 1.0
     )
-    opaque = dark.band_contrasts(point, jnp.zeros(1), bandpass=lambda w: 0.0)
+    opaque = dark.band_contrasts(point, jnp.zeros(1), transmission=lambda w: 0.0)
     assert np.isnan(opaque).all()
 
 
@@ -520,7 +520,7 @@ def test_band_contrast_tophat_and_narrow_limits(tabulated):
     band = Band(4200.0, 5800.0)
     response = Transmission.from_band(band)
     rule = Quadrature.build([band], system, response)
-    actual = eqx.filter_jit(system.band_contrasts)(rule, times, bandpass=response)
+    actual = eqx.filter_jit(system.band_contrasts)(rule, times, transmission=response)
     expected = system.band_contrasts(rule, times)
     np.testing.assert_allclose(actual, expected, rtol=3e-14, atol=0)
     if not tabulated:
@@ -534,7 +534,7 @@ def test_band_contrast_tophat_and_narrow_limits(tabulated):
         system.dynamics,
     )
     np.testing.assert_allclose(
-        batched.band_contrasts(rule, times, bandpass=response),
+        batched.band_contrasts(rule, times, transmission=response),
         actual,
         rtol=3e-14,
         atol=0,
@@ -582,7 +582,7 @@ def test_band_contrast_triangle_and_temperature_gradient():
         varied = eqx.tree_at(
             lambda s: s.planets[0].physical_model.teff_K, system, jnp.array([teff])
         )
-        return varied.band_contrasts(rule, times, bandpass=band)[0, 0, 0]
+        return varied.band_contrasts(rule, times, transmission=band)[0, 0, 0]
 
     np.testing.assert_allclose(contrast(800.0), reference, rtol=2e-8, atol=0)
     fd = (contrast(800.008) - contrast(799.992)) / 0.016
@@ -609,7 +609,7 @@ def test_band_contrast_triangle_and_temperature_gradient():
             bounded,
             table_planet.contrast_grid * scale,
         )
-        return varied.band_contrasts(rule, times, bandpass=response)[0, 0, 0]
+        return varied.band_contrasts(rule, times, transmission=response)[0, 0, 0]
 
     read = eqx.filter_jit(jax.value_and_grad(bounded_contrast))
     on_support = read(1.0, narrow, band)

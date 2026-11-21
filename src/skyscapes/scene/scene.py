@@ -605,13 +605,13 @@ class Scene(eqx.Module):
         quadrature: Quadrature,
         time_d: Array,
         *,
-        bandpass: Callable | None = None,
+        transmission: Callable | None = None,
         ephemeris=None,
     ) -> Array:
         """Ratio of integrated planet and star photons, shape ``(W, K_total, T)``.
 
         Build the quadrature on the host with this system and any tabulated
-        bandpass. The optional photon-counting response is evaluated on all
+        transmission. The optional photon-counting response is evaluated on all
         ``(W, Q)`` wavelength nodes and must broadcast to that shape. Each
         finite-width band must transmit nonzero stellar flux. Spectra may be
         undefined where transmission is zero. A monochromatic channel returns
@@ -623,9 +623,9 @@ class Scene(eqx.Module):
         wave = quadrature.nodes_nm
         if len(quadrature.bands) == 1 and quadrature.bands[0].width_nm == 0:
             contrast = self.contrast_cube(wave[:, 0], time_d, ephemeris=eph)
-            if bandpass is None:
+            if transmission is None:
                 return contrast
-            response = jnp.broadcast_to(bandpass(wave), wave.shape)[0, 0]
+            response = jnp.broadcast_to(transmission(wave), wave.shape)[0, 0]
             return jnp.where(response > 0, contrast, jnp.nan)
 
         def densities(nodes):
@@ -637,8 +637,8 @@ class Scene(eqx.Module):
             )
             return planet, star
 
-        if bandpass is not None:
-            throughput = jnp.broadcast_to(bandpass(wave), wave.shape)
+        if transmission is not None:
+            throughput = jnp.broadcast_to(transmission(wave), wave.shape)
 
             def opaque_wings(nodes):
                 # Keep valid samples, including zeros of a fitted response:
@@ -663,7 +663,7 @@ class Scene(eqx.Module):
             throughput = jnp.where(masked, 0.0, throughput)
 
         planet, star = densities(wave)
-        if bandpass is not None:
+        if transmission is not None:
             planet = planet * throughput[..., None, None]
             star = star * throughput[..., None]
         return quadrature.integrate(planet) / quadrature.integrate(star)[:, None, :]

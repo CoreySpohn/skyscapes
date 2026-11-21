@@ -491,7 +491,7 @@ from optixstuff.spectral import Band, Quadrature, Transmission
 def green_band_contrasts(system, time_d):
     response = Transmission([500.0, 550.0, 600.0], [0.0, 1.0, 0.0])
     rule = Quadrature.build([Band(500.0, 600.0)], system, response)
-    return system.band_contrasts(rule, time_d, bandpass=response)
+    return system.band_contrasts(rule, time_d, transmission=response)
 ```
 
 `skyscapes.io.bandpass_from_table(path)` also returns a `Transmission`.
