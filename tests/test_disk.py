@@ -304,14 +304,6 @@ def test_exovista_disk_flux_shape():
     assert isinstance(disk, AbstractDisk)
 
 
-def test_point_disk_planet_centroid():
-    """No supported profile can represent a compact Gaussian clump."""
-    pytest.skip(
-        "Both profiles are star-centered axisymmetric annuli; neither supports "
-        "a compact Gaussian density/clump."
-    )
-
-
 def test_system_radiance_owns_midplane_override():
     """Fails if Scene ignores its angle or multiplies stellar flux a second time.
 
