@@ -119,7 +119,8 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
             log_ratio = _log_occupation(wavelength_nm, self.teff_K) - _log_occupation(
                 wavelength_nm, star.teff_K
             )
-            ratio = (area * jnp.exp(log_ratio))[:, None]
+            # The denominator is the star's scaled flux, so its scale divides.
+            ratio = (area * jnp.exp(log_ratio) / star.flux_scale)[:, None]
             return ratio * jnp.ones_like(phase_angle_rad)
         flux = self._photon_flux_density(
             wavelength_nm,

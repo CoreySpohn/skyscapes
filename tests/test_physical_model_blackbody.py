@@ -36,6 +36,35 @@ def _system(model, star=STAR, rp=15.7):
     )
 
 
+@pytest.mark.parametrize("kind", [BlackbodyStar, FlatStar])
+def test_star_flux_scale_divides_thermal_contrast_for_any_star(kind):
+    """Fails if a star's ``flux_scale`` is dropped from the thermal contrast.
+
+    The contrast is the planet's own flux over the star's scaled flux, so a
+    star scale of two halves it and the planet flux (contrast times the scaled
+    star flux) is unchanged, to rtol 1e-12, for every star model.
+    """
+    with jax.enable_x64(True):
+        wl, rp = jnp.asarray(10000.0), jnp.array([15.7])
+        model = BlackbodyPhysicalModel(teff_K=jnp.array([150.0]))
+        make = (
+            (lambda scale: BlackbodyStar(8840.0, 1.77 * Rsun2m, flux_scale=scale))
+            if kind is BlackbodyStar
+            else (lambda scale: FlatStar(3.0e-3, flux_scale=scale))
+        )
+        contrast, flux = {}, {}
+        for scale in (1.0, 2.0):
+            star = make(scale)
+            contrast[scale] = model.contrast_at_time(
+                *ARGS, wl, rp, time_d=T_D, star=star, dist_pc=107.5
+            )
+            flux[scale] = contrast[scale] * star.photon_flux_density(
+                wl, T_D, dist_pc=107.5
+            )
+        np.testing.assert_allclose(contrast[2.0], 0.5 * contrast[1.0], rtol=1e-12)
+        np.testing.assert_allclose(flux[2.0], flux[1.0], rtol=1e-12)
+
+
 @pytest.mark.parametrize(
     "temperature, wavelength", [(1560.0, 4400.0), (150.0, 10000.0), (100.0, 1650.0)]
 )
