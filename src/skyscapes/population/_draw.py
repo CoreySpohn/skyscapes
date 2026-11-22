@@ -77,7 +77,11 @@ class PopulationConfig(eqx.Module):
     max_stalled: int = eqx.field(static=True, default=50)
 
     def __check_init__(self):
-        """Refuse an inclination distribution whose support exceeds ``[0, pi]``."""
+        """Refuse an inclination distribution whose support exceeds ``[0, pi]``.
+
+        Returns:
+            None.
+        """
         if self.inclination_rad is None:
             return
         low, high = self.inclination_rad.support()
@@ -150,6 +154,14 @@ def earth_like(a_AU, radius_Rearth, luminosity_Lsun):
     ``[HZ_INNER_EEID, HZ_OUTER_EEID)``
     and the radius in ``[0.8 / sqrt(a_scaled), 1.4)`` Earth radii (Stark et al.
     2019, the same box the ExoVista planet-type table uses for exoEarth candidates).
+
+    Args:
+        a_AU: Semi-major axis [AU].
+        radius_Rearth: Planet radius [Earth radii].
+        luminosity_Lsun: Host luminosity [solar luminosities].
+
+    Returns:
+        Boolean flag, true for an exoEarth candidate, broadcast over the inputs.
     """
     a_scaled = a_AU / jnp.sqrt(luminosity_Lsun)
     lower_r = 0.8 / jnp.sqrt(a_scaled)
@@ -501,6 +513,11 @@ def sky_elements(population, star_mass_Msun):
     Args:
         population: One world's `PlanetPopulation`.
         star_mass_Msun: ``[n_stars]`` host masses in solar masses.
+
+    Returns:
+        A ``SkyElements`` with the semi-major axis [AU], eccentricity,
+        inclination, node, argument of periapsis and mean anomaly [rad] and
+        the period [d], each of shape ``[n_stars, max_planets]``.
     """
     present = population.present
     safe = lambda x, fill: jnp.where(present, x, fill)  # noqa: E731
@@ -539,6 +556,19 @@ def draw_populations(
     Equivalent to calling `draw_population` with ``n_worlds`` split keys; the
     leaves of the result gain a leading world axis. Use ``eqx.filter_jit`` on a
     wrapper for repeated calls with the same number of stars.
+
+    Args:
+        key: A JAX PRNG key.
+        n_worlds: Number of independent worlds.
+        occurrence: The `OccurrenceTable` to draw from.
+        types: The `PlanetTypes` that planets are assigned to.
+        luminosity_Lsun: ``[n_stars]`` host luminosities in solar units.
+        mass_Msun: ``[n_stars]`` host masses in solar masses.
+        config: A `PopulationConfig`; None uses the ExoVista generator's.
+
+    Returns:
+        A `PlanetPopulation` whose leaves have shape
+        ``[n_worlds, n_stars, config.max_planets]``.
     """
     keys = jax.random.split(key, n_worlds)
     return jax.lax.map(

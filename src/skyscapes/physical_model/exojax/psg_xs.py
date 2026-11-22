@@ -118,7 +118,7 @@ class PsgCrossSectionOpacity:
     For files with a single temperature column the cross-section is
     returned independent of layer temperature.
 
-    Attributes:
+    Instance attributes:
         name: Molecule name (e.g. ``"O3"``, ``"SO2"``).
         molmass: Molar mass [g/mol]. Caller supplies; used by
             ``opacity_profile_xs`` to convert mmr to column density.

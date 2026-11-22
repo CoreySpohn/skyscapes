@@ -109,6 +109,8 @@ def plot_disk_radiance(
         disk_or_image: A ``Scene`` (its disk, midplane
             orientation and distance are used), an ``AbstractDisk``, or a
             bare ``(ny, nx)`` photon radiance map.
+        grid: Arcsec PixelGrid with SkyOrientation, required for rendering.
+        star: Host star; a system supplies it.
         wavelength_nm: Wavelength to render at [nm]. Required for a disk.
         time_d: Time to render at, in days from the scene epoch.
         incl_deg: Midplane inclination [deg], in ``[0, 180]``. Defaults to
@@ -116,8 +118,6 @@ def plot_disk_radiance(
             (outline only). ``i`` and ``180 - i`` at ``pa + 180`` are the
             same midplane and render the same map.
         position_angle_deg: Major-axis angle north through east [deg].
-        grid: Arcsec PixelGrid with SkyOrientation, required for rendering.
-        star: Host star; a system supplies it.
         pixel_scale_arcsec: Sampling for a bare north-up radiance array.
         dist_pc: Distance [pc], used to place the AU outlines. Read from
             the system; required for a bare parametric disk.
@@ -282,7 +282,12 @@ def plot_disk_radiance(
     artists["scatter"] = scatters
 
     def place(incl_now, pa_now):
-        """Move the outlines and the sightline marker to an orientation."""
+        """Move the outlines and the sightline marker to an orientation.
+
+        Args:
+            incl_now: Midplane inclination [deg].
+            pa_now: Midplane position angle [deg].
+        """
         if rings:
             for line, radius in zip(rings, radii, strict=True):
                 ring = _geometry.ring_sky(radius, incl_now, pa_now)
@@ -302,7 +307,20 @@ def plot_disk_radiance(
     hide({"star": [star], "outline": rings, "sightline": [marker]}, shown)
 
     def update(new_image, incl_deg=None, position_angle_deg=None):
-        """Show a new image; move the outlines when angles are given."""
+        """Show a new image; move the outlines when angles are given.
+
+        Args:
+            new_image: New map, an ``(ny, nx)`` photon radiance array or an
+                ``Image`` that is resampled onto the first draw's display
+                grid.
+            incl_deg: New midplane inclination [deg]; None keeps the
+                current one.
+            position_angle_deg: New major-axis angle [deg]; None keeps the
+                current one.
+
+        Returns:
+            None.
+        """
         if isinstance(new_image, Image):
             target = (
                 display
@@ -346,6 +364,23 @@ class _GeometryPanel:
         observer_text="to observer",
         inset_values="corner",
     ):
+        """Create the panel's artists; place them with ``place``.
+
+        Args:
+            ax: The axes to draw on.
+            radii: ``(r_in, r_out)`` truncation radii [AU].
+            pa: Midplane position angle [deg].
+            grain_radius: Disk-frame radius of the grain [AU]; negative
+                for the far half.
+            thickness: Full thickness of the dust layer [AU], or None for
+                no layer.
+            labels: Whether to draw the text labels.
+            inset: ``(x0, y0, width, height)`` of the grain inset in axes
+                coordinates, or None for no inset.
+            observer_text: Text of the observer label.
+            inset_values: Where the inset prints its angle values; see
+                ``ScatteringAngle``.
+        """
         self.ax = ax
         self.radii = radii
         self.pa = pa
@@ -452,6 +487,12 @@ class _GeometryPanel:
 
         The sightline's chord through the layer belongs to both
         ``sightline`` and ``layer``: it is drawn only when both are.
+
+        Args:
+            shown: The set of part names that are shown.
+
+        Returns:
+            Dict from part name to a list of artists (entries may be None).
         """
         parts = {
             "star": [self.star],
@@ -475,12 +516,25 @@ class _GeometryPanel:
         return parts
 
     def side(self, points):
-        """Side-view ``(z, u)`` pairs of sky-frame points."""
+        """Side-view ``(z, u)`` pairs of sky-frame points.
+
+        Args:
+            points: Sky-frame ``(east, north, away)`` points [AU], shape
+                ``(..., 3)``.
+
+        Returns:
+            Array of shape ``(..., 2)`` with ``z`` (away from the observer)
+            and ``u`` (along the projected minor axis), in AU.
+        """
         z, u = _geometry.to_side(points, self.minor)
         return np.stack([z, u], axis=-1)
 
     def place(self, incl):
-        """Put every inclination-dependent artist where ``incl`` puts it."""
+        """Put every inclination-dependent artist where ``incl`` puts it.
+
+        Args:
+            incl: Midplane inclination [deg].
+        """
         r_in, r_out = self.radii
         R = self.big
         _, near, normal = _geometry.disk_axes_sky(incl, self.pa)
@@ -539,7 +593,12 @@ class _GeometryPanel:
             self.inset.set(k_in, np.array([-1.0, 0.0]))
 
     def artists(self):
-        """The panel's artists, grouped by artist-vocabulary key."""
+        """The panel's artists, grouped by artist-vocabulary key.
+
+        Returns:
+            Dict with keys ``"scatter"``, ``"lines"``, ``"text"`` and, when a
+            layer is drawn, ``"fill"``, each a list of artists.
+        """
         lines = [self.plane, self.near, self.far, self.sightline, self.forward]
         lines += [self.theta.line, self.incl_arc.line]
         if self.path is not None:
@@ -724,7 +783,11 @@ def plot_disk_geometry(
     )
 
     def update(incl_deg):
-        """Move the midplane, sightline, rays and arcs to ``incl_deg``."""
+        """Move the midplane, sightline, rays and arcs to ``incl_deg``.
+
+        Args:
+            incl_deg: Midplane inclination [deg], in ``[0, 180]``.
+        """
         _check_incl(incl_deg)
         panel.place(float(incl_deg))
 

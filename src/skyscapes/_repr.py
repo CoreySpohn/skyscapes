@@ -18,6 +18,13 @@ def indent(text: str, prefix: str = "  ") -> str:
 
     Used by aggregator-class reprs (``Scene``, ``Planet``)
     to nest the child reprs one level deeper.
+
+    Args:
+        text: Possibly multi-line text.
+        prefix: String put at the start of every line.
+
+    Returns:
+        ``text`` with ``prefix`` prepended to each line.
     """
     return "\n".join(prefix + line for line in text.split("\n"))
 
@@ -28,6 +35,16 @@ def fmt_scalar_or_array(x: Array, fmt: str = ".3g", max_items: int = 3) -> str:
     For a scalar (shape () or (1,)): formats as ``"3.14"``.
     For a short array: formats as ``"[3.14, 2.72, 1.41]"``.
     For a long array: formats as ``"[3.14, 2.72, ... (N=20)]"``.
+
+    Args:
+        x: Scalar or array to format; an array is read as a flat
+            sequence of floats.
+        fmt: Format specification applied to each element.
+        max_items: Largest array size printed in full; longer arrays show
+            this many leading elements and the total count.
+
+    Returns:
+        The formatted string.
     """
     a = jnp.asarray(x)
     if a.shape == () or a.shape == (1,):

@@ -15,7 +15,11 @@ from .base import AbstractDisk, check_sky_grid
 
 
 class _Knots:
-    """Hashable, immutable wavelength knots, so they can be a static field."""
+    """Hashable, immutable wavelength knots, so they can be a static field.
+
+    Args:
+        values: Wavelength knot values [nm]; stored as a read-only 1-D float array.
+    """
 
     __slots__ = ("_hash", "values")
 
@@ -72,6 +76,13 @@ class ExovistaDisk(AbstractDisk):
     knots are static), applied to the cube on each call, so ``eqx.tree_at`` on
     ``contrast_cube`` reaches the image. The wavelength knots are a static
     grid, not a parameter, and must be concrete when the disk is built.
+
+    Attributes:
+        native_grid: Sky grid of the stored cube, in arcsec with a
+            ``SkyOrientation``. Static.
+        contrast_cube: Host-relative contrast of each pixel (pixel flux over host
+            flux, dimensionless), shape ``(n_wave, ny, nx)``.
+        flux_scale: Dimensionless scalar factor on the radiance, default one.
     """
 
     native_grid: PixelGrid = eqx.field(static=True)
@@ -80,7 +91,16 @@ class ExovistaDisk(AbstractDisk):
     flux_scale: Array
 
     def __init__(self, native_grid, wavelengths_nm, contrast_cube, flux_scale=1.0):
-        """Store the native geometry, the static knots and the cube."""
+        """Store the native geometry, the static knots and the cube.
+
+        Args:
+            native_grid: Sky grid of the stored cube, in arcsec with a
+                ``SkyOrientation``.
+            wavelengths_nm: 1-D wavelength knots of the cube [nm]; must be concrete.
+            contrast_cube: Host-relative contrast of each pixel (dimensionless), shape
+                ``(len(wavelengths_nm), ny, nx)``.
+            flux_scale: Dimensionless scalar factor on the radiance; default one.
+        """
         self.flux_scale = jnp.asarray(flux_scale)
         self.native_grid = native_grid
         self._knots_nm = _Knots(wavelengths_nm)
@@ -92,7 +112,11 @@ class ExovistaDisk(AbstractDisk):
         return self._knots_nm.values
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Wavelength breaks of the stored contrast cube [nm]."""
+        """Wavelength breaks of the stored contrast cube [nm].
+
+        Returns:
+            1-D array of the wavelength knots of the stored cube [nm].
+        """
         return self.wavelengths_nm
 
     def __check_init__(self):

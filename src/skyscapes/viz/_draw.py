@@ -23,6 +23,13 @@ def halo(text):
     contrasts more with the text color, because the image, not the axes
     background, is what the label sits on. Otherwise the outline takes the
     facecolor of the axes the text belongs to.
+
+    Args:
+        text: The matplotlib ``Text`` to outline; its path effects are
+            replaced.
+
+    Returns:
+        The same ``Text`` object, with the outline applied.
     """
     from matplotlib import patheffects
     from matplotlib.colors import to_rgb
@@ -48,7 +55,17 @@ class Arrow:
     """A straight arrow from ``start`` to ``end`` (an ``Annotation``)."""
 
     def __init__(self, ax, start, end, *, color, gid, lw=1.4, label=None):
-        """Draw the arrow, optionally with a text label at its head."""
+        """Draw the arrow from ``start`` to ``end``.
+
+        Args:
+            ax: The axes to draw on.
+            start: ``(x, y)`` of the tail, in data coordinates.
+            end: ``(x, y)`` of the head, in data coordinates.
+            color: Matplotlib color of the arrow.
+            gid: Group id set on the artist, used to find it later.
+            lw: Line width in points.
+            label: Accepted but not used; the arrow carries no text.
+        """
         self.artist = ax.annotate(
             "",
             xy=tuple(end),
@@ -66,7 +83,12 @@ class Arrow:
         self.artist.set_gid(gid)
 
     def set(self, start, end):
-        """Move the arrow."""
+        """Move the arrow.
+
+        Args:
+            start: ``(x, y)`` of the new tail, in data coordinates.
+            end: ``(x, y)`` of the new head, in data coordinates.
+        """
         self.artist.xy = tuple(end)
         self.artist.set_position(tuple(start))
 
@@ -80,7 +102,15 @@ class AngleArc:
     """The shorter arc between two directions, with a label at its middle."""
 
     def __init__(self, ax, *, color, gid, lw=1.1, fontsize=None):
-        """Create the (empty) arc and label; place them with ``set``."""
+        """Create the (empty) arc and label; place them with ``set``.
+
+        Args:
+            ax: The axes to draw on.
+            color: Matplotlib color of the arc and its label.
+            gid: Group id of the arc line; the label takes ``gid + "/label"``.
+            lw: Arc line width in points.
+            fontsize: Label font size; None uses the matplotlib default.
+        """
         (self.line,) = ax.plot([], [], color=color, lw=lw, solid_capstyle="round")
         self.line.set_gid(gid)
         self.text = ax.text(
@@ -114,6 +144,20 @@ class AngleArc:
         along the arc's middle direction, or along ``label_dir`` when the
         middle is crowded. With ``outward`` it is aligned so it grows away
         from ``center``; otherwise its alignment is left as it is.
+
+        Args:
+            center: ``(x, y)`` of the arc center, in data coordinates.
+            v_from: 2D direction the arc starts from; need not be unit.
+            v_to: 2D direction the arc ends at; need not be unit.
+            radius: Arc radius in data units.
+            label: Text of the arc label.
+            label_scale: Label distance from ``center`` as a multiple of
+                ``radius``, used when ``label_distance`` is None.
+            label_dir: Optional 2D direction to place the label along
+                instead of the arc's middle direction.
+            label_distance: Label distance from ``center`` in data units;
+                overrides ``label_scale`` when given.
+            outward: Align the label to grow away from ``center``.
         """
         a0 = np.arctan2(v_from[1], v_from[0])
         sweep = _wrap(np.arctan2(v_to[1], v_to[0]) - a0)
@@ -140,7 +184,15 @@ class AngleArc:
 
 
 def unit(v):
-    """``v`` scaled to unit length."""
+    """``v`` scaled to unit length.
+
+    Args:
+        v: A nonzero vector of any length.
+
+    Returns:
+        ``v`` divided by its Euclidean norm, as a float array of the same
+        shape.
+    """
     v = np.asarray(v, dtype=float)
     return v / np.linalg.norm(v)
 
@@ -179,6 +231,11 @@ def hide(artists_by_part, shown):
 
     A hidden artist is still created and still moved by ``update``; a
     caller can reveal it later with ``set_visible(True)``.
+
+    Args:
+        artists_by_part: Mapping from part name to a sequence of artists
+            (entries may be None).
+        shown: The part names to leave visible.
     """
     for part, artists in artists_by_part.items():
         if part not in shown:
@@ -243,7 +300,30 @@ class ScatteringAngle:
         theta_radius=THETA_RADIUS,
         alpha_radius=ALPHA_RADIUS,
     ):
-        """Create the (unplaced) artists; place them with ``set``."""
+        """Create the (unplaced) artists; place them with ``set``.
+
+        Args:
+            ax: The axes to draw on; the drawing uses its own unit
+                coordinates.
+            grain_color: Matplotlib color of the grain and the scattered
+                ray.
+            gid_prefix: Prefix of every artist's group id, joined with
+                ``/``; empty for none.
+            value_size: Font size of the corner value texts.
+            star: Also draw a star glyph beyond the incident ray.
+            observer: Also draw an observer glyph beyond the scattered ray.
+            labels: Also draw text labels on the three rays.
+            values: Where the two angle values are printed: ``"corner"``,
+                ``"arcs"`` or None.
+            theta_radius: Radius of the scattering-angle arc, in units of
+                the ray length.
+            alpha_radius: Radius of the illumination-angle arc, in units
+                of the ray length.
+
+        Raises:
+            ValueError: If ``values`` is not one of the allowed places or
+                an arc radius is not positive.
+        """
         if values not in VALUE_PLACES:
             raise ValueError(f"values must be one of {VALUE_PLACES}, got {values!r}")
         for name, radius in (("theta", theta_radius), ("alpha", alpha_radius)):
@@ -321,6 +401,10 @@ class ScatteringAngle:
         """Draw the grain for incident direction ``k_in`` and outgoing ``k_out``.
 
         Both are 2D directions in the drawing's plane; they need not be unit.
+
+        Args:
+            k_in: 2D incident direction (star to grain).
+            k_out: 2D outgoing direction (grain to observer).
         """
         k_in = unit(k_in)
         k_out = unit(k_out)
@@ -372,7 +456,12 @@ class ScatteringAngle:
                 label.set_va(va)
 
     def artists(self):
-        """Every artist the drawing owns, grouped by artist-vocabulary key."""
+        """Every artist the drawing owns, grouped by artist-vocabulary key.
+
+        Returns:
+            Dict with keys ``"text"``, ``"lines"`` and ``"scatter"``, each a
+            list of artists.
+        """
         text = [
             self.incident.artist,
             self.outgoing.artist,
@@ -395,7 +484,18 @@ class GrainInset:
     """A ``ScatteringAngle`` drawing on a framed inset axes of a view."""
 
     def __init__(self, ax, bounds, *, grain_color, gid_prefix="inset", values="corner"):
-        """Create the inset axes and its drawing; place it with ``set``."""
+        """Create the inset axes and its drawing; place it with ``set``.
+
+        Args:
+            ax: The parent axes that holds the inset.
+            bounds: ``(x0, y0, width, height)`` of the inset in the parent's
+                axes coordinates.
+            grain_color: Matplotlib color of the grain and scattered ray.
+            gid_prefix: Group id of the inset axes and prefix of its
+                artists' ids.
+            values: Where the angle values are printed; see
+                ``ScatteringAngle``.
+        """
         self.ax = ax.inset_axes(bounds)
         self.ax.set_gid(gid_prefix)
         inset = self.ax
@@ -412,11 +512,21 @@ class GrainInset:
         )
 
     def set(self, k_in, k_out):
-        """Draw the grain for 2D incident ``k_in`` and outgoing ``k_out``."""
+        """Draw the grain for 2D incident ``k_in`` and outgoing ``k_out``.
+
+        Args:
+            k_in: 2D incident direction (star to grain).
+            k_out: 2D outgoing direction (grain to observer).
+        """
         self.drawing.set(k_in, k_out)
 
     def artists(self):
-        """Every artist the inset owns, grouped by artist-vocabulary key."""
+        """Every artist the inset owns, grouped by artist-vocabulary key.
+
+        Returns:
+            Dict with keys ``"text"``, ``"lines"`` and ``"scatter"``; see
+            ``ScatteringAngle.artists``.
+        """
         return self.drawing.artists()
 
 

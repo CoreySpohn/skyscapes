@@ -34,7 +34,11 @@ class AbstractPhysicalModel(eqx.Module):
     """
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Analytic spectra declare no integration breaks; tabulated ones override."""
+        """Analytic spectra declare no integration breaks; tabulated ones override.
+
+        Returns:
+            Empty 1-D array of wavelength breaks [nm]; tabulated models override it.
+        """
         return np.empty(0)
 
     def photon_flux_density(
@@ -56,6 +60,19 @@ class AbstractPhysicalModel(eqx.Module):
         Each wavelength returns stellar photon density times model contrast.
         Thermal kernels evaluate that product directly to retain dynamic range.
         No integration or band width enters this method.
+
+        Args:
+            wavelength_nm: Wavelengths [nm], any shape.
+            time_d: Observation times in days from the scene epoch, shape ``(T,)``.
+            phase_angle_rad: Star-planet-observer phase angle [rad], shape ``(K, T)``.
+            star_planet_distance_AU: Star-planet distance [AU], shape ``(K, T)``.
+            Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
+            star: Host ``AbstractStar``, providing the stellar photon flux.
+            dist_pc: Distance of the system from the observer [pc].
+
+        Returns:
+            Photon flux density at the observer [ph s^-1 m^-2 nm^-1], shape
+            ``(K, T) + wavelength_nm.shape``.
         """
         wave = jnp.asarray(wavelength_nm)
 
@@ -162,8 +179,8 @@ class AbstractPhysicalModel(eqx.Module):
             wavelength_nm: Scalar wavelength [nm], as accepted by ``contrast``.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
             time_d: Observation times in days from the scene epoch, shape ``(T,)``.
-            dist_pc: Observer distance supplied by the system [pc].
             star: The host ``AbstractStar``; ``Scene`` always supplies it.
+            dist_pc: Observer distance supplied by the system [pc].
 
         Returns:
             Planet-to-star flux ratio, shape ``(K, T)``.

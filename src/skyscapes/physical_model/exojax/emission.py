@@ -103,7 +103,15 @@ def _top_of_atmosphere_flux(
 
 
 def log_gravity_cgs_from_mass_radius(mass_Mearth: Array, radius_Rearth: Array) -> Array:
-    """Log10 surface gravity [cm/s^2] from mass and radius in Earth units."""
+    """Log10 surface gravity [cm/s^2] from mass and radius in Earth units.
+
+    Args:
+        mass_Mearth: Planet mass [Earth masses].
+        radius_Rearth: Planet radius [Earth radii].
+
+    Returns:
+        Log10 of the surface gravity in cm/s^2, same shape as the inputs.
+    """
     g_si = G_si * mass_Mearth * Mearth2kg / (radius_Rearth * Rearth2m) ** 2
     return jnp.log10(g_si * (const.nm2cm / const.nm2m))
 
@@ -264,6 +272,10 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
 
         Gauss nodes cannot resolve absorption lines between breaks, so a band
         integral samples every native grid point. Cost scales with the grid.
+
+        Returns:
+            Ascending wavelengths [nm] of the native grid points, shape
+            ``(n_nu,)``.
         """
         return np.sort(np.asarray(wavenumber_cm_to_nm(np.asarray(self.nu_grid))))
 
@@ -332,6 +344,10 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
                 CIA: MMR-to-VMR conversion and hydrostatic layer thickness.
                 The default 28.97 is appropriate for air; set it explicitly
                 for other bulk compositions.
+
+        Returns:
+            An :class:`ExoJaxEmissionModel` with ``K`` planets, where ``K`` is
+            the leading length of ``log_gravity_cgs``.
         """
         if molecules is None:
             molecules = tuple(log_mmrs.keys())
@@ -401,6 +417,30 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         partners. Modeled species use their live MMR profiles instead.
         ``mean_molecular_weight`` [u] defaults to air (28.97); it sets CIA
         layer thickness and converts modeled MMRs to VMRs.
+
+        Args:
+            engines: Dict returned by :func:`build_exojax_emission_engines`.
+            species: Species of the atmosphere, each holding its opacity
+                engine and mass-mixing-ratio profile.
+            temperature_coefficients: Polynomial T-P coefficients
+                ``a_0 ... a_n`` [K] in ``log10 P[bar]``, shape ``(K, n + 1)``
+                (a 1-D input is treated as one planet).
+            log_gravity_cgs: Log10 surface gravity [cm/s^2], shape ``(K,)``.
+            surface_temperature_K: Ground temperature [K], shape ``(K,)``.
+                Defaults to the T-P profile evaluated at the surface pressure.
+            surface_emissivity: Ground emissivity, shape ``(K,)``. Defaults
+                to 1.
+            surface_emissivity_spectrum: Emissivity shape on the wavenumber
+                grid, shape ``(n_nu,)``. Defaults to flat ones.
+            surface_pressure_bar: Surface pressure [bar] used to evaluate the
+                default ground temperature. Defaults to the value stored in
+                ``engines``.
+            cia_vmr: Constant volume fractions for CIA partners absent from
+                ``species``. Defaults to none.
+            mean_molecular_weight: Mean atmospheric molecular mass [u].
+
+        Returns:
+            An :class:`ExoJaxEmissionModel` with ``K`` planets.
         """
         cia = engines.get("cia_prebuilt", ())
         cia_vmr = {} if cia_vmr is None else cia_vmr
@@ -481,7 +521,14 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         return dtau
 
     def layer_temperature(self, k: int = 0) -> Array:
-        """Layer temperatures [K] of planet ``k``, shape ``(n_layers,)``."""
+        """Layer temperatures [K] of planet ``k``, shape ``(n_layers,)``.
+
+        Args:
+            k: Planet index along the ``K`` axis.
+
+        Returns:
+            Layer temperatures [K], shape ``(n_layers,)``.
+        """
         return self.tp_profile.compute_Tarr(
             self.rt_engine, self.tp_profile.coefficients[k]
         )
@@ -523,12 +570,20 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
 
         Units are erg/s/cm^2/cm^-1 per unit planet surface area, on
         ``nu_grid``. A blackbody at ``T`` gives ``pi B_nu(T)``.
+
+        Returns:
+            Emergent flux [erg/s/cm^2/cm^-1], shape ``(K, n_nu)``.
         """
         K = int(self.log_gravity_cgs.shape[0])
         return jnp.stack([self._emergent_flux_one_planet(k) for k in range(K)])
 
     def brightness_temperature(self) -> Array:
-        """Brightness temperature [K] on ``nu_grid``, shape ``(K, n_nu)``."""
+        """Brightness temperature [K] on ``nu_grid``, shape ``(K, n_nu)``.
+
+        Returns:
+            Brightness temperature [K] of the emergent flux, shape
+            ``(K, n_nu)``.
+        """
         wavelength_nm = wavenumber_cm_to_nm(self.nu_grid)
         radiance_w = cgs_per_wavenumber_to_w_per_nm_per_m2(
             self.emergent_flux() / jnp.pi, wavelength_nm
@@ -555,6 +610,10 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
             wavelength_nm: Wavelengths [nm], shape ``(W,)``.
             Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
             distance_pc: Distance to the system [pc], scalar or ``(K,)``.
+
+        Returns:
+            Flux density at the observer [Jy], shape ``(W, K)``; NaN outside
+            the spectral grid.
         """
         flux = self.emergent_flux()
         target_nu = nm_to_wavenumber_cm(jnp.atleast_1d(wavelength_nm))
@@ -604,7 +663,19 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         wavelength_nm: Array,
         Rp_Rearth: Array,
     ) -> Array:
-        """Require the host star to normalize thermal emission."""
+        """Require the host star to normalize thermal emission.
+
+        Args:
+            phase_angle_rad: Phase angle [rad], shape ``(K, T)``; unused.
+            star_planet_distance_AU: Star-planet distance [AU], shape
+                ``(K, T)``; unused.
+            wavelength_nm: Scalar wavelength [nm]; unused.
+            Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``; unused.
+
+        Returns:
+            Nothing; always raises ``ValueError`` and directs the caller to
+            :meth:`contrast_at_time`.
+        """
         raise ValueError(
             "Use contrast_at_time(..., time_d=..., star=...) for thermal emission"
         )
@@ -623,6 +694,24 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         """Thermal photon flux over stellar flux, shape ``(K, T)``.
 
         ``time_d`` is days from the scene epoch.
+
+        Args:
+            phase_angle_rad: Phase angle [rad], shape ``(K, T)``; used only
+                for the output shape because thermal emission is phase
+                independent.
+            star_planet_distance_AU: Star-planet distance [AU], shape
+                ``(K, T)``.
+            wavelength_nm: Scalar wavelength [nm].
+            Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
+            time_d: Observation times in days from the scene epoch, shape
+                ``(T,)``.
+            star: Host star supplying the stellar photon flux density;
+                required.
+            dist_pc: Observer distance [pc]. ``None`` lets the star supply its
+                own distance.
+
+        Returns:
+            Planet-to-star photon flux ratio, shape ``(K, T)``.
         """
         if star is None:
             raise ValueError("ExoJaxEmissionModel needs the host star")
@@ -638,7 +727,11 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         return flux / star.photon_flux_density(wavelength_nm, time_d, dist_pc=dist_pc)
 
     def __repr__(self) -> str:
-        """One-line summary of species, grid and planet count."""
+        """One-line summary of species, grid and planet count.
+
+        Returns:
+            Summary string.
+        """
         species_label = ", ".join(s.name for s in self.species)
         return (
             f"ExoJaxEmissionModel(K={int(self.log_gravity_cgs.shape[0])}, "

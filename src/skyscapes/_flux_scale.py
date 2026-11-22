@@ -14,6 +14,12 @@ def check_flux_scale(scale) -> None:
 
     Positivity is not required: a detection test profiles a signed amplitude.
     A fit that must keep a scale positive gives it a positive law.
+
+    Args:
+        scale: The dimensionless ``flux_scale`` leaf, scalar or array.
+
+    Raises:
+        ValueError: If a concrete ``scale`` has a non-finite entry.
     """
     if isinstance(scale, jax.core.Tracer):
         return

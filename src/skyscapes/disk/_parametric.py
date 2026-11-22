@@ -19,6 +19,18 @@ class AbstractParametricDisk(AbstractDisk):
 
     The declared unit profile is extinction per AU. zero_point_jy optionally
     overrides the calibration passband's monochromatic flux zero point.
+
+    Attributes:
+        profile_id: Class-level identifier of the profile family; a
+            ``DensityDust`` amplitude must carry the same identifier.
+        wavelengths_nm: 1-D wavelength grid of the tabulated scattering
+            parameters [nm].
+        amplitude: Typed density or calibrated surface-brightness amplitude.
+        inclination_deg: Inclination of the disk plane [deg]; zero is face-on.
+        position_angle_deg: Position angle of the major axis, north through east
+            [deg].
+        zero_point_jy: Optional monochromatic flux zero point of the calibration
+            passband [Jy]. ``None`` uses the passband default. Static.
     """
 
     profile_id: eqx.AbstractClassVar[str]
@@ -29,7 +41,11 @@ class AbstractParametricDisk(AbstractDisk):
     zero_point_jy: float | None = eqx.field(static=True, default=None, kw_only=True)
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Wavelength breaks of the tabulated scattering parameters [nm]."""
+        """Wavelength breaks of the tabulated scattering parameters [nm].
+
+        Returns:
+            1-D array of the wavelengths of the tabulated scattering parameters [nm].
+        """
         return np.asarray(self.wavelengths_nm)
 
     def __check_init__(self):

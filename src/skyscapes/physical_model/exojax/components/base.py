@@ -21,7 +21,7 @@ from .species import BulkGasResidual, MolecularSpecies
 class Contribution(NamedTuple):
     """Per-layer optical-property contribution from one component.
 
-    Fields:
+    Attributes:
         dtau_total: Layer optical depth this component adds to the total
             opacity budget, shape ``(n_layers, n_nu)``.
         dtau_scatter: Subset of ``dtau_total`` that is *scattering*
@@ -47,7 +47,19 @@ class AbstractTPProfile(eqx.Module, strict=True):
     def compute_Tarr(
         self, rt_engine, T_eq_K_scalar: Array, T_alpha_scalar: Array
     ) -> Array:
-        """Return layer temperatures, shape ``(n_layers,)``."""
+        """Return layer temperatures, shape ``(n_layers,)``.
+
+        Args:
+            rt_engine: ExoJAX radiative-transfer engine; supplies the layer
+                pressures.
+            T_eq_K_scalar: Temperature parameter of one planet [K]. Concrete
+                profiles define its role.
+            T_alpha_scalar: Shape parameter of one planet. Concrete profiles
+                define its role.
+
+        Returns:
+            Layer temperatures [K], shape ``(n_layers,)``.
+        """
 
 
 class AbstractAbsorption(eqx.Module, strict=True):
@@ -72,6 +84,19 @@ class AbstractAbsorption(eqx.Module, strict=True):
         ``dtau_scatter`` and ``g_weighted_num`` are zero for pure
         absorbers, but the return shape is the same as for scattering
         components so the atmosphere can combine them uniformly.
+
+        Args:
+            species: Species of one planet, each with its opacity engine and
+                mass-mixing-ratio profile.
+            Tarr: Layer temperatures [K], shape ``(n_layers,)``.
+            pressure: Layer pressures [bar], shape ``(n_layers,)``.
+            gravity: Surface gravity [cm/s^2], scalar.
+            rt_engine: ExoJAX radiative-transfer engine; supplies the
+                wavenumber grid and the opacity-to-column conversion.
+
+        Returns:
+            :class:`Contribution` of this component, fields of shape
+            ``(n_layers, n_nu)``.
         """
 
 
@@ -92,6 +117,20 @@ class AbstractScattering(eqx.Module, strict=True):
 
         For a pure scatterer ``dtau_total == dtau_scatter``;
         ``g_weighted_num`` is zero for isotropic Rayleigh.
+
+        Args:
+            species: Species of one planet, each with its Rayleigh cross-section
+                and mass-mixing-ratio profile.
+            bulk: Implicit residual gas, or ``None`` for no bulk gas.
+            gravity: Surface gravity [cm/s^2], scalar.
+            rt_engine: ExoJAX radiative-transfer engine; supplies the layer
+                pressures and the opacity-to-column conversion.
+            n_layers: Number of atmospheric layers.
+            n_nu: Number of wavenumber grid points.
+
+        Returns:
+            :class:`Contribution` of this component, fields of shape
+            ``(n_layers, n_nu)``.
         """
 
 
@@ -111,6 +150,18 @@ class AbstractClouds(eqx.Module, strict=True):
         For a single-scattering-albedo cloud the scattering and
         absorption parts are both nonzero; for a purely scattering
         cloud ``dtau_total == dtau_scatter``.
+
+        Args:
+            log_pressure_bar_scalar: Log10 cloud-deck pressure [bar] of one
+                planet, scalar.
+            log_opt_depth_scalar: Log10 vertically integrated cloud optical
+                depth of one planet, scalar.
+            pressure: Layer pressures [bar], shape ``(n_layers,)``.
+            n_nu: Number of wavenumber grid points.
+
+        Returns:
+            :class:`Contribution` of this component, fields of shape
+            ``(n_layers, n_nu)``.
         """
 
 
@@ -119,4 +170,12 @@ class AbstractSurface(eqx.Module, strict=True):
 
     @abstractmethod
     def compute_refl(self, log_albedo_scalar: Array, n_nu: int) -> Array:
-        """Return surface reflectivity, shape ``(n_nu,)``."""
+        """Return surface reflectivity, shape ``(n_nu,)``.
+
+        Args:
+            log_albedo_scalar: Log10 surface albedo of one planet, scalar.
+            n_nu: Number of wavenumber grid points.
+
+        Returns:
+            Surface reflectivity (dimensionless), shape ``(n_nu,)``.
+        """

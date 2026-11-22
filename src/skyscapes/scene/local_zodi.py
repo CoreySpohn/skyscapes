@@ -30,11 +30,19 @@ class AbstractLocalZodi(eqx.Module):
     ``flux_scale`` is a dimensionless factor, default one, on the local zodi
     alone: it does not scale the star, the planets or the disk. The instrument's
     own ``flux_scale`` also multiplies this light.
+
+    Attributes:
+        flux_scale: Dimensionless factor on the local zodi alone, default one.
+            It is checked finite, not positive.
     """
 
     @abstractmethod
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Return the model's spectral breakpoints in nm as a host array."""
+        """Return the model's spectral breakpoints in nm as a host array.
+
+        Returns:
+            Breakpoint wavelengths [nm], a NumPy array on the host.
+        """
 
     flux_scale: eqx.AbstractVar[Array]
 
@@ -56,6 +64,10 @@ class AbstractLocalZodi(eqx.Module):
                 model that depends on the sightline raises a ``ValueError``
                 when the frame has no position (an unplaced scene).
             time_d: Observation time, days from ``sky_frame.epoch``.
+
+        Returns:
+            Photon radiance [ph s^-1 m^-2 nm^-1 sr^-1], with the shape of
+            ``wavelength_nm``.
         """
         return self.flux_scale * self._photon_radiance(wavelength_nm, sky_frame, time_d)
 
@@ -72,6 +84,12 @@ class AYOZodi(AbstractLocalZodi):
 
     The sky frame and time are accepted and ignored. The reference magnitude
     parameter sets the fixed apparent brightness; zodi owns the color model.
+
+    Attributes:
+        surface_brightness_mag_arcsec2: Apparent surface brightness at the
+            reference wavelength [AB mag arcsec^-2].
+        reference_wavelength_nm: Wavelength at which the brightness applies [nm].
+        flux_scale: Dimensionless factor on the local zodi alone, default one.
     """
 
     surface_brightness_mag_arcsec2: float = 22.0
@@ -79,7 +97,11 @@ class AYOZodi(AbstractLocalZodi):
     flux_scale: Array = eqx.field(default=1.0, converter=jnp.asarray, kw_only=True)
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Table 19 color breakpoints [nm]; the spectrum is piecewise in them."""
+        """Table 19 color breakpoints [nm]; the spectrum is piecewise in them.
+
+        Returns:
+            Breakpoint wavelengths [nm], a NumPy array on the host.
+        """
         return um_to_nm(TABLE19_WAVELENGTH_UM)
 
     def _photon_radiance(
@@ -109,12 +131,19 @@ class LeinertZodi(AbstractLocalZodi):
     adjustable reference magnitude. At (longitude=90, latitude=0) the V-band
     brightness is approximately 22 AB mag/arcsec^2; AYO's rounded 22-mag
     normalization differs slightly from the absolute table value.
+
+    Attributes:
+        flux_scale: Dimensionless factor on the local zodi alone, default one.
     """
 
     flux_scale: Array = eqx.field(default=1.0, converter=jnp.asarray, kw_only=True)
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Table 19 color breakpoints [nm]; the spectrum is piecewise in them."""
+        """Table 19 color breakpoints [nm]; the spectrum is piecewise in them.
+
+        Returns:
+            Breakpoint wavelengths [nm], a NumPy array on the host.
+        """
         return um_to_nm(TABLE19_WAVELENGTH_UM)
 
     def _photon_radiance(
@@ -148,6 +177,12 @@ class PrecomputedZodi(AbstractLocalZodi):
 
     The sky frame and time are accepted and ignored. Values outside the
     supplied wavelength support are NaN.
+
+    Attributes:
+        wavelengths_nm: Wavelengths of the table [nm], increasing, shape ``(N,)``.
+        radiance_phot_per_s_m2_nm_sr: Photon radiance at those wavelengths
+            [ph s^-1 m^-2 nm^-1 sr^-1], shape ``(N,)``.
+        flux_scale: Dimensionless factor on the local zodi alone.
     """
 
     wavelengths_nm: Array = eqx.field(converter=jnp.asarray)
@@ -160,13 +195,24 @@ class PrecomputedZodi(AbstractLocalZodi):
         radiance_phot_per_s_m2_nm_sr: Array,
         flux_scale: Array | float = 1.0,
     ):
-        """Store a photon radiance table in ph s^-1 m^-2 nm^-1 sr^-1."""
+        """Store a photon radiance table in ph s^-1 m^-2 nm^-1 sr^-1.
+
+        Args:
+            wavelengths_nm: Wavelengths of the table [nm], increasing, shape ``(N,)``.
+            radiance_phot_per_s_m2_nm_sr: Photon radiance at those wavelengths
+                [ph s^-1 m^-2 nm^-1 sr^-1], shape ``(N,)``.
+            flux_scale: Dimensionless factor on the local zodi alone, default one.
+        """
         self.flux_scale = jnp.asarray(flux_scale)
         self.wavelengths_nm = jnp.asarray(wavelengths_nm)
         self.radiance_phot_per_s_m2_nm_sr = jnp.asarray(radiance_phot_per_s_m2_nm_sr)
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Return the tabulated radiance wavelengths in nm on the host."""
+        """Return the tabulated radiance wavelengths in nm on the host.
+
+        Returns:
+            The table wavelengths [nm], a NumPy array of shape ``(N,)``.
+        """
         return np.asarray(self.wavelengths_nm)
 
     def _photon_radiance(

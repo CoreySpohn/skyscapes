@@ -17,6 +17,17 @@ class StarSpots(eqx.Module):
     model. In particular, loading them does not add asymmetric stellar
     leakage to a diameter-only coronagraph map. Temperatures may be
     unknown in files that omit the corresponding header cards.
+
+    Attributes:
+        times_d: Sample times, days from the scene epoch, shape ``(n_times,)``.
+        latitude_deg: Spot latitudes [deg], shape ``(n_times, n_spots)``.
+        longitude_deg: Spot longitudes [deg], shape ``(n_times, n_spots)``.
+        area_m2: Total spot area including the umbra [m^2], shape
+            ``(n_times, n_spots)``.
+        area_ratio: Total spot area divided by umbra area, dimensionless, shape
+            ``(n_times, n_spots)``.
+        umbra_temperature_K: Umbra temperature [K], or None when unknown.
+        penumbra_temperature_K: Penumbra temperature [K], or None when unknown.
     """
 
     times_d: Array

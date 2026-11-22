@@ -11,13 +11,27 @@ from .._flux_scale import check_flux_scale
 
 
 def check_sky_grid(grid):
-    """Require angular sampling with an explicit detector-to-sky orientation."""
+    """Require angular sampling with an explicit detector-to-sky orientation.
+
+    Args:
+        grid: Sky grid to validate; it must have unit ``"arcsec"`` and a
+            ``SkyOrientation``.
+    """
     if grid.unit != "arcsec" or grid.orientation is None:
         raise ValueError("disk grid must be arcsec with a SkyOrientation")
 
 
 def radiance_image(data, grid):
-    """Name wavelength axes and the radiance unit, without pixel integration."""
+    """Name wavelength axes and the radiance unit, without pixel integration.
+
+    Args:
+        data: Photon radiance [ph s^-1 m^-2 nm^-1 sr^-1], shape
+            ``wavelength_shape + grid.shape``.
+        grid: Sky grid whose pixels the last two axes of ``data`` sample.
+
+    Returns:
+        Image of ``data`` on ``grid`` with a per-steradian density measure.
+    """
     return Image(
         data,
         grid,
@@ -43,6 +57,10 @@ class AbstractDisk(eqx.Module):
     flux). The image is linear in it, and jointly linear in the planet and disk
     scales at a fixed star scale. A parametric disk's scale is exactly
     degenerate with its ``amplitude.level``. It is checked finite, not positive.
+
+    Attributes:
+        flux_scale: Dimensionless scalar factor on the disk's own radiance, applied
+            once in :meth:`photon_radiance_at`. Concrete disks default it to one.
     """
 
     flux_scale: eqx.AbstractVar[Array]
@@ -52,7 +70,12 @@ class AbstractDisk(eqx.Module):
         check_flux_scale(self.flux_scale)
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Wavelength breaks in the disk scattering spectrum [nm]."""
+        """Wavelength breaks in the disk scattering spectrum [nm].
+
+        Returns:
+            1-D array of wavelength breaks [nm]; empty here, and overridden by disks
+            with a tabulated spectrum.
+        """
         return np.empty(0)
 
     def photon_radiance(
@@ -62,6 +85,17 @@ class AbstractDisk(eqx.Module):
 
         ``grid`` must have unit arcsec and a SkyOrientation. The image has
         a per-steradian density measure and quantity ph s^-1 m^-2 nm^-1.
+
+        Args:
+            wavelength_nm: Wavelengths [nm], any shape.
+            time_d: Scalar time in days from the scene epoch.
+            star: Host star, supplying the photon flux that the disk scatters.
+            dist_pc: Distance of the system from the observer [pc].
+            grid: Sky grid on which to evaluate the radiance.
+
+        Returns:
+            Photon radiance [ph s^-1 m^-2 nm^-1 sr^-1] as an image of shape
+            ``wavelength_nm.shape + grid.shape``.
         """
         check_sky_grid(grid)
         east, north = grid.orientation.detector_to_sky(*grid.coordinates())
@@ -78,6 +112,20 @@ class AbstractDisk(eqx.Module):
         Wavelength axes precede the broadcast shape of east_arcsec and
         north_arcsec. time_d is scalar days from the scene epoch. The result is
         ``flux_scale`` times the model's own radiance.
+
+        Args:
+            wavelength_nm: Wavelengths [nm], any shape.
+            time_d: Scalar time in days from the scene epoch.
+            east_arcsec: Sky offsets of the query points toward east of the star
+                [arcsec]; broadcast against ``north_arcsec``.
+            north_arcsec: Sky offsets of the query points toward north of the star
+                [arcsec].
+            star: Host star, supplying the photon flux that the disk scatters.
+            dist_pc: Distance of the system from the observer [pc].
+
+        Returns:
+            Photon radiance [ph s^-1 m^-2 nm^-1 sr^-1], shape
+            ``wavelength_nm.shape + broadcast(east_arcsec, north_arcsec).shape``.
         """
         return self.flux_scale * self._photon_radiance_at(
             wavelength_nm, time_d, east_arcsec, north_arcsec, star=star, dist_pc=dist_pc

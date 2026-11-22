@@ -21,7 +21,11 @@ class SumPhysicalModel(AbstractPhysicalModel):
     components: tuple[AbstractPhysicalModel, ...]
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Union of all component spectral breaks [nm]."""
+        """Union of all component spectral breaks [nm].
+
+        Returns:
+            1-D array of the union of the component wavelength breaks [nm].
+        """
         return spectral_breaks(*self.components)
 
     def __check_init__(self):
@@ -64,7 +68,17 @@ class SumPhysicalModel(AbstractPhysicalModel):
         wavelength_nm: Array,
         Rp_Rearth: Array,
     ) -> Array:
-        """Require the host star and epochs for the component fluxes."""
+        """Require the host star and epochs for the component fluxes.
+
+        Args:
+            phase_angle_rad: Phase angle [rad], shape ``(K, T)``; unused.
+            star_planet_distance_AU: Star-planet distance [AU]; unused.
+            wavelength_nm: Wavelength [nm]; unused.
+            Rp_Rearth: Planet radius [Earth radii]; unused.
+
+        Returns:
+            Nothing; this method always raises ``ValueError``.
+        """
         raise ValueError("Use contrast_at_time(..., time_d=..., star=...) for a sum")
 
     def contrast_at_time(
@@ -81,6 +95,18 @@ class SumPhysicalModel(AbstractPhysicalModel):
         """Summed photon flux over stellar flux, shape ``(K, T)``.
 
         ``time_d`` is days from the scene epoch.
+
+        Args:
+            phase_angle_rad: Star-planet-observer phase angle [rad], shape ``(K, T)``.
+            star_planet_distance_AU: Star-planet distance [AU], shape ``(K, T)``.
+            wavelength_nm: Scalar wavelength [nm].
+            Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
+            time_d: Observation times in days from the scene epoch, shape ``(T,)``.
+            star: Host ``AbstractStar``; required.
+            dist_pc: Distance of the system from the observer [pc].
+
+        Returns:
+            Contrast (planet-to-star flux ratio), shape ``(K, T)``.
         """
         if star is None:
             raise ValueError("SumPhysicalModel needs the host star")

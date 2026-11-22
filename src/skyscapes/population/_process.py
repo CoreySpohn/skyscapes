@@ -42,6 +42,13 @@ class HostStars(eqx.Module):
     ``flux_scale``) means the same value for every host and is broadcast to
     (S,). IDs must be unique and stable when selecting or reordering hosts.
     Mass, luminosity and distance must be positive.
+
+    Attributes:
+        star_id: Unique, stable integer host identifiers, int32, shape ``(S,)``.
+        mass_Msun: Host masses [solar masses], shape ``(S,)``.
+        luminosity_Lsun: Host luminosities [solar luminosities], shape ``(S,)``.
+        dist_pc: Distances to the hosts [pc], shape ``(S,)``.
+        star: Photometric star whose numeric leaves carry the leading axis ``(S,)``.
     """
 
     star_id: jax.Array
@@ -51,7 +58,15 @@ class HostStars(eqx.Module):
     star: AbstractStar
 
     def __init__(self, star_id, mass_Msun, luminosity_Lsun, dist_pc, star):
-        """Store the host arrays and broadcast scalar star leaves to (S,)."""
+        """Store the host arrays and broadcast scalar star leaves to (S,).
+
+        Args:
+            star_id: Unique, stable integer host identifiers, shape ``(S,)``.
+            mass_Msun: Host masses [solar masses], shape ``(S,)``.
+            luminosity_Lsun: Host luminosities [solar luminosities], shape ``(S,)``.
+            dist_pc: Distances to the hosts [pc], shape ``(S,)``.
+            star: Photometric star; scalar numeric leaves broadcast to ``(S,)``.
+        """
         self.star_id = jnp.asarray(star_id, jnp.int32)
         self.mass_Msun = jnp.asarray(mass_Msun)
         self.luminosity_Lsun = jnp.asarray(luminosity_Lsun)
@@ -74,14 +89,28 @@ class HostStars(eqx.Module):
 
 
 class _TypeReflector(AbstractPhysicalModel):
-    """One spectral reflector class, distinguished by a per-planet type leaf."""
+    """One spectral reflector class, distinguished by a per-planet type leaf.
+
+    Attributes:
+        type_index: Integer index of each planet's type into ``spectrum``.
+        wavelengths_nm: Common wavelength grid of the spectra [nm].
+        spectrum: Geometric albedo spectra, shape ``(n_types, n_wavelengths)``.
+    """
 
     type_index: jax.Array
     wavelengths_nm: jax.Array
     spectrum: jax.Array
 
     def geometric_albedo(self, wavelength_nm):
-        """Interpolate the selected type spectra at a scalar wavelength in nm."""
+        """Interpolate the selected type spectra at a scalar wavelength in nm.
+
+        Args:
+            wavelength_nm: A single wavelength [nm].
+
+        Returns:
+            Geometric albedo of each planet's type, dimensionless, with the
+            shape of ``type_index``.
+        """
         return _type_albedo(
             self.type_index, wavelength_nm, self.wavelengths_nm, self.spectrum
         )
@@ -89,7 +118,17 @@ class _TypeReflector(AbstractPhysicalModel):
     def contrast(
         self, phase_angle_rad, star_planet_distance_AU, wavelength_nm, Rp_Rearth
     ):
-        """Use the existing Lambertian phase law with the type's spectral albedo."""
+        """Use the existing Lambertian phase law with the type's spectral albedo.
+
+        Args:
+            phase_angle_rad: Star-planet-observer phase angle [rad].
+            star_planet_distance_AU: Star-planet separation [AU].
+            wavelength_nm: A single wavelength [nm].
+            Rp_Rearth: Planet radius [Earth radii].
+
+        Returns:
+            Planet-to-star flux ratio, dimensionless.
+        """
         return LambertianPhysicalModel(self.geometric_albedo(wavelength_nm)).contrast(
             phase_angle_rad, star_planet_distance_AU, wavelength_nm, Rp_Rearth
         )
@@ -129,6 +168,13 @@ class OccurrencePopulation(eqx.Module):
 
     epoch is static host metadata. Config integers and requested output
     shapes are static; use eqx.filter_jit for methods with integer arguments.
+
+    Attributes:
+        occurrence: Expected planets per star in (scaled semi-major axis, mass)
+            cells.
+        types: Planet types and their albedo spectra.
+        config: Draw settings, including the eccentricity law and ``max_planets``.
+        epoch: Epoch of the scenes drawn, static host metadata.
     """
 
     occurrence: OccurrenceTable
@@ -140,11 +186,25 @@ class OccurrencePopulation(eqx.Module):
         return jnp.where(self.occurrence.bin_id >= 0, self.occurrence.rate, 0.0)
 
     def rate(self, stars):
-        """Expected pre-pruning planets per host, shape (S,)."""
+        """Expected pre-pruning planets per host, shape (S,).
+
+        Args:
+            stars: ``HostStars`` of length S.
+
+        Returns:
+            Expected planet count per host, shape ``(S,)``.
+        """
         return jnp.broadcast_to(self._rates().sum(), stars.star_id.shape)
 
     def log_rate(self, stars):
-        """Log pre-pruning rate, shape (S,); zero rate gives -inf."""
+        """Log pre-pruning rate, shape (S,); zero rate gives -inf.
+
+        Args:
+            stars: ``HostStars`` of length S.
+
+        Returns:
+            Natural log of the expected planet count per host, shape ``(S,)``.
+        """
         return jnp.log(self.rate(stars))
 
     def _marks(self, key, n, luminosity):
@@ -323,6 +383,15 @@ class OccurrencePopulation(eqx.Module):
         The default rate about 11 gives 115 candidates (tail below 1e-73 per
         host). This finite-storage failure is distinct from keeping the K
         innermost survivors. Zero-rate hosts return fully padded systems.
+
+        Args:
+            key: A JAX PRNG key.
+            stars: ``HostStars`` of length S.
+            n_worlds: Number of independent worlds, a static integer.
+
+        Returns:
+            Scenes with batch shape ``(n_worlds, S)`` and capacity
+            ``config.max_planets``, planets sorted inner to outer.
         """
 
         def world(w):
@@ -342,6 +411,14 @@ class OccurrencePopulation(eqx.Module):
         star must be a HostStars of length one. Each draw uses the exact
         isotropic single-planet marginal, including for zero midplane tilt.
         n is a static integer; the rate must be positive.
+
+        Args:
+            key: A JAX PRNG key.
+            n: Number of draws, a static integer.
+            star: ``HostStars`` of length one.
+
+        Returns:
+            Scenes with batch shape ``(n,)`` and one planet slot each.
         """
         if star.star_id.shape != (1,):
             raise ValueError("mark_sample requires HostStars of length one")
@@ -363,6 +440,13 @@ class OccurrencePopulation(eqx.Module):
         Each returned scalar leaf has the scene batch shape B; the orbit
         quaternion has shape B + (4,). The state is at scene time zero.
         Padded entries have finite filler, zero mass and int32 label zero.
+
+        Args:
+            system: A capacity-one scene, batched or not.
+
+        Returns:
+            A tuple of the star-relative orbit, the planet mass [Earth masses]
+            and the int32 type label, each with the scene batch shape B.
         """
         if system.capacity != 1:
             raise ValueError("mark_read requires capacity one")
@@ -393,6 +477,15 @@ class OccurrencePopulation(eqx.Module):
         and int32 label have shape B. The supplied orbit epoch is in days
         from the scene epoch. Stellar and planet masses set the dynamics rate;
         radius and reflection use the same relations as mark_sample.
+
+        Args:
+            star: ``HostStars`` of length one.
+            orbit: Star-relative orbit with scalar leaves of batch shape B.
+            mass_Mearth: Planet masses [Earth masses], shape B.
+            label: Integer type index of each planet, shape B.
+
+        Returns:
+            Capacity-one scenes with batch shape B.
         """
         if star.star_id.shape != (1,):
             raise ValueError("mark_build requires HostStars of length one")
@@ -518,6 +611,14 @@ class OccurrencePopulation(eqx.Module):
         stars has length S matching the last batch axis, or length one to
         broadcast a single host across B. Padded slots return zero. Radius
         is the deterministic mass-radius image, not an independent coordinate.
+
+        Args:
+            system: Scene or batched scene of capacity K.
+            stars: ``HostStars`` of length S matching the last batch axis, or
+                length one to broadcast a single host across B.
+
+        Returns:
+            Log mark density, shape ``B + (K,)``.
         """
         if self.config.eccentricity is None:
             raise ValueError(
@@ -535,7 +636,16 @@ class OccurrencePopulation(eqx.Module):
         return read(system, luminosity)
 
     def log_intensity(self, system, stars):
-        """Log pre-pruning intensity, B + (K,); padding remains exactly zero."""
+        """Log pre-pruning intensity, B + (K,); padding remains exactly zero.
+
+        Args:
+            system: Scene or batched scene of capacity K.
+            stars: ``HostStars`` of length S matching the last batch axis, or
+                length one to broadcast a single host across B.
+
+        Returns:
+            Log of the pre-pruning point-process intensity, shape ``B + (K,)``.
+        """
         log_rate = (
             jnp.broadcast_to(self.log_rate(stars), system.batch_shape)
             if system.batch_shape
@@ -551,6 +661,14 @@ class OccurrencePopulation(eqx.Module):
         axis at scene time zero, the mass-radius image of the planet mass and
         the host luminosity. stars has length S matching the last batch axis,
         or length one to broadcast. Padded and unbound slots return False.
+
+        Args:
+            system: Scene or batched scene of capacity K.
+            stars: ``HostStars`` of length S matching the last batch axis, or
+                length one to broadcast a single host across B.
+
+        Returns:
+            Boolean exoEarth-candidate flags, shape ``B + (K,)``.
         """
         luminosity = (
             jnp.broadcast_to(stars.luminosity_Lsun, system.batch_shape)
@@ -577,6 +695,13 @@ class OccurrencePopulation(eqx.Module):
 
         The scene's physical model also carries these spectra and the type
         index, so ordinary scene photometry uses the same albedo automatically.
+
+        Args:
+            system: Scene or batched scene of capacity K.
+            wavelength_nm: A single wavelength [nm].
+
+        Returns:
+            Geometric albedo, dimensionless, shape ``B + (K,)``.
         """
         index = system.planets[0].physical_model.type_index
         return jnp.where(

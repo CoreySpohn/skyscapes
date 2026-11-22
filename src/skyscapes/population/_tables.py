@@ -42,6 +42,12 @@ def mass_to_radius(mass_Mearth):
     The genuine slope jumps have finite one-sided autodiff derivatives
     (the lower branch at equality), not a classical derivative at the kink.
     Returns a JAX array, preserving floating input precision under tracing.
+
+    Args:
+        mass_Mearth: Planet mass [Earth masses], any shape.
+
+    Returns:
+        Mean planet radius [Earth radii], same shape as the input.
     """
     m = jnp.asarray(mass_Mearth)
     # Keep the inactive negative power away from zero (including padded mass).
@@ -67,6 +73,12 @@ def radius_to_mass(radius_Rearth):
     that extrapolation is not an inverse. At R(2.04) autodiff returns the
     finite lower-branch derivative; the physical relation has a slope jump.
     Pure JAX, including float32 jit/vmap/grad; no inactive negative power.
+
+    Args:
+        radius_Rearth: Planet radius [Earth radii], any shape.
+
+    Returns:
+        Planet mass [Earth masses], same shape as the input.
     """
     r = jnp.asarray(radius_Rearth)
     return jnp.where(
@@ -357,6 +369,9 @@ def occurrence_table_from_grid(rate, a_edges_AU, mass_edges_Mearth, bin_id):
         a_edges_AU: ``[n_a + 1]`` edges of the scaled semi-major axis.
         mass_edges_Mearth: ``[n_m + 1]`` edges of the planet mass.
         bin_id: ``int[n_a, n_m]`` planet bin of each cell, -1 outside every bin.
+
+    Returns:
+        The assembled `OccurrenceTable`.
     """
     rate, bin_id = np.asarray(rate, float), np.asarray(bin_id, np.int32)
     return OccurrenceTable(
@@ -370,7 +385,11 @@ def occurrence_table_from_grid(rate, a_edges_AU, mass_edges_Mearth, bin_id):
 
 
 def load_occurrence_table():
-    """The Dulz et al. (2020) nominal occurrence grid, as built by ExoVista."""
+    """The Dulz et al. (2020) nominal occurrence grid, as built by ExoVista.
+
+    Returns:
+        The nominal `OccurrenceTable`.
+    """
     rate, m_edge, a_edge, bin_id = _grid()
     return occurrence_table_from_grid(rate, a_edge, m_edge, bin_id)
 
@@ -405,7 +424,15 @@ class PlanetTypes(eqx.Module):
     albedo: jnp.ndarray
 
     def geometric_albedo(self, type_index, wavelength_nm):
-        """Geometric albedo of the planets of `type_index` at one wavelength."""
+        """Geometric albedo of the planets of `type_index` at one wavelength.
+
+        Args:
+            type_index: Integer index of each planet's type, any shape.
+            wavelength_nm: A single wavelength [nm].
+
+        Returns:
+            Geometric albedo, dimensionless, with the shape of ``type_index``.
+        """
         return _type_albedo(type_index, wavelength_nm, self.wavelength_nm, self.albedo)
 
 
@@ -416,7 +443,11 @@ def _type_albedo(type_index, wavelength_nm, wavelengths_nm, spectrum):
 
 
 def load_planet_types():
-    """Load ExoVista planet types, clipping negative tabulated albedos to zero."""
+    """Load ExoVista planet types, clipping negative tabulated albedos to zero.
+
+    Returns:
+        The `PlanetTypes` table with its albedo spectra.
+    """
     rows = list(csv.reader(io.StringIO(_read_text("albedo_list.csv"))))
     rows = [[field.strip() for field in row] for row in rows[1:] if row]
     names = tuple(row[0] for row in rows)

@@ -19,6 +19,13 @@ def lambert_phase(phase_angle_rad: Array) -> Array:
 
     Phi(b) = (sin(b) + (pi - b) cos(b)) / pi. Clipping keeps reflected
     light nonnegative at new phase; it leaves interior values unchanged.
+
+    Args:
+        phase_angle_rad: Star-planet-observer phase angle [rad], in [0, pi].
+
+    Returns:
+        Dimensionless Lambert phase function, same shape as the input; one at
+        zero phase angle.
     """
     sin_b = jnp.sin(phase_angle_rad)
     cos_b = jnp.cos(phase_angle_rad)
@@ -30,6 +37,15 @@ def reflected_contrast(phase_angle_rad, star_planet_distance_AU, Ag, Rp_Rearth):
 
     Geometry comes from orbix. Radius is in Earth radii, distance in AU,
     and Ag is geometric albedo (possibly wavelength dependent).
+
+    Args:
+        phase_angle_rad: Star-planet-observer phase angle [rad].
+        star_planet_distance_AU: Star-planet distance [AU].
+        Ag: Geometric albedo, dimensionless; may depend on wavelength.
+        Rp_Rearth: Planet radius [Earth radii].
+
+    Returns:
+        Contrast (planet-to-star flux ratio), broadcast shape of the inputs.
     """
     return (
         Ag
@@ -105,6 +121,15 @@ class LambertianPhysicalModel(AbstractPhysicalModel):
         ``wavelength_nm`` is part of the interface but ignored in the
         gray case. ``Rp_Rearth`` is shape ``(K,)``, supplied by the
         host ``Planet``.
+
+        Args:
+            phase_angle_rad: Star-planet-observer phase angle [rad], shape ``(K, T)``.
+            star_planet_distance_AU: Star-planet distance [AU], shape ``(K, T)``.
+            wavelength_nm: Wavelength [nm]; ignored.
+            Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
+
+        Returns:
+            Contrast (planet-to-star flux ratio), shape ``(K, T)``.
         """
         return reflected_contrast(
             phase_angle_rad,
@@ -114,6 +139,10 @@ class LambertianPhysicalModel(AbstractPhysicalModel):
         )
 
     def __repr__(self) -> str:
-        """One-line summary of geometric albedo."""
+        """One-line summary of geometric albedo.
+
+        Returns:
+            One-line summary string.
+        """
         ag = fmt_scalar_or_array(self.Ag)
         return f"LambertianPhysicalModel(Ag={ag})"

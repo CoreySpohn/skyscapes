@@ -20,7 +20,14 @@ _LAZY = {"ExoJaxEmissionModel", "ExoJaxPhysicalModel"}
 
 
 def __getattr__(name):
-    """Load the ExoJAX models on first use, so importing skyscapes stays light."""
+    """Load the ExoJAX models on first use, so importing skyscapes stays light.
+
+    Args:
+        name: Name of the attribute being looked up on the package.
+
+    Returns:
+        The lazily imported ExoJAX model class, cached in the module namespace.
+    """
     if name in _LAZY:
         value = getattr(import_module(".exojax", __name__), name)
         globals()[name] = value

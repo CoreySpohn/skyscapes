@@ -48,6 +48,9 @@ class AbstractStar(eqx.Module):
     linear, and the image is bilinear in it and any planet or disk scale: a
     star scale and a planet scale are correlated, not degenerate. It is
     checked finite, not positive.
+
+    Attributes:
+        flux_scale: Dimensionless factor on all light from the star, default one.
     """
 
     flux_scale: eqx.AbstractVar[Array]
@@ -69,6 +72,14 @@ class AbstractStar(eqx.Module):
         shape, with tabulated stars also broadcasting against ``time_d``.
         Time is days from the scene epoch. Physical spectra use ``dist_pc``;
         apparent spectra accept and ignore it.
+
+        Args:
+            wavelength_nm: Wavelengths [nm], any shape.
+            time_d: Time, days from the scene epoch.
+            dist_pc: Observer distance [pc].
+
+        Returns:
+            Photon flux density [ph s^-1 m^-2 nm^-1] at the observer.
         """
         return self.flux_scale * self._photon_flux_density(
             wavelength_nm, time_d, dist_pc=dist_pc
@@ -91,10 +102,21 @@ class AbstractStar(eqx.Module):
 
     @abstractmethod
     def angular_diameter_arcsec(self, dist_pc: Array) -> Array:
-        """Apparent stellar diameter in arcseconds at observer distance dist_pc."""
+        """Apparent stellar diameter in arcseconds at observer distance dist_pc.
+
+        Args:
+            dist_pc: Observer distance [pc].
+
+        Returns:
+            Apparent angular diameter [arcsec].
+        """
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Analytic stellar spectra have no wavelength breaks."""
+        """Analytic stellar spectra have no wavelength breaks.
+
+        Returns:
+            An empty array of breakpoint wavelengths [nm].
+        """
         return np.empty(0)
 
 
@@ -113,7 +135,14 @@ class FlatStar(AbstractStar):
     flux_scale: Array = eqx.field(default=1.0, converter=jnp.asarray, kw_only=True)
 
     def angular_diameter_arcsec(self, dist_pc: Array) -> Array:
-        """Return the stored apparent diameter in arcseconds, ignoring dist_pc."""
+        """Return the stored apparent diameter in arcseconds, ignoring dist_pc.
+
+        Args:
+            dist_pc: Observer distance [pc]; ignored.
+
+        Returns:
+            The stored apparent diameter [arcsec].
+        """
         return jnp.asarray(self.fixed_diameter_arcsec)
 
     def _photon_flux_density(
@@ -134,7 +163,11 @@ class FlatStar(AbstractStar):
         return jnp.full_like(wl, self.flux_phot_per_nm_m2, dtype=wl.dtype)
 
     def __repr__(self) -> str:
-        """Summarize flux and nonzero angular diameter."""
+        """Summarize flux and nonzero angular diameter.
+
+        Returns:
+            A one-line text summary.
+        """
         diameter = (
             f", diam={self.fixed_diameter_arcsec:.3g} arcsec"
             if self.fixed_diameter_arcsec
@@ -166,6 +199,12 @@ class BlackbodyStar(AbstractStar):
 
         Uses the small-angle relation from Carroll & Ostlie (2007),
         An Introduction to Modern Astrophysics.
+
+        Args:
+            dist_pc: Observer distance [pc].
+
+        Returns:
+            Apparent angular diameter [arcsec].
         """
         return jnp.asarray(angular_diameter_arcsec(self.radius_m, dist_pc))
 
@@ -190,7 +229,11 @@ class BlackbodyStar(AbstractStar):
         )
 
     def __repr__(self) -> str:
-        """Compact one-line summary of temperature and radius."""
+        """Compact one-line summary of temperature and radius.
+
+        Returns:
+            A one-line text summary.
+        """
         return f"BlackbodyStar(Teff={self.teff_K:.3g} K, radius={self.radius_m:.3g} m)"
 
 
@@ -203,6 +246,14 @@ class Star(AbstractStar):
     tabulated flux or automatically add spatially resolved stellar emission.
     ``flux_scale`` is a dimensionless factor on the tabulated flux, default one;
     see :class:`AbstractStar`.
+
+    Attributes:
+        flux_scale: Dimensionless factor on the tabulated flux, default one.
+        fixed_diameter_arcsec: Apparent stellar diameter [arcsec]; zero is a
+            point star.
+        luminosity_Lsun: Stellar luminosity [solar luminosities].
+        spots: Imported spot history, or None.
+        metadata: Free-form source metadata, held as a static field.
     """
 
     flux_scale: Array
@@ -238,6 +289,20 @@ class Star(AbstractStar):
         h*c/lambda_m and multiplying by nm2m gives F_nu*Jy/(h*wavelength_nm)
         in ph s^-1 m^-2 nm^-1. The hwoutils conversion supplies the constants.
         Linear interpolation of photon density avoids overshoot.
+
+        Args:
+            wavelengths_nm: Wavelength grid [nm], shape ``(n_wavelengths,)``.
+            times_d: Epochs, days from the scene epoch, shape ``(n_times,)``.
+            flux_density_jy: Flux density F_nu [Jy], shape
+                ``(n_wavelengths, n_times)``.
+            fixed_diameter_arcsec: Apparent stellar diameter [arcsec]; zero is
+                a point star.
+            luminosity_Lsun: Stellar luminosity [solar luminosities].
+            spots: Imported spot history, or None.
+            metadata: Free-form source metadata; None stores an empty dict.
+            interpolation_method: ``"linear"`` or ``"cubic"`` interpolation of
+                the photon table.
+            flux_scale: Dimensionless factor on the tabulated flux, default one.
         """
         if interpolation_method not in ("linear", "cubic"):
             raise ValueError("interpolation_method must be linear or cubic.")
@@ -275,7 +340,14 @@ class Star(AbstractStar):
         )
 
     def angular_diameter_arcsec(self, dist_pc: Array) -> Array:
-        """Return the stored apparent diameter in arcseconds, ignoring dist_pc."""
+        """Return the stored apparent diameter in arcseconds, ignoring dist_pc.
+
+        Args:
+            dist_pc: Observer distance [pc]; ignored.
+
+        Returns:
+            The stored apparent diameter [arcsec].
+        """
         return jnp.asarray(self.fixed_diameter_arcsec)
 
     def _photon_flux_density(
@@ -314,11 +386,18 @@ class Star(AbstractStar):
         interpolated photon table is integrated exactly by a Gauss-Legendre
         rule split at the knots, even at order one (Davis and Rabinowitz 1984,
         Methods of Numerical Integration).
+
+        Returns:
+            Unique tabulated wavelengths [nm], sorted ascending.
         """
         return np.unique(self.wavelengths_nm)
 
     def __repr__(self) -> str:
-        """One-line summary of metadata + wavelength/time grid extent."""
+        """One-line summary of metadata + wavelength/time grid extent.
+
+        Returns:
+            A one-line text summary.
+        """
         wl_min = float(jnp.min(self._wavelengths_nm))
         wl_max = float(jnp.max(self._wavelengths_nm))
         n_t = int(self._times_d.shape[0])

@@ -29,6 +29,16 @@ def castelli_kurucz_surface_flux(
     as for PHOENIX. Temperature spans 3500-50000 K; available gravity ranges
     depend on temperature. Both bracketing files must support the requested
     gravity. ``fetch`` maps a temperature node [K] to its local FITS path.
+
+    Args:
+        teff_K: Effective temperature [K], from 3500 to 50000.
+        logg: Surface gravity, log10 of the cgs gravity in cm/s^2.
+        mh: Metallicity [M/H] in dex. Only 0.0 is registered.
+        fetch: Callable mapping a temperature node [K] to a local FITS path.
+
+    Returns:
+        ``(wavelength_nm, flux)``: wavelength [nm] and surface flux density
+        [W m^-2 nm^-1], both 1-D arrays on the model grid.
     """
     if mh != 0.0:
         raise ValueError("Only solar metallicity ([M/H] = 0) is registered.")
@@ -52,6 +62,20 @@ def from_castelli_kurucz(
     diluted by ``(radius_m / (dist_pc * pc2m))**2``. The returned Star
     evaluates photon flux in ph/s/m^2/nm and supports exact linear-table
     bin means. Downloads are lazy, cached, and SHA-256 verified.
+
+    Args:
+        teff_K: Effective temperature [K], from 3500 to 50000.
+        logg: Surface gravity, log10 of the cgs gravity in cm/s^2.
+        dist_pc: Distance of the star from the observer [pc].
+        radius_m: Stellar radius [m].
+        mh: Metallicity [M/H] in dex. Only 0.0 is registered.
+        wavelength_range_nm: ``(min, max)`` crop of the model grid [nm], or
+            ``None`` to keep the full grid.
+        fetch: Callable mapping a temperature node [K] to a local FITS path.
+
+    Returns:
+        Static ``Star`` whose photon flux density at the observer is in
+        ph s^-1 m^-2 nm^-1.
     """
     wavelength_nm, surface_flux = castelli_kurucz_surface_flux(
         teff_K, logg, mh, fetch=fetch

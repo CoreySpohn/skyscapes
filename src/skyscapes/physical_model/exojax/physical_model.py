@@ -99,6 +99,13 @@ def grid_resolving_power(nu_grid: Array) -> float:
     the point-count convention; the interval-count value is smaller by
     a relative fraction 1/N.
     Intended for setup diagnostics, outside JIT.
+
+    Args:
+        nu_grid: Ascending logarithmic wavenumber grid [cm^-1], shape
+            ``(N,)``.
+
+    Returns:
+        Resolving power (dimensionless) of the grid sampling.
     """
     return len(nu_grid) / log(float(nu_grid[-1]) / float(nu_grid[0]))
 
@@ -444,6 +451,10 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
 
         Gauss nodes cannot resolve absorption lines between breaks, so a band
         integral samples every native grid point. Cost scales with the grid.
+
+        Returns:
+            Ascending wavelengths [nm] of the native grid points, shape
+            ``(n_nu,)``.
         """
         return np.sort(np.asarray(wavenumber_cm_to_nm(np.asarray(self.nu_grid))))
 
@@ -502,6 +513,10 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
             pressure_btm_bar: See :func:`build_exojax_engines`.
             databases_dir: See :func:`build_exojax_engines`.
             crit: See :func:`build_exojax_engines`.
+
+        Returns:
+            An :class:`ExoJaxPhysicalModel` with ``K`` planets, where ``K`` is
+            the leading length of ``log_gravity_cgs``.
         """
         if molecules is None:
             molecules = tuple(log_mmrs.keys())
@@ -560,6 +575,13 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
         leaves no longer changes the spectrum. To fit temperature, use
         :meth:`from_default_setup` (the full per-eval recompute) instead. Single
         planet only (``K == 1``).
+
+        Args:
+            **kwargs: Keyword arguments of :meth:`from_default_setup`.
+
+        Returns:
+            An :class:`ExoJaxPhysicalModel` whose absorption component is a
+            :class:`PrecomputedAbsorption`.
         """
         return _precompute_absorption_model(cls.from_default_setup(**kwargs))
 
@@ -603,8 +625,6 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
         directly.
 
         Args:
-            cache_dir: Override the cache directory. Defaults to
-                ``~/.cache/skyscapes/physical_models/``.
             log_mmrs: See :meth:`from_default_setup`.
             T_eq_K: See :meth:`from_default_setup`.
             T_alpha: See :meth:`from_default_setup`.
@@ -624,6 +644,8 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
             pressure_btm_bar: See :meth:`from_default_setup`.
             databases_dir: See :meth:`from_default_setup`.
             crit: See :meth:`from_default_setup`.
+            cache_dir: Override the cache directory. Defaults to
+                ``~/.cache/skyscapes/physical_models/``.
 
         Returns:
             A :class:`PrecomputedPhysicalModel` with no RT cost at
@@ -717,6 +739,9 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
         common K=1 case this is a single iteration with no overhead.
         For HMC retrievals (K=1 per sample), the JIT cache is reused
         across MCMC steps.
+
+        Returns:
+            Reflectivity (dimensionless), shape ``(K, n_nu)``, on ``nu_grid``.
         """
         K = int(self.log_gravity_cgs.shape[0])
         return jnp.stack([self._reflectivity_one_planet(k) for k in range(K)], axis=0)
@@ -732,6 +757,17 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
 
         The single-wavelength case of :meth:`contrast_cube`; shape ``(K, T)``.
         Runs the 2-stream RT once per call.
+
+        Args:
+            phase_angle_rad: Star-planet-observer phase angle [rad], shape
+                ``(K, T)``.
+            star_planet_distance_AU: Star-planet distance [AU], shape
+                ``(K, T)``.
+            wavelength_nm: Scalar wavelength [nm].
+            Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
+
+        Returns:
+            Planet-to-star flux-ratio contrast, shape ``(K, T)``.
         """
         return self.contrast_cube(
             phase_angle_rad,
@@ -754,6 +790,17 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
         interpolation (extrapolating linearly outside the grid, where values
         can be negative), then the Lambertian-sphere conversion to geometric
         albedo (Seager 2010, eq 3.36), Lambert phase and ``(Rp/d)^2``.
+
+        Args:
+            phase_angle_rad: Star-planet-observer phase angle [rad], shape
+                ``(K, T)``.
+            star_planet_distance_AU: Star-planet distance [AU], shape
+                ``(K, T)``.
+            wavelengths_nm: Wavelengths [nm], shape ``(W,)``.
+            Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
+
+        Returns:
+            Planet-to-star flux-ratio contrast, shape ``(W, K, T)``.
         """
         return project_reflected(
             self.reflectivity(),
@@ -765,7 +812,11 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
         )
 
     def __repr__(self) -> str:
-        """Human-readable summary of components + species + per-planet state."""
+        """Human-readable summary of components + species + per-planet state.
+
+        Returns:
+            Multi-line summary string.
+        """
         K = int(self.log_gravity_cgs.shape[0])
         n_layers = int(self.rt_engine.pressure.shape[0])
         wl_min_nm = float(1.0e7 / self.nu_grid.max())

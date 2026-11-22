@@ -31,7 +31,14 @@ class Planet(eqx.Module):
     flux_scale: Array = eqx.field(converter=jnp.asarray)
 
     def __init__(self, Rp_Rearth, physical_model, flux_scale=1.0):
-        """Store radii and model; a scalar ``flux_scale`` broadcasts to the radii."""
+        """Store radii and model; a scalar ``flux_scale`` broadcasts to the radii.
+
+        Args:
+            Rp_Rearth: Planet radius [Earth radii], shape ``B + (K,)``.
+            physical_model: Spectral physics (reflectivity / emission).
+            flux_scale: Dimensionless factor per planet on its contrast and
+                flux; a scalar broadcasts to the shape of ``Rp_Rearth``.
+        """
         self.Rp_Rearth = jnp.asarray(Rp_Rearth)
         self.physical_model = physical_model
         self.flux_scale = jnp.broadcast_to(
@@ -43,7 +50,11 @@ class Planet(eqx.Module):
         check_flux_scale(self.flux_scale)
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Wavelength breaks of the planetary spectrum [nm]."""
+        """Wavelength breaks of the planetary spectrum [nm].
+
+        Returns:
+            Breakpoint wavelengths [nm] from the physical model, on the host.
+        """
         return self.physical_model.spectral_breaks_nm()
 
     @property
@@ -52,7 +63,11 @@ class Planet(eqx.Module):
         return int(self.Rp_Rearth.shape[-1])
 
     def __repr__(self) -> str:
-        """Nested summary of radii and the physical model."""
+        """Nested summary of radii and the physical model.
+
+        Returns:
+            A multi-line text summary.
+        """
         rp = fmt_scalar_or_array(self.Rp_Rearth)
         scale = ""
         if not isinstance(self.flux_scale, jax.core.Tracer) and bool(

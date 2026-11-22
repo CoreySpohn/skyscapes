@@ -146,7 +146,12 @@ def plot_scattering_angle(
     ax.set_axis_off()
 
     def update(k_in, k_out):
-        """Redraw the grain for a new pair of directions."""
+        """Redraw the grain for a new pair of directions.
+
+        Args:
+            k_in: Incident direction, 2D or 3D, as for the plot function.
+            k_out: Outgoing direction, 2D or 3D, as for the plot function.
+        """
         drawing.set(*_plane(k_in, k_out))
 
     return ep.PlotResult(ax=ax, artists=drawing.artists(), update=update)

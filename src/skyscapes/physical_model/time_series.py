@@ -64,7 +64,11 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
             raise ValueError("contrast_grid must contain finite nonnegative values")
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Wavelength breaks of the time-dependent contrast table [nm]."""
+        """Wavelength breaks of the time-dependent contrast table [nm].
+
+        Returns:
+            1-D array of the unique table wavelengths [nm].
+        """
         return np.unique(self.wavelengths_nm)
 
     def contrast(
@@ -74,7 +78,17 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
         wavelength_nm: Array,
         Rp_Rearth: Array,
     ) -> Array:
-        """Require physical epochs rather than substituting orbital phase."""
+        """Require physical epochs rather than substituting orbital phase.
+
+        Args:
+            phase_angle_rad: Phase angle [rad]; unused.
+            star_planet_distance_AU: Star-planet distance [AU]; unused.
+            wavelength_nm: Wavelength [nm]; unused.
+            Rp_Rearth: Planet radius [Earth radii]; unused.
+
+        Returns:
+            Nothing; this method always raises ``ValueError``.
+        """
         raise ValueError(
             "Use contrast_at_time(..., time_d=...) for a time-series model"
         )

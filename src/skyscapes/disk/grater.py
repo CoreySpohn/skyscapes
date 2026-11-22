@@ -142,29 +142,29 @@ class GraterDisk(AbstractParametricDisk):
         beta: Flaring index (0 = none, 1 = linear).
         rmin_AU: Inner truncation radius [AU].
         rmax_AU: Outer truncation radius [AU].
-        cutoff_width_AU: Nonnegative inward radial taper width [AU].
-            Zero (default) preserves the hard rmin/rmax mask exactly.
-            Positive values use a C2 quintic ramp from zero at the boundary
-            to one a width inside the annulus. Widths larger than half the
-            annulus overlap.
         wavelengths_nm: 1-D wavelength grid for ``g_HG_grid`` /
             ``Ag_grid``, shape ``(n_wave,)`` [nm]. Must be sorted.
             ``photon_radiance`` calls outside this range return NaN.
         g_HG_grid: Henyey-Greenstein asymmetry at each grid wavelength.
         Ag_grid: Albedo-like scaling at each grid wavelength.
-
+        profile_id: Class-level profile identifier, ``"grater-1999"``.
         amplitude: Typed density or calibrated surface-brightness amplitude.
+        n_slices_los: Number of Gauss-Legendre LOS nodes.
         inclination_deg: Inclination, zero face-on.
         position_angle_deg: Major axis north through east.
-        n_slices_los: Number of Gauss-Legendre LOS nodes.
+        flux_scale: Dimensionless factor on the radiance, default one; see
+            :class:`~skyscapes.disk.AbstractDisk`. Exactly degenerate with
+            ``amplitude.level``.
+        cutoff_width_AU: Nonnegative inward radial taper width [AU].
+            Zero (default) preserves the hard rmin/rmax mask exactly.
+            Positive values use a C2 quintic ramp from zero at the boundary
+            to one a width inside the annulus. Widths larger than half the
+            annulus overlap.
         fixed_vertical_profile: Static. True declares ``gamma = 2`` and
             ``beta = 1`` fixed: the density is evaluated without general
             powers (1.5 to 1.8 times faster, same numbers to rounding).
             ``gamma`` and ``beta`` must hold 2 and 1 and are
             no longer fittable. Leave False (default) to fit either.
-        flux_scale: Dimensionless factor on the radiance, default one; see
-            :class:`~skyscapes.disk.AbstractDisk`. Exactly degenerate with
-            ``amplitude.level``.
     """
 
     sma_AU: Array
@@ -190,7 +190,11 @@ class GraterDisk(AbstractParametricDisk):
     fixed_vertical_profile: bool = eqx.field(static=True, default=False)
 
     def __check_init__(self):
-        """Validate the static LOS settings and the fixed-profile promise."""
+        """Validate the static LOS settings and the fixed-profile promise.
+
+        Returns:
+            None.
+        """
         if self.n_slices_los < 1:
             raise ValueError("n_slices_los must be positive.")
         if not self.fixed_vertical_profile:

@@ -82,6 +82,28 @@ class _ZodiPanel:
         look_radius=None,
         look_label_at=None,
     ):
+        """Create the panel's artists; place them with ``place``.
+
+        Args:
+            ax: The axes to draw on.
+            view: ``"top"`` (ecliptic plane seen from the north pole) or
+                ``"side"`` (the plane holding the sightline).
+            R: Observer's distance from the Sun [AU].
+            ray_length: Drawn length of the sightline [AU].
+            grain_distances: Distances of the marked grains along the
+                sightline [AU].
+            labels: Whether to draw the text labels.
+            inset: ``(x0, y0, width, height)`` of the grain inset in axes
+                coordinates, or None for no inset.
+            observer_text: Text of the observer label.
+            look_label: ``str.format`` template of the look-angle label, or
+                None for the view's default.
+            look_radius: Radius of the look-angle arc [AU]; None takes
+                ``0.3 * R``.
+            look_label_at: ``(angle_deg, distance_AU)`` polar position of
+                the look-angle label about the arc vertex, or None for
+                automatic placement.
+        """
         self.ax = ax
         self.look_label = _LOOK_LABELS[view] if look_label is None else look_label
         self.look_radius = 0.3 * R if look_radius is None else float(look_radius)
@@ -214,7 +236,11 @@ class _ZodiPanel:
             self.inset = GrainInset(ax, inset, grain_color=zodi)
 
     def parts(self):
-        """The panel's artists grouped by ``show`` part name."""
+        """The panel's artists grouped by ``show`` part name.
+
+        Returns:
+            Dict from part name to a list of artists (entries may be None).
+        """
         return {
             "orbit": [self.orbit],
             "sun": [self.sun, self.sun_label, self.to_sun],
@@ -234,6 +260,12 @@ class _ZodiPanel:
 
         The figure is symmetric about the Sun line, so the longitude enters
         through its absolute value.
+
+        Args:
+            ecliptic_latitude_deg: Ecliptic latitude of the sightline
+                [deg], in ``[-90, 90]``.
+            helioecliptic_longitude_deg: Longitude of the sightline from
+                the Sun's direction [deg], in ``[-180, 180]``.
         """
         R = self.R
         helioecliptic_longitude_deg = abs(helioecliptic_longitude_deg)
@@ -373,7 +405,12 @@ class _ZodiPanel:
         )
 
     def artists(self):
-        """The panel's artists, grouped by artist-vocabulary key."""
+        """The panel's artists, grouped by artist-vocabulary key.
+
+        Returns:
+            Dict with keys ``"scatter"``, ``"lines"`` and ``"text"``, each a
+            list of artists.
+        """
         out = {
             "scatter": list(self.scatters),
             "lines": list(self.lines),
@@ -638,7 +675,14 @@ def plot_local_zodi_geometry(
     ax.set_aspect("equal")
 
     def update(ecliptic_latitude_deg, helioecliptic_longitude_deg):
-        """Move the look-dependent artists to a new pair of angles."""
+        """Move the look-dependent artists to a new pair of angles.
+
+        Args:
+            ecliptic_latitude_deg: Ecliptic latitude of the sightline
+                [deg], in ``[-90, 90]``.
+            helioecliptic_longitude_deg: Longitude of the sightline from
+                the Sun's direction [deg], in ``[-180, 180]``.
+        """
         _check(ecliptic_latitude_deg, helioecliptic_longitude_deg)
         panel.place(float(ecliptic_latitude_deg), float(helioecliptic_longitude_deg))
 

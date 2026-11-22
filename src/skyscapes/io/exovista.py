@@ -481,6 +481,12 @@ def get_earth_like_planet_indices(fits_file: str) -> list[int]:
     Classification criteria:
       - Scaled semi-major axis: 0.95 <= a / sqrt(L_star) < 1.67 AU
       - Planet radius: 0.8 / sqrt(a_scaled) <= R < 1.4 R_earth
+
+    Args:
+        fits_file: Path of the ExoVista FITS file.
+
+    Returns:
+        Zero-based indices of the planets that meet the Earth-like criteria.
     """
     with fits.open(fits_file, memmap=False) as hdul:
         return _earth_like_planet_indices_from_hdul(hdul)

@@ -33,6 +33,14 @@ class WavelengthDependentSurface(AbstractSurface):
 
         ``n_nu`` is accepted for parity with :class:`FlatSurface` but
         unused -- the wavelength axis comes from ``self.spectrum``.
+
+        Args:
+            log_albedo_scalar: Log10 surface albedo scaling of one planet,
+                scalar.
+            n_nu: Number of wavenumber grid points; unused.
+
+        Returns:
+            Surface reflectivity (dimensionless), shape ``(n_nu,)``.
         """
         return (10.0**log_albedo_scalar) * self.spectrum
 
@@ -51,7 +59,15 @@ class FlatSurface(AbstractSurface):
     log_albedo: Array
 
     def compute_refl(self, log_albedo_scalar: Array, n_nu: int) -> Array:
-        """Return scalar albedo broadcast across the wavenumber grid."""
+        """Return scalar albedo broadcast across the wavenumber grid.
+
+        Args:
+            log_albedo_scalar: Log10 surface albedo of one planet, scalar.
+            n_nu: Number of wavenumber grid points.
+
+        Returns:
+            Surface reflectivity (dimensionless), shape ``(n_nu,)``.
+        """
         return (10.0**log_albedo_scalar) * jnp.ones(n_nu)
 
 
@@ -76,5 +92,12 @@ class EmittingSurface(eqx.Module):
     spectrum: Array
 
     def compute_emissivity(self, k: int) -> Array:
-        """Emissivity of planet ``k`` on the wavenumber grid, shape ``(n_nu,)``."""
+        """Emissivity of planet ``k`` on the wavenumber grid, shape ``(n_nu,)``.
+
+        Args:
+            k: Planet index along the ``K`` axis.
+
+        Returns:
+            Emissivity (dimensionless), shape ``(n_nu,)``.
+        """
         return self.emissivity[k] * self.spectrum

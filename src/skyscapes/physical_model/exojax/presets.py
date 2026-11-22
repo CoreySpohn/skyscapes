@@ -187,6 +187,15 @@ def vmr_dict_to_log_mmr_dict(
     (uniform mmr at every altitude). For Earth-realistic profiles
     (O3 stratospheric peak, H2O cold-trap drop) use
     :func:`vmr_dict_to_earth_profile_dict` instead.
+
+    Args:
+        vmrs: ``{name: VMR}`` for tracked molecules. Sum must be < 1.
+        K: Number of planets; each returned array has length ``K``.
+        bulk_gas: Name of the implicit residual gas, a key of
+            :data:`BULK_GAS_RECIPES`.
+
+    Returns:
+        ``{name: log10 MMR}`` with each value of shape ``(K,)``.
     """
     mmrs = vmr_dict_to_mmr_dict(vmrs, bulk_gas=bulk_gas)
     return {name: jnp.full((K,), float(jnp.log10(mmr))) for name, mmr in mmrs.items()}

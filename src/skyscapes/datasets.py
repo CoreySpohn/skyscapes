@@ -230,7 +230,11 @@ def fetch_scene() -> str:
 
 
 def list_phoenix() -> list[int]:
-    """List the registered PHOENIX Teff nodes in kelvin (solar metallicity)."""
+    """List the registered PHOENIX Teff nodes in kelvin (solar metallicity).
+
+    Returns:
+        The registered effective temperatures [K], as a list of ints.
+    """
     return list(PHOENIX_TEFF_K)
 
 
@@ -256,7 +260,11 @@ def fetch_phoenix(teff_K: int) -> str:
 
 
 def list_castelli_kurucz() -> list[int]:
-    """List solar-metallicity ATLAS9 Teff nodes [K], from 3500 to 50000."""
+    """List solar-metallicity ATLAS9 Teff nodes [K], from 3500 to 50000.
+
+    Returns:
+        The registered effective temperatures [K], as a list of ints.
+    """
     return list(CASTELLI_KURUCZ_TEFF_K)
 
 
@@ -266,6 +274,16 @@ def fetch_castelli_kurucz(teff_K: int) -> str:
     Each file contains all gravity columns, including zero-filled columns
     for gravities unavailable at this temperature. See ``list_castelli_kurucz`` for
     registered temperatures in kelvin. Downloads are cached by pooch.
+
+    Args:
+        teff_K: Node effective temperature in kelvin; one of
+            ``list_castelli_kurucz()``.
+
+    Returns:
+        Absolute path to the node's FITS file in the cache.
+
+    Raises:
+        ValueError: If ``teff_K`` is not a registered node.
     """
     if teff_K not in _CK04_HASHES:
         raise ValueError(f"teff_K = {teff_K} is not a registered CK04 node.")

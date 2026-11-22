@@ -28,7 +28,11 @@ class GridPhysicalModel(AbstractPhysicalModel):
     contrast_grid: Array
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Wavelength breaks of the phase-dependent contrast table [nm]."""
+        """Wavelength breaks of the phase-dependent contrast table [nm].
+
+        Returns:
+            1-D array of the unique grid wavelengths [nm].
+        """
         return np.unique(self.wavelengths_nm)
 
     def contrast(
@@ -88,7 +92,11 @@ class GridPhysicalModel(AbstractPhysicalModel):
         return jax.vmap(per_planet)(contrast_grid, phase_deg_x)
 
     def __repr__(self) -> str:
-        """One-line summary of grid shape (K, n_wl, n_phase) and wl range."""
+        """One-line summary of grid shape (K, n_wl, n_phase) and wl range.
+
+        Returns:
+            One-line summary string.
+        """
         K = int(self.contrast_grid.shape[0])
         n_wl = int(self.wavelengths_nm.shape[0])
         n_phase = int(self.phase_angle_deg.shape[0])

@@ -59,7 +59,20 @@ class GrayCloud(AbstractClouds):
         pressure: Array,
         n_nu: int,
     ) -> Contribution:
-        """Gray cloud contribution at a single pressure level."""
+        """Gray cloud contribution at a single pressure level.
+
+        Args:
+            log_pressure_bar_scalar: Log10 cloud-deck pressure [bar] of one
+                planet, scalar.
+            log_opt_depth_scalar: Log10 vertically integrated cloud scattering
+                optical depth of one planet, scalar.
+            pressure: Layer pressures [bar], shape ``(n_layers,)``.
+            n_nu: Number of wavenumber grid points.
+
+        Returns:
+            :class:`Contribution` with wavelength-independent optical depth,
+            fields of shape ``(n_layers, n_nu)``.
+        """
         n_layers = pressure.shape[0]
         log_p_layers = jnp.log10(pressure)
         log_w = -0.5 * ((log_p_layers - log_pressure_bar_scalar) / self.log_sigma) ** 2
@@ -95,6 +108,17 @@ class NoCloud(AbstractClouds):
 
         ``log_pressure_bar_scalar`` and ``log_opt_depth_scalar`` are
         accepted for parity with :class:`GrayCloud` but unused.
+
+        Args:
+            log_pressure_bar_scalar: Unused.
+            log_opt_depth_scalar: Unused.
+            pressure: Layer pressures [bar], shape ``(n_layers,)``; only its
+                length is used.
+            n_nu: Number of wavenumber grid points.
+
+        Returns:
+            :class:`Contribution` of zeros, fields of shape
+            ``(n_layers, n_nu)``.
         """
         zeros = jnp.zeros((pressure.shape[0], n_nu))
         return Contribution(dtau_total=zeros, dtau_scatter=zeros, g_weighted_num=zeros)

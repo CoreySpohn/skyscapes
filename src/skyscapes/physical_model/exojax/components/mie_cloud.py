@@ -87,7 +87,20 @@ class MieCloud(AbstractClouds):
         pressure: Array,
         n_nu: int,
     ) -> Contribution:
-        """Mie-cloud contribution: gray-depth distribution, spectral ssa/g."""
+        """Mie-cloud contribution: gray-depth distribution, spectral ssa/g.
+
+        Args:
+            log_pressure_bar_scalar: Log10 cloud-deck pressure [bar] of one
+                planet, scalar.
+            log_opt_depth_scalar: Log10 vertically integrated cloud extinction
+                optical depth of one planet, scalar.
+            pressure: Layer pressures [bar], shape ``(n_layers,)``.
+            n_nu: Number of wavenumber grid points.
+
+        Returns:
+            :class:`Contribution` with spectrally varying single-scattering
+            albedo and asymmetry, fields of shape ``(n_layers, n_nu)``.
+        """
         n_layers = pressure.shape[0]
         log_p_layers = jnp.log10(pressure)
         log_w = -0.5 * ((log_p_layers - log_pressure_bar_scalar) / self.log_sigma) ** 2

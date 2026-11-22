@@ -217,6 +217,11 @@ def build_species_prebuilt(
             tabulated over; must bracket the atmosphere's T-P profile.
         rayleigh: If False, skip the Rayleigh cross-section and return
             zeros (negligible in the thermal infrared).
+
+    Returns:
+        Tuple ``(molmass, opa, rayleigh_xs)``: molar mass [g/mol], the
+        opacity engine (``None`` when HITRAN has no lines in the range), and
+        the Rayleigh cross-section [cm^2/molecule] on ``nu_grid``.
     """
     if name not in MOLECULE_RECIPES:
         raise KeyError(
@@ -295,12 +300,27 @@ def recipe_default_molmass(name: str) -> float:
     Uses ExoJAX's ``molinfo.molmass`` lookup. Used when the species
     has no HITRAN lines in the configured wavenumber range and we
     therefore can't construct an MdbHitran to get the value from.
+
+    Args:
+        name: Molecule name known to ExoJAX's ``molinfo``.
+
+    Returns:
+        Molar mass [g/mol].
     """
     return float(molinfo.molmass(name))
 
 
 def build_bulk_prebuilt(*, name: str, nu_grid: Array) -> tuple[float, Array]:
-    """Construct (molmass, rayleigh_xs) for the implicit residual gas."""
+    """Construct (molmass, rayleigh_xs) for the implicit residual gas.
+
+    Args:
+        name: Gas name, a key of :data:`BULK_GAS_RECIPES`.
+        nu_grid: Wavenumber grid [cm^-1].
+
+    Returns:
+        Tuple ``(molmass, rayleigh_xs)``: molar mass [g/mol] and Rayleigh
+        cross-section [cm^2/molecule] on ``nu_grid``.
+    """
     if name not in BULK_GAS_RECIPES:
         raise KeyError(
             f"Unknown bulk gas {name!r}. Known: "

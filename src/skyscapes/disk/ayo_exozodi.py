@@ -49,7 +49,11 @@ class AYOExozodi(AbstractDisk):
     flux_scale: Array = eqx.field(default=1.0, converter=jnp.asarray, kw_only=True)
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """The analytic flat-AB spectrum has no wavelength breaks."""
+        """The analytic flat-AB spectrum has no wavelength breaks.
+
+        Returns:
+            Empty 1-D array of wavelength breaks [nm].
+        """
         return np.empty(0)
 
     def _photon_radiance_at(

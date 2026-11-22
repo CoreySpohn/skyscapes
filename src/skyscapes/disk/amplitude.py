@@ -19,6 +19,16 @@ def zero_magnitude_photon_flux_density(passband, *, zero_point_jy=None):
     Vega bands require an explicit zero_point_jy. This is a zero-point
     choice, not an integration through a filter: zodi.Passband specifies
     only a center. F0_ph = F0_Jy * Jy / (h * lambda_m) * nm2m.
+
+    Args:
+        passband: Calibration band, giving the magnitude system, name and center
+            wavelength.
+        zero_point_jy: Monochromatic flux density of a zero-magnitude source
+            [Jy]. ``None`` uses the AB definition, or 3636 Jy for Johnson V.
+
+    Returns:
+        Photon flux density of a zero-magnitude source at the band center
+        [ph s^-1 m^-2 nm^-1].
     """
     if zero_point_jy is None:
         if passband.magnitude_system == "ab":
@@ -31,7 +41,14 @@ def zero_magnitude_photon_flux_density(passband, *, zero_point_jy=None):
 
 
 def check_amplitude(amplitude, profile):
-    """Reject incompatible amplitude families, profiles and viewing metadata."""
+    """Reject incompatible amplitude families, profiles and viewing metadata.
+
+    Args:
+        amplitude: Dust amplitude to validate, either a ``DensityDust`` or a
+            ``SurfaceBrightnessDust``.
+        profile: Parametric disk the amplitude is paired with; supplies the
+            ``profile_id`` and ``zero_point_jy`` that are checked.
+    """
     if isinstance(amplitude, DensityDust):
         if amplitude.profile_id != profile.profile_id:
             raise ValueError(f"profile_id must be {profile.profile_id!r}")
@@ -76,6 +93,17 @@ def density_level(amplitude, profile, *, star, dist_pc, time_d=0.0):
     Dividing by 10^(-0.4*4.83) and multiplying by (0.010)^2 gives
     4.0655682e-11 host contrast per 10 mas pixel. DensityDust is already
     a profile multiplier and passes through without host rescaling.
+
+    Args:
+        amplitude: Dust amplitude, either a ``DensityDust`` or a
+            ``SurfaceBrightnessDust``.
+        profile: Parametric disk whose unit scattering density is scaled.
+        star: Host star, supplying the photon flux used in the calibration.
+        dist_pc: Distance of the system from the observer [pc].
+        time_d: Time of the calibration in days from the scene epoch; default 0.
+
+    Returns:
+        Dimensionless multiplier of the profile's unit scattering density.
     """
     check_amplitude(amplitude, profile)
     if isinstance(amplitude, DensityDust):
@@ -121,6 +149,19 @@ def surface_brightness_level(
     face-on integral, so their round trip is limited only by floating point.
     A template is required because DensityDust cannot encode luminosity_rule
     or mag_per_arcsec2. No conversion exists without an explicit profile.
+
+    Args:
+        amplitude: ``DensityDust`` amplitude to convert.
+        profile: Parametric disk whose unit scattering density is scaled.
+        calibration: ``SurfaceBrightnessDust`` template that supplies the
+            luminosity rule, reference radius and brightness metadata.
+        star: Host star, supplying the photon flux used in the calibration.
+        dist_pc: Distance of the system from the observer [pc].
+        time_d: Time of the calibration in days from the scene epoch; default 0.
+
+    Returns:
+        Dimensionless surface-brightness level, the density level divided by the
+        density level of the template at level one.
     """
     if not isinstance(amplitude, DensityDust):
         raise TypeError("amplitude must be DensityDust")

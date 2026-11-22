@@ -13,6 +13,16 @@ def transmission_from_table(path, *, wavelength_unit="nm") -> Transmission:
     units are ``"nm"``, ``"um"`` or ``"angstrom"``; transmission is a
     nonnegative photon-counting response. Rows must have increasing
     wavelengths. No data are fetched from the network.
+
+    Args:
+        path: Path of the local text file with a wavelength column and a
+            transmission column.
+        wavelength_unit: Unit of the wavelength column: ``"nm"``, ``"um"`` or
+            ``"angstrom"``.
+
+    Returns:
+        Transmission with wavelengths converted to nm and the tabulated
+        photon-counting response.
     """
     factors = {"nm": 1.0, "um": 1000.0, "angstrom": 0.1}
     if wavelength_unit not in factors:

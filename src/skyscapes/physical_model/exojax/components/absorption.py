@@ -31,7 +31,22 @@ class Absorption(AbstractAbsorption):
         gravity: Array,
         rt_engine,
     ) -> Contribution:
-        """Sum per-species absorption optical depth."""
+        """Sum per-species absorption optical depth.
+
+        Args:
+            species: Species of one planet; those with ``opa is None`` are
+                skipped.
+            Tarr: Layer temperatures [K], shape ``(n_layers,)``.
+            pressure: Layer pressures [bar], shape ``(n_layers,)``.
+            gravity: Surface gravity [cm/s^2], scalar.
+            rt_engine: ExoJAX radiative-transfer engine; supplies the
+                wavenumber grid and the opacity-to-column conversion.
+
+        Returns:
+            :class:`Contribution` whose ``dtau_total`` is the summed
+            absorption optical depth, shape ``(n_layers, n_nu)``; the
+            scattering fields are zero.
+        """
         dtau_per_mol = [
             rt_engine.opacity_profile_xs(
                 s.opa.xsmatrix(Tarr, pressure),
@@ -66,6 +81,10 @@ class PrecomputedAbsorption(AbstractAbsorption):
 
     ``xsmatrix_per_species`` corresponds, in order, to the species with
     ``opa is not None`` (the same ones :class:`Absorption` would sum over).
+
+    Attributes:
+        xsmatrix_per_species: Cross-section matrices [cm^2/molecule], one per
+            absorbing species, each of shape ``(n_layers, n_nu)``.
     """
 
     xsmatrix_per_species: tuple[Array, ...]
@@ -78,7 +97,23 @@ class PrecomputedAbsorption(AbstractAbsorption):
         gravity: Array,
         rt_engine,
     ) -> Contribution:
-        """Sum per-species absorption from the stored cross-sections."""
+        """Sum per-species absorption from the stored cross-sections.
+
+        Args:
+            species: Species of one planet; only those with ``opa`` set are
+                used, matched in order to ``xsmatrix_per_species``.
+            Tarr: Layer temperatures [K]; unused, the stored cross-sections
+                fix the temperature.
+            pressure: Layer pressures [bar], shape ``(n_layers,)``.
+            gravity: Surface gravity [cm/s^2], scalar.
+            rt_engine: ExoJAX radiative-transfer engine; supplies the
+                wavenumber grid and the opacity-to-column conversion.
+
+        Returns:
+            :class:`Contribution` whose ``dtau_total`` is the summed
+            absorption optical depth, shape ``(n_layers, n_nu)``; the
+            scattering fields are zero.
+        """
         absorbing = [s for s in species if s.opa is not None]
         dtau_per_mol = [
             rt_engine.opacity_profile_xs(

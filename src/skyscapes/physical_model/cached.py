@@ -59,6 +59,9 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
 
         Gauss nodes cannot resolve absorption lines between breaks, so a band
         integral samples every native grid point. Cost scales with the grid.
+
+        Returns:
+            1-D array of the native grid wavelengths [nm], sorted ascending.
         """
         return np.sort(np.asarray(wavenumber_cm_to_nm(np.asarray(self.nu_grid))))
 
@@ -72,6 +75,12 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
         result. Requires the model to expose ``reflectivity()``,
         ``nu_grid``, and ``n_nu`` --
         presently :class:`ExoJaxPhysicalModel` is the supported source.
+
+        Args:
+            model: Source model exposing ``reflectivity()``, ``nu_grid`` and ``n_nu``.
+
+        Returns:
+            Pre-computed model holding the source model's reflectivity.
         """
         try:
             reflectivity = model.reflectivity()
@@ -126,6 +135,9 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
         Idempotent and safe to call from JAX-traced contexts (the
         save itself is plain NumPy -- callers should not call this
         inside a JIT region, but the data is just regular arrays).
+
+        Args:
+            path: Destination ``.npz`` file; missing parent directories are created.
         """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -146,6 +158,15 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
         """Per-planet, per-time geometric-albedo contrast at one wavelength.
 
         The single-wavelength case of :meth:`contrast_cube`; shape ``(K, T)``.
+
+        Args:
+            phase_angle_rad: Star-planet-observer phase angle [rad], shape ``(K, T)``.
+            star_planet_distance_AU: Star-planet distance [AU], shape ``(K, T)``.
+            wavelength_nm: Scalar wavelength [nm].
+            Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
+
+        Returns:
+            Contrast (planet-to-star flux ratio), shape ``(K, T)``.
         """
         return self.contrast_cube(
             phase_angle_rad,
@@ -167,6 +188,15 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
         interpolation (extrapolating linearly outside the grid, where values
         can be negative), then the Lambertian-sphere conversion to geometric
         albedo (Seager 2010, eq 3.36), Lambert phase and ``(Rp/d)^2``.
+
+        Args:
+            phase_angle_rad: Star-planet-observer phase angle [rad], shape ``(K, T)``.
+            star_planet_distance_AU: Star-planet distance [AU], shape ``(K, T)``.
+            wavelengths_nm: Wavelengths [nm], shape ``(W,)``.
+            Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
+
+        Returns:
+            Contrast (planet-to-star flux ratio), shape ``(W, K, T)``.
         """
         return project_reflected(
             self.reflectivity,
@@ -178,7 +208,11 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
         )
 
     def __repr__(self) -> str:
-        """Compact summary of the cached spectrum."""
+        """Compact summary of the cached spectrum.
+
+        Returns:
+            Multi-line summary string.
+        """
         K = int(self.reflectivity.shape[0])
         wl_min = float(1.0e7 / self.nu_grid.max())
         wl_max = float(1.0e7 / self.nu_grid.min())

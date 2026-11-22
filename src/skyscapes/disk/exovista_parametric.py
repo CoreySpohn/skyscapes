@@ -75,6 +75,18 @@ def three_component_hg(
 
     ``pfunc = w0 HG(g0) + w1 HG(g1) + w2 HG(g2)``. The caller is responsible
     for choosing weights that sum to 1 (we do not normalize here).
+
+    Args:
+        cos_phi: Cosine of the scattering angle, any shape.
+        g0: Asymmetry parameter of the first component, in (-1, 1).
+        g1: Asymmetry parameter of the second component, in (-1, 1).
+        g2: Asymmetry parameter of the third component, in (-1, 1).
+        w0: Weight of the first component.
+        w1: Weight of the second component.
+        w2: Weight of the third component.
+
+    Returns:
+        Phase function value per steradian, broadcast shape of the inputs.
     """
     return (
         w0 * henyey_greenstein(cos_phi, g0)
@@ -182,19 +194,23 @@ class ExovistaParametricDisk(AbstractParametricDisk):
             than ``rmin_AU`` to disable.
         hor: Opening angle (Gaussian vertical scale / radius).
         eta: PR-drag / collision-timescale ratio at ``r0 - dr``.
-        g0, g1, g2: Three-component HG asymmetry parameters.
-        w0, w1, w2: Three-component HG weights. Should sum to 1; not
-            enforced.
+        g0: Asymmetry parameter of the first HG component.
+        g1: Asymmetry parameter of the second HG component.
+        g2: Asymmetry parameter of the third HG component.
+        w0: Weight of the first HG component. The three weights should sum
+            to 1; this is not enforced.
+        w1: Weight of the second HG component.
+        w2: Weight of the third HG component.
         rmin_AU: LOS-integration inner bound [AU].
         rmax_AU: LOS-integration outer bound [AU].
         wavelengths_nm: 1-D wavelength grid for ``Ag_grid``. Queries
             outside this range return NaN.
         Ag_grid: Phenomenological albedo scaling vs wavelength.
-
+        profile_id: Class-level profile identifier, ``"exovista-parametric"``.
         amplitude: Typed density or calibrated surface-brightness amplitude.
+        n_slices_los: Number of Gauss-Legendre LOS nodes.
         inclination_deg: Inclination, zero face-on.
         position_angle_deg: Major axis north through east.
-        n_slices_los: Number of Gauss-Legendre LOS nodes.
         flux_scale: Dimensionless factor on the radiance, default one; see
             :class:`~skyscapes.disk.AbstractDisk`. Exactly degenerate with
             ``amplitude.level``.

@@ -96,7 +96,21 @@ def _planet_group(system, model_template):
 
 
 def from_scenes(cls, scenes, *, capacity=None, batch_shape=None):
-    """Pack unbatched scenes, sorted by semi-major axis, on the host."""
+    """Pack unbatched scenes, sorted by semi-major axis, on the host.
+
+    Args:
+        cls: The scene class to construct for each packed row.
+        scenes: Unbatched scenes sharing one epoch, star class and
+            physical-model class, with no disk or local zodi.
+        capacity: Planet slots per scene. None uses the largest valid planet
+            count among the scenes; extra slots are padding.
+        batch_shape: Leading batch axes of the result. None uses
+            ``(len(scenes),)``; its product must equal ``len(scenes)``.
+
+    Returns:
+        A batched scene on the host whose leaves carry ``batch_shape`` as
+        leading axes.
+    """
     scenes = list(scenes)
     if not scenes:
         raise ValueError("scenes must be nonempty")
@@ -209,7 +223,14 @@ def from_scenes(cls, scenes, *, capacity=None, batch_shape=None):
 
 
 def to_scenes(system):
-    """Unpack host scenes, discarding padding and restoring source leaf order."""
+    """Unpack host scenes, discarding padding and restoring source leaf order.
+
+    Args:
+        system: A scene, batched or not.
+
+    Returns:
+        A list of unbatched host scenes, one per batch row in C order.
+    """
     if (
         not system.batch_shape
         and system._source_layout is None
@@ -273,7 +294,16 @@ def to_scenes(system):
 
 
 def to_table(system):
-    """Flatten every dynamic leaf under its JAX key path, with epoch and K."""
+    """Flatten every dynamic leaf under its JAX key path, with epoch and K.
+
+    Args:
+        system: A scene, batched or not.
+
+    Returns:
+        A dict of host arrays keyed by leaf path, plus ``body_index``, ``K``
+        (the planet capacity) and the epoch entries ``epoch_jd1``,
+        ``epoch_jd2`` and ``epoch_scale``.
+    """
     table = {
         jax.tree_util.keystr(path).lstrip("."): np.asarray(x).copy()
         for path, x in jax.tree_util.tree_flatten_with_path(_host(system))[0]
@@ -299,7 +329,17 @@ def _table_leaf(table, path, template_leaf):
 
 
 def from_table(cls, table, *, template):
-    """Restore leaf arrays using a template for model classes and static fields."""
+    """Restore leaf arrays using a template for model classes and static fields.
+
+    Args:
+        cls: The scene class to construct.
+        table: A table written by :func:`to_table`.
+        template: A scene supplying the model classes, static fields and
+            structure; its leaf values are replaced by the table.
+
+    Returns:
+        The restored scene on the host.
+    """
     capacity = int(table["K"])
     indices = {
         int(key[len("planets[") :].split("]", 1)[0])

@@ -27,7 +27,18 @@ class PowerLawTPProfile(AbstractTPProfile):
     def compute_Tarr(
         self, rt_engine, T_eq_K_scalar: Array, T_alpha_scalar: Array
     ) -> Array:
-        """``T(P) = T_eq * P^alpha`` on the rt_engine's layer pressures."""
+        """``T(P) = T_eq * P^alpha`` on the rt_engine's layer pressures.
+
+        Args:
+            rt_engine: ExoJAX radiative-transfer engine; supplies the layer
+                pressures.
+            T_eq_K_scalar: Reference temperature at 1 bar [K] of one planet,
+                scalar.
+            T_alpha_scalar: Power-law exponent of one planet, scalar.
+
+        Returns:
+            Layer temperatures [K], shape ``(n_layers,)``.
+        """
         return rt_engine.powerlaw_temperature(T_eq_K_scalar, T_alpha_scalar)
 
 
@@ -46,7 +57,15 @@ class PolynomialTPProfile(AbstractTPProfile):
     coefficients: Array
 
     def temperature(self, pressure_bar: Array, k: int = 0) -> Array:
-        """Temperature [K] of planet ``k`` at ``pressure_bar``."""
+        """Temperature [K] of planet ``k`` at ``pressure_bar``.
+
+        Args:
+            pressure_bar: Pressures [bar], any shape.
+            k: Planet index along the ``K`` axis.
+
+        Returns:
+            Temperature [K], same shape as ``pressure_bar``.
+        """
         logp = jnp.log10(pressure_bar)
         powers = logp[..., None] ** jnp.arange(self.coefficients.shape[-1])
         return powers @ self.coefficients[k]
@@ -58,6 +77,16 @@ class PolynomialTPProfile(AbstractTPProfile):
 
         ``coefficients_scalar`` is one planet's coefficient vector, shape
         ``(n + 1,)``; ``unused`` exists only to match the abstract signature.
+
+        Args:
+            rt_engine: ExoJAX radiative-transfer engine; supplies the layer
+                pressures [bar].
+            coefficients_scalar: Polynomial coefficients [K] of one planet in
+                ``log10 P[bar]``, shape ``(n + 1,)``.
+            unused: Ignored.
+
+        Returns:
+            Layer temperatures [K], shape ``(n_layers,)``.
         """
         logp = jnp.log10(rt_engine.pressure)
         powers = logp[:, None] ** jnp.arange(coefficients_scalar.shape[-1])

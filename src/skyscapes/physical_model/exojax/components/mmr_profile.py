@@ -33,7 +33,14 @@ class AbstractMmrProfile(eqx.Module, strict=True):
 
     @abstractmethod
     def evaluate(self, pressure: Array) -> Array:
-        """Return shape ``(n_layers,)`` mmr values at the layer pressures."""
+        """Return shape ``(n_layers,)`` mmr values at the layer pressures.
+
+        Args:
+            pressure: Layer pressures [bar], shape ``(n_layers,)``.
+
+        Returns:
+            Mass-mixing ratio (dimensionless) per layer, shape ``(n_layers,)``.
+        """
 
 
 class ConstantMmr(AbstractMmrProfile):
@@ -50,7 +57,15 @@ class ConstantMmr(AbstractMmrProfile):
     log_mmr: Array
 
     def evaluate(self, pressure: Array) -> Array:
-        """Return ``10**log_mmr`` broadcast to ``pressure.shape``."""
+        """Return ``10**log_mmr`` broadcast to ``pressure.shape``.
+
+        Args:
+            pressure: Layer pressures [bar], shape ``(n_layers,)``; only its
+                shape is used.
+
+        Returns:
+            Mass-mixing ratio (dimensionless) per layer, shape ``(n_layers,)``.
+        """
         return (10.0**self.log_mmr) * jnp.ones_like(pressure)
 
 
@@ -74,7 +89,14 @@ class StratosphericPeakMmr(AbstractMmrProfile):
     log_sigma_decades: Array
 
     def evaluate(self, pressure: Array) -> Array:
-        """Gaussian peak in log-pressure."""
+        """Gaussian peak in log-pressure.
+
+        Args:
+            pressure: Layer pressures [bar], shape ``(n_layers,)``.
+
+        Returns:
+            Mass-mixing ratio (dimensionless) per layer, shape ``(n_layers,)``.
+        """
         log_p = jnp.log10(pressure)
         shape = jnp.exp(
             -0.5 * ((log_p - self.log_peak_pressure_bar) / self.log_sigma_decades) ** 2
@@ -103,7 +125,14 @@ class TroposphericMmr(AbstractMmrProfile):
     log_transition_width_decades: Array
 
     def evaluate(self, pressure: Array) -> Array:
-        """Sigmoid step in log-pressure."""
+        """Sigmoid step in log-pressure.
+
+        Args:
+            pressure: Layer pressures [bar], shape ``(n_layers,)``.
+
+        Returns:
+            Mass-mixing ratio (dimensionless) per layer, shape ``(n_layers,)``.
+        """
         log_p = jnp.log10(pressure)
         # Sigmoid weight: ~1 at high pressure (below cold trap),
         # ~0 at low pressure (above cold trap).

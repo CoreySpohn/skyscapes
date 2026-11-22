@@ -35,6 +35,10 @@ class _SceneEphemeris(Ephemeris):
 
     ``scene_planet_indices`` has shape ``(K_total,)`` and indexes the body
     axis of all inherited observables; body zero is always the star.
+
+    Attributes:
+        scene_planet_indices: Integer indices of the scene's planets on the body
+            axis, in scene order, shape ``(K_total,)``.
     """
 
     scene_planet_indices: Array
@@ -118,18 +122,16 @@ class Scene(eqx.Module):
 
     All ``time_d`` arguments are plain arrays of days from the scene epoch,
     ``dynamics.frame.epoch``. Convert absolute dates on the host with
-    ``scene.epoch.days(...)`` before passing offsets to JAX.
+    ``scene.epoch.days(...)`` before passing offsets to JAX. The read-only
+    ``epoch`` property returns ``dynamics.frame.epoch``.
 
     Attributes:
         star: Host star (``AbstractStar``).
         planets: Variable-length tuple of ``Planet``.
         dynamics: Orbix Jacobi chain, declared inner to outer.
-        epoch: Read-only reference to ``dynamics.frame.epoch``.
         valid: Boolean B + (K,) mask; defaults to all True. Batched scenes
             contain exactly one stacked Planet group and no disk. Every
             numeric leaf, including spectral grids, carries the batch axes.
-        body_index: Static permutation mapping flattened scene planet indices to
-            zero-based chain planet indices. Defaults to the identity.
         disk: Optional extended source, the only exozodi (``AbstractDisk | None``):
             an ExoVista disk, a parametric disk, or an analytic exozodi model
             such as ``skyscapes.disk.AYOExozodi``.
@@ -143,6 +145,8 @@ class Scene(eqx.Module):
             disk images already carry their own geometry.
         midplane_position_angle_deg: Major-axis position angle north through
             east [deg]. ExoVista headers map to (90 + PA) modulo 360.
+        body_index: Static permutation mapping flattened scene planet indices to
+            zero-based chain planet indices. Defaults to the identity.
     """
 
     star: AbstractStar
@@ -162,6 +166,15 @@ class Scene(eqx.Module):
         Returns ph s^-1 m^-2 nm^-1 sr^-1 with shape wavelength_nm.shape
         + grid.shape. A scene without a disk returns zero radiance.
         Batched scenes exclude disks and local zodi.
+
+        Args:
+            wavelength_nm: Wavelengths [nm], any shape.
+            time_d: Observation time, scalar days from the scene epoch.
+            grid: Sky pixel grid on which the radiance is sampled.
+
+        Returns:
+            Disk photon radiance [ph s^-1 m^-2 nm^-1 sr^-1], shape
+            ``wavelength_nm.shape + grid.shape``.
         """
         from ..disk.base import check_sky_grid, radiance_image
 
@@ -179,6 +192,17 @@ class Scene(eqx.Module):
         Axes of wavelength_nm precede the broadcast shape of the supplied
         east/north offsets. Positions are in arcseconds and time_d is scalar
         days from the scene epoch. No disk gives zero.
+
+        Args:
+            wavelength_nm: Wavelengths [nm], any shape.
+            time_d: Observation time, scalar days from the scene epoch.
+            east_arcsec: Sky offsets east of the star [arcsec].
+            north_arcsec: Sky offsets north of the star [arcsec], broadcast with
+                ``east_arcsec``.
+
+        Returns:
+            Disk photon radiance [ph s^-1 m^-2 nm^-1 sr^-1], shape
+            ``wavelength_nm.shape`` followed by the broadcast offset shape.
         """
         from ..disk.composite import orient_disk
 
@@ -221,6 +245,20 @@ class Scene(eqx.Module):
 
         ``body_index[j]`` is the zero-based chain planet for flattened scene
         planet j. It is structural metadata, never inferred during a solve.
+
+        Args:
+            star: Host star.
+            planets: One ``Planet`` or a sequence of them, in scene order.
+            dynamics: Orbix Jacobi chain of the star and planets, inner to outer.
+            disk: Optional extended source, or None.
+            midplane_inc_deg: Disk midplane inclination [deg], 0 face-on.
+            midplane_position_angle_deg: Disk major-axis position angle north
+                through east [deg].
+            local_zodi: Optional local zodiacal light model, or None.
+            body_index: Chain planet index for each flattened scene planet; None
+                uses the identity.
+            valid: Boolean mask of real planet slots, shape ``B + (K,)``; None
+                marks all valid.
         """
         self.star = star
         self._source_layout = None
@@ -285,26 +323,58 @@ class Scene(eqx.Module):
         At least one Planet group must supply the physical-model class; an
         empty group is sufficient. Host layout data restores source group
         boundaries and scene order when unpacking.
+
+        Args:
+            scenes: Unbatched scenes to pack.
+            capacity: Planet slots per scene; None uses the largest valid count.
+            batch_shape: Leading batch axes; None uses ``(len(scenes),)``.
+
+        Returns:
+            A batched scene on the host with NumPy float64 leaves.
         """
         return _system_batch.from_scenes(
             cls, scenes, capacity=capacity, batch_shape=batch_shape
         )
 
     def to_scenes(self):
-        """Return unpadded host scenes in row-major batch order."""
+        """Return unpadded host scenes in row-major batch order.
+
+        Returns:
+            A list of unbatched host scenes.
+        """
         return _system_batch.to_scenes(self)
 
     def to_table(self) -> dict[str, np.ndarray]:
-        """Return all leaves by JAX key path, plus scalar K and epoch parts."""
+        """Return all leaves by JAX key path, plus scalar K and epoch parts.
+
+        Returns:
+            A dict of host arrays keyed by leaf path, plus ``body_index``,
+            ``K`` and the epoch entries.
+        """
         return _system_batch.to_table(self)
 
     @classmethod
     def from_table(cls, table, *, template):
-        """Restore a table; template supplies model classes and static metadata."""
+        """Restore a table; template supplies model classes and static metadata.
+
+        Args:
+            table: A table written by :meth:`to_table`.
+            template: A scene supplying model classes and static metadata.
+
+        Returns:
+            The restored scene on the host.
+        """
         return _system_batch.from_table(cls, table, template=template)
 
     def take(self, index):
-        """Gather a scalar index along the last batch axis, under jit or vmap."""
+        """Gather a scalar index along the last batch axis, under jit or vmap.
+
+        Args:
+            index: Scalar integer index along the last batch axis.
+
+        Returns:
+            A scene with that batch axis removed.
+        """
         if not self.batch_shape:
             raise ValueError("take requires at least one batch axis")
         axis = len(self.batch_shape) - 1
@@ -361,6 +431,38 @@ class Scene(eqx.Module):
         transferring the resulting offsets to JAX. ``ra_deg`` and ``dec_deg``
         place the scene on the sky (ICRS degrees, both or neither); without
         them the scene is unplaced.
+
+        Args:
+            star: Host star.
+            planets: One ``Planet`` or a sequence of them, in scene order.
+            star_mass_Msun: Stellar mass [solar masses].
+            planet_mass_Msun: Planet masses [solar masses]; a scalar or shape
+                ``(K_total,)`` in scene order.
+            dist_pc: Distance to the system [pc].
+            a_AU: Semi-major axes [AU]; a scalar or shape ``(K_total,)``.
+            e: Eccentricities, dimensionless; a scalar or shape ``(K_total,)``.
+            i_rad: Inclinations [rad]; a scalar or shape ``(K_total,)``.
+            W_rad: Longitudes of the ascending node [rad]; a scalar or shape
+                ``(K_total,)``.
+            w_rad: Arguments of periapsis [rad]; a scalar or shape
+                ``(K_total,)``.
+            M0_rad: Mean anomalies at ``epoch_d`` [rad]; a scalar or shape
+                ``(K_total,)``.
+            epoch_d: Epoch of the elements, days from the scene epoch.
+            epoch: Scene reference epoch, host-side metadata.
+            ra_deg: Right ascension [deg, ICRS], or None for an unplaced scene.
+            dec_deg: Declination [deg, ICRS], or None for an unplaced scene.
+            order: Scene planet indices in inner-to-outer chain order; None
+                sorts by semi-major axis.
+            valid: Boolean mask of real planet slots; None marks all valid.
+            disk: Optional extended source, or None.
+            midplane_inc_deg: Disk midplane inclination [deg], 0 face-on.
+            midplane_position_angle_deg: Disk major-axis position angle north
+                through east [deg].
+            local_zodi: Optional local zodiacal light model, or None.
+
+        Returns:
+            The assembled scene.
         """
         planets = (planets,) if isinstance(planets, Planet) else tuple(planets)
         count = sum(p.n_planets for p in planets)
@@ -463,6 +565,13 @@ class Scene(eqx.Module):
         geometry consumer to reuse the solve; dates must match that solve.
         ``solver`` accepts an orbix.kepler strategy. Stored orbit rates follow
         orbix semantics: editing masses changes barycentric weights, not rates.
+
+        Args:
+            time_d: Observation times, days from the scene epoch.
+            solver: Optional ``orbix.kepler`` strategy; None uses Markley.
+
+        Returns:
+            The solved ephemeris, with ``scene_planet_indices`` in scene order.
         """
         solved = _masked_solve(
             self.dynamics,
@@ -482,6 +591,14 @@ class Scene(eqx.Module):
         """Star-relative (east, north) offsets in arcsec, north up, ``(2, K_total, T)``.
 
         ``time_d`` is days from the scene epoch.
+
+        Args:
+            time_d: Observation times, days from the scene epoch, shape ``(T,)``.
+            ephemeris: Optional ephemeris from :meth:`ephemeris` solved at these
+                dates; None solves it here.
+
+        Returns:
+            Offsets [arcsec] of each planet from the star, shape ``(2, K_total, T)``.
         """
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
         return jnp.stack(eph.offset_arcsec(eph.scene_planet_indices, 0), axis=0)
@@ -491,6 +608,14 @@ class Scene(eqx.Module):
         """Position angles east of north in ``[0, 360)``, ``(K_total, T)``.
 
         ``time_d`` is days from the scene epoch.
+
+        Args:
+            time_d: Observation times, days from the scene epoch, shape ``(T,)``.
+            ephemeris: Optional ephemeris from :meth:`ephemeris` solved at these
+                dates; None solves it here.
+
+        Returns:
+            Position angles [deg], shape ``(K_total, T)``.
         """
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
         return eph.position_angle_deg(eph.scene_planet_indices, 0)
@@ -503,6 +628,14 @@ class Scene(eqx.Module):
 
         The Jacobi chain includes interior planets in each orbit's reference
         mass and centre; it is a Kepler hierarchy, without mutual perturbations.
+
+        Args:
+            time_d: Observation times, days from the scene epoch, shape ``(T,)``.
+            ephemeris: Optional ephemeris from :meth:`ephemeris` solved at these
+                dates; None solves it here.
+
+        Returns:
+            Stellar offsets (east, north) [arcsec], shape ``(2, T)``.
         """
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
         return jnp.stack(eph.offset_arcsec(0, "barycenter"), axis=0)
@@ -514,6 +647,14 @@ class Scene(eqx.Module):
         ``time_d`` is days from the scene epoch.
 
         Read the Jacobi ephemeris without adding a systemic velocity.
+
+        Args:
+            time_d: Observation times, days from the scene epoch, shape ``(T,)``.
+            ephemeris: Optional ephemeris from :meth:`ephemeris` solved at these
+                dates; None solves it here.
+
+        Returns:
+            Radial velocity [m/s], shape ``(T,)``.
         """
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
         return eph.radial_velocity_m_per_s(0, "barycenter")
@@ -574,6 +715,15 @@ class Scene(eqx.Module):
         """Per-planet contrast at a scalar wavelength [nm], shape ``(K_total, T)``.
 
         ``time_d`` is days from the scene epoch.
+
+        Args:
+            wavelength_nm: A single wavelength [nm].
+            time_d: Observation times, days from the scene epoch, shape ``(T,)``.
+            ephemeris: Optional ephemeris from :meth:`ephemeris` solved at these
+                dates; None solves it here.
+
+        Returns:
+            Planet-to-star flux ratio, dimensionless, shape ``(K_total, T)``.
         """
         return self._photometry(wavelength_nm, time_d, ephemeris)
 
@@ -587,6 +737,9 @@ class Scene(eqx.Module):
             wavelengths_nm: Wavelengths [nm], shape ``(W,)``.
             time_d: Observation times in days from the scene epoch, shape ``(T,)``.
             ephemeris: Optional scene ephemeris solved at these dates.
+
+        Returns:
+            Planet-to-star flux ratio, dimensionless, shape ``(W, K_total, T)``.
         """
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
         return jax.vmap(lambda w: self.contrasts(w, time_d, ephemeris=eph))(
@@ -594,7 +747,11 @@ class Scene(eqx.Module):
         )
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Union of stellar, planetary, disk and local-zodi wavelength breaks [nm]."""
+        """Union of stellar, planetary, disk and local-zodi wavelength breaks [nm].
+
+        Returns:
+            Sorted breakpoint wavelengths [nm] on the host.
+        """
         models = (self.star, *self.planets)
         if self.disk is not None:
             models = (*models, self.disk)
@@ -621,6 +778,20 @@ class Scene(eqx.Module):
         the model contrast directly, including for a reflected spectrum at a
         stellar zero. An opaque response has undefined contrast.
         Times are days from the scene epoch.
+
+        Args:
+            quadrature: Host-built quadrature giving the band nodes [nm] and
+                weights.
+            time_d: Observation times, days from the scene epoch, shape ``(T,)``.
+            transmission: Optional photon-counting response evaluated on the
+                ``(W, Q)`` node wavelengths [nm]; it must broadcast to that
+                shape.
+            ephemeris: Optional ephemeris from :meth:`ephemeris` solved at these
+                dates; None solves it here.
+
+        Returns:
+            Band-integrated planet-to-star photon ratio, dimensionless, shape
+            ``(W, K_total, T)``.
         """
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
         wave = quadrature.nodes_nm
@@ -678,6 +849,16 @@ class Scene(eqx.Module):
         """Per-planet flux density [ph/s/m^2/nm], shape ``(K_total, T)``.
 
         ``time_d`` is days from the scene epoch.
+
+        Args:
+            wavelength_nm: A single wavelength [nm].
+            time_d: Observation times, days from the scene epoch, shape ``(T,)``.
+            ephemeris: Optional ephemeris from :meth:`ephemeris` solved at these
+                dates; None solves it here.
+
+        Returns:
+            Planet photon flux density at the observer [ph s^-1 m^-2 nm^-1],
+            shape ``(K_total, T)``.
         """
         return self._photometry(wavelength_nm, time_d, ephemeris, flux=True)
 
@@ -690,6 +871,16 @@ class Scene(eqx.Module):
         ``time_d`` is days from the scene epoch.
 
         Each result has shape ``(K_total, T)``; wavelength_nm is scalar.
+
+        Args:
+            time_d: Observation times, days from the scene epoch, shape ``(T,)``.
+            wavelength_nm: Wavelength at which the contrast is taken [nm].
+            ephemeris: Optional ephemeris from :meth:`ephemeris` solved at these
+                dates; None solves it here.
+
+        Returns:
+            A tuple of the star-planet angular separation [arcsec] and the
+            planet-star magnitude difference dMag, each of shape ``(K_total, T)``.
         """
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
         alpha = eph.separation_arcsec(eph.scene_planet_indices, 0)
@@ -699,7 +890,11 @@ class Scene(eqx.Module):
         return alpha, dMag
 
     def __repr__(self) -> str:
-        """Tree-shaped summary: star + planets + disk + midplane geometry."""
+        """Tree-shaped summary: star + planets + disk + midplane geometry.
+
+        Returns:
+            A multi-line text summary.
+        """
         if self.batch_shape:
             return (
                 f"Scene(batch_shape={self.batch_shape}, capacity={self.capacity}, "

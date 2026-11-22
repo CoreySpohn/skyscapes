@@ -30,6 +30,15 @@ class TabulatedCIA(eqx.Module):
 
     Bands carry independent temperature grids. Outside each spectral block
     the coefficient is zero; temperatures clamp to each band's endpoints.
+
+    Attributes:
+        partners: Names of the two colliding molecules, for example
+            ``("N2", "N2")``.
+        temperatures: One ascending temperature grid [K] per spectral band,
+            each of shape ``(n_T,)``.
+        coefficients: One coefficient table [cm^5 molecule^-2] per band, each
+            of shape ``(n_T, n_nu)`` on the model wavenumber grid.
+        n_nu: Number of points of the wavenumber grid.
     """
 
     partners: tuple[str, str] = eqx.field(static=True)
@@ -38,7 +47,15 @@ class TabulatedCIA(eqx.Module):
     n_nu: int = eqx.field(static=True)
 
     def coefficient_matrix(self, temperature_K: Array) -> Array:
-        """Interpolate layer temperatures, returning shape (n_layers, n_nu)."""
+        """Interpolate layer temperatures, returning shape (n_layers, n_nu).
+
+        Args:
+            temperature_K: Layer temperatures [K], shape ``(n_layers,)``.
+
+        Returns:
+            CIA coefficients [cm^5 molecule^-2], shape ``(n_layers, n_nu)``,
+            summed over bands.
+        """
         result = jnp.zeros((temperature_K.shape[0], self.n_nu))
         for temperatures, coefficients in zip(
             self.temperatures, self.coefficients, strict=True
@@ -52,7 +69,16 @@ class TabulatedCIA(eqx.Module):
 
 
 def cia_path(pair: str, directory: str | Path | None) -> Path:
-    """Resolve a supported cached table without fetching or creating files."""
+    """Resolve a supported cached table without fetching or creating files.
+
+    Args:
+        pair: Collision pair, a key of ``CIA_FILES`` such as ``"N2-N2"``.
+        directory: Directory holding the HITRAN CIA files. ``None`` selects
+            ``~/.cache/skyscapes/cia``.
+
+    Returns:
+        Path of the existing table file for ``pair``.
+    """
     if pair not in CIA_FILES:
         raise ValueError(
             f"Unsupported CIA pair {pair!r}; choose from {tuple(CIA_FILES)}"
@@ -108,6 +134,17 @@ def load_cia(pair: str, directory: str | Path | None, nu_grid: Array) -> Tabulat
     At a repeated temperature, later blocks take precedence only inside their
     coverage. Adjacent bands retain separate temperature grids and add in any
     small edge overlap; spectral gaps remain zero.
+
+    Args:
+        pair: Collision pair, a key of ``CIA_FILES`` such as ``"N2-N2"``.
+        directory: Directory holding the HITRAN CIA files. ``None`` selects
+            ``~/.cache/skyscapes/cia``.
+        nu_grid: Wavenumber grid [cm^-1], shape ``(n_nu,)``, to interpolate
+            the coefficients onto.
+
+    Returns:
+        A :class:`TabulatedCIA` with coefficients [cm^5 molecule^-2] on
+        ``nu_grid``.
     """
     path = cia_path(pair, directory)
     nu_grid = np.asarray(nu_grid)

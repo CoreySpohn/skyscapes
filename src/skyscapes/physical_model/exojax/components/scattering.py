@@ -37,6 +37,20 @@ class RayleighScattering(AbstractScattering):
         ``max(0, 1 - sum(species profiles at this pressure))``, so
         altitude variation of the tracked species translates into
         altitude variation of the bulk-gas residual.
+
+        Args:
+            species: Species of one planet, each with its Rayleigh cross-section
+                and mass-mixing-ratio profile.
+            bulk: Implicit residual gas, or ``None`` for no bulk gas.
+            gravity: Surface gravity [cm/s^2], scalar.
+            rt_engine: ExoJAX radiative-transfer engine; supplies the layer
+                pressures and the opacity-to-column conversion.
+            n_layers: Number of atmospheric layers.
+            n_nu: Number of wavenumber grid points.
+
+        Returns:
+            :class:`Contribution` of this component, fields of shape
+            ``(n_layers, n_nu)``.
         """
         pressure = rt_engine.pressure
 
@@ -89,6 +103,19 @@ class NullScattering(AbstractScattering):
         n_layers: int,
         n_nu: int,
     ) -> Contribution:
-        """Return zero-everywhere contribution."""
+        """Return zero-everywhere contribution.
+
+        Args:
+            species: Unused.
+            bulk: Unused.
+            gravity: Unused.
+            rt_engine: Unused.
+            n_layers: Number of atmospheric layers.
+            n_nu: Number of wavenumber grid points.
+
+        Returns:
+            :class:`Contribution` of zeros, fields of shape
+            ``(n_layers, n_nu)``.
+        """
         zeros = jnp.zeros((n_layers, n_nu))
         return Contribution(dtau_total=zeros, dtau_scatter=zeros, g_weighted_num=zeros)
