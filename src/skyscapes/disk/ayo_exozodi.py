@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import equinox as eqx
 import jax.numpy as jnp
 import numpy as np
 from hwoutils.conversions import arcsec_to_au
@@ -39,16 +40,19 @@ class AYOExozodi(AbstractDisk):
         level_zodis: Exozodi level, in zodis.
         surface_brightness_mag_arcsec2: AB surface brightness of one zodi at
             1 AU.
+        flux_scale: Dimensionless factor on the radiance, default one; see
+            :class:`~skyscapes.disk.AbstractDisk`.
     """
 
     level_zodis: float | Array = 3.0
     surface_brightness_mag_arcsec2: float | Array = MAG_1ZODI_V_ARCSEC2
+    flux_scale: Array = eqx.field(default=1.0, converter=jnp.asarray, kw_only=True)
 
     def spectral_breaks_nm(self) -> np.ndarray:
         """The analytic flat-AB spectrum has no wavelength breaks."""
         return np.empty(0)
 
-    def photon_radiance_at(
+    def _photon_radiance_at(
         self, wavelength_nm, time_d, east_arcsec, north_arcsec, *, star, dist_pc
     ) -> Array:
         """Photons/s/m^2/nm/sr, wavelength axes first, then the sky shape."""

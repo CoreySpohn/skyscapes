@@ -553,11 +553,14 @@ class Scene(eqx.Module):
                 ),
                 planet.physical_model,
             )
-            values.append(
+            value = (
                 model.photon_flux_density(wavelength_nm, **geometry)
                 if flux
                 else model.contrast_at_time(wavelength_nm=wavelength_nm, **geometry)
             )
+            # The planet's own scale, applied once here, beside the radius.
+            scale = planet.flux_scale
+            values.append(value * scale.reshape(scale.shape + (1,) * (value.ndim - 1)))
             start = stop
         result = (
             jnp.concatenate(values, axis=0) if values else jnp.empty((0, time_d.size))

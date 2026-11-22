@@ -42,7 +42,7 @@ class AbstractParametricDisk(AbstractDisk):
     ):
         """Unit-profile scattering integral at broadcastable sky coordinates."""
 
-    def photon_radiance_at(
+    def _photon_radiance_at(
         self, wavelength_nm, time_d, east_arcsec, north_arcsec, *, star, dist_pc
     ):
         """Photon radiance in photons/s/m^2/nm/sr from the parametric profile.

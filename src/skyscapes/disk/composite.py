@@ -1,7 +1,9 @@
 """Sum of scattered-light components on a caller's sky grid."""
 
 import equinox as eqx
+import jax.numpy as jnp
 import numpy as np
+from jaxtyping import Array
 from optixstuff.spectral import spectral_breaks
 
 from .base import AbstractDisk
@@ -30,9 +32,13 @@ def orient_disk(disk, inclination_deg, position_angle_deg):
 
 
 class CompositeDisk(AbstractDisk):
-    """Sum radiance from components that may have different native grids."""
+    """Sum radiance from components that may have different native grids.
+
+    Each component applies its own ``flux_scale``; the composite's scales the sum.
+    """
 
     components: tuple[AbstractDisk, ...]
+    flux_scale: Array = eqx.field(default=1.0, converter=jnp.asarray, kw_only=True)
 
     def spectral_breaks_nm(self) -> np.ndarray:
         """Union of all component spectral breaks [nm]."""
@@ -43,7 +49,7 @@ class CompositeDisk(AbstractDisk):
         if not self.components:
             raise ValueError("CompositeDisk requires at least one component.")
 
-    def photon_radiance_at(
+    def _photon_radiance_at(
         self, wavelength_nm, time_d, east_arcsec, north_arcsec, *, star, dist_pc
     ):
         """Sum component photon radiance in photons/s/m^2/nm/sr."""

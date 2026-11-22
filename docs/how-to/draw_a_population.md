@@ -139,7 +139,7 @@ hosts = HostStars(
     mass_Msun=mass_Msun,
     luminosity_Lsun=luminosity_Lsun,
     dist_pc=jnp.array([5.0, 8.0, 12.0]),
-    star=FlatStar(jnp.full(3, 1e9), jnp.zeros(3)),
+    star=FlatStar(jnp.full(3, 1e9), jnp.zeros(3), flux_scale=jnp.ones(3)),
 )
 process = OccurrencePopulation(occurrence, types, config, Epoch())
 

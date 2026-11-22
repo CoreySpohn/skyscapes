@@ -16,6 +16,8 @@ from orbix.system import SkyFrame
 from zodi.tables import TABLE19_WAVELENGTH_UM
 from zodi.units import intensity_from_ab_mag_arcsec2, power_to_photon_intensity
 
+from .._flux_scale import check_flux_scale
+
 
 class AbstractLocalZodi(eqx.Module):
     """Local background radiance in ph s^-1 m^-2 nm^-1 sr^-1.
@@ -24,17 +26,29 @@ class AbstractLocalZodi(eqx.Module):
     :class:`~orbix.system.SkyFrame` and the time in days from its epoch, and
     derives whatever it needs from them. Every implementation preserves the
     wavelength array's shape.
+
+    ``flux_scale`` is a dimensionless factor, default one, on the local zodi
+    alone: it does not scale the star, the planets or the disk. The instrument's
+    own ``flux_scale`` also multiplies this light.
     """
 
     @abstractmethod
     def spectral_breaks_nm(self) -> np.ndarray:
         """Return the model's spectral breakpoints in nm as a host array."""
 
-    @abstractmethod
+    flux_scale: eqx.AbstractVar[Array]
+
+    def __check_init__(self):
+        """Require a finite ``flux_scale``."""
+        check_flux_scale(self.flux_scale)
+
     def photon_radiance(
         self, wavelength_nm: Array, sky_frame: SkyFrame, time_d: Array
     ) -> Array:
-        """Evaluate photon radiance at wavelengths in nm, without integration.
+        """Photon radiance at wavelengths in nm, times ``flux_scale``.
+
+        No integration is done. ``flux_scale`` is applied here, once; a concrete
+        model implements :meth:`_photon_radiance` and never sees it.
 
         Args:
             wavelength_nm: Wavelengths [nm].
@@ -43,6 +57,13 @@ class AbstractLocalZodi(eqx.Module):
                 when the frame has no position (an unplaced scene).
             time_d: Observation time, days from ``sky_frame.epoch``.
         """
+        return self.flux_scale * self._photon_radiance(wavelength_nm, sky_frame, time_d)
+
+    @abstractmethod
+    def _photon_radiance(
+        self, wavelength_nm: Array, sky_frame: SkyFrame, time_d: Array
+    ) -> Array:
+        """Unscaled photon radiance; the hook a concrete model implements."""
 
 
 @final
@@ -55,12 +76,13 @@ class AYOZodi(AbstractLocalZodi):
 
     surface_brightness_mag_arcsec2: float = 22.0
     reference_wavelength_nm: float = 550.0
+    flux_scale: Array = eqx.field(default=1.0, converter=jnp.asarray, kw_only=True)
 
     def spectral_breaks_nm(self) -> np.ndarray:
         """Table 19 color breakpoints [nm]; the spectrum is piecewise in them."""
         return um_to_nm(TABLE19_WAVELENGTH_UM)
 
-    def photon_radiance(
+    def _photon_radiance(
         self, wavelength_nm: Array, sky_frame: SkyFrame, time_d: Array
     ) -> Array:
         """Photon radiance per sr; the sightline is ignored, wavelength-shaped."""
@@ -89,11 +111,13 @@ class LeinertZodi(AbstractLocalZodi):
     normalization differs slightly from the absolute table value.
     """
 
+    flux_scale: Array = eqx.field(default=1.0, converter=jnp.asarray, kw_only=True)
+
     def spectral_breaks_nm(self) -> np.ndarray:
         """Table 19 color breakpoints [nm]; the spectrum is piecewise in them."""
         return um_to_nm(TABLE19_WAVELENGTH_UM)
 
-    def photon_radiance(
+    def _photon_radiance(
         self, wavelength_nm: Array, sky_frame: SkyFrame, time_d: Array
     ) -> Array:
         """Photon radiance per sr, converted from zodi's per-micron output."""
@@ -128,9 +152,16 @@ class PrecomputedZodi(AbstractLocalZodi):
 
     wavelengths_nm: Array = eqx.field(converter=jnp.asarray)
     radiance_phot_per_s_m2_nm_sr: Array = eqx.field(converter=jnp.asarray)
+    flux_scale: Array = eqx.field(converter=jnp.asarray)
 
-    def __init__(self, wavelengths_nm: Array, radiance_phot_per_s_m2_nm_sr: Array):
+    def __init__(
+        self,
+        wavelengths_nm: Array,
+        radiance_phot_per_s_m2_nm_sr: Array,
+        flux_scale: Array | float = 1.0,
+    ):
         """Store a photon radiance table in ph s^-1 m^-2 nm^-1 sr^-1."""
+        self.flux_scale = jnp.asarray(flux_scale)
         self.wavelengths_nm = jnp.asarray(wavelengths_nm)
         self.radiance_phot_per_s_m2_nm_sr = jnp.asarray(radiance_phot_per_s_m2_nm_sr)
 
@@ -138,7 +169,7 @@ class PrecomputedZodi(AbstractLocalZodi):
         """Return the tabulated radiance wavelengths in nm on the host."""
         return np.asarray(self.wavelengths_nm)
 
-    def photon_radiance(
+    def _photon_radiance(
         self, wavelength_nm: Array, sky_frame: SkyFrame, time_d: Array
     ) -> Array:
         """Photon radiance per sr; the sightline is ignored, wavelength-shaped."""

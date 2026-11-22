@@ -195,6 +195,9 @@ class ExovistaParametricDisk(AbstractParametricDisk):
         inclination_deg: Inclination, zero face-on.
         position_angle_deg: Major axis north through east.
         n_slices_los: Number of Gauss-Legendre LOS nodes.
+        flux_scale: Dimensionless factor on the radiance, default one; see
+            :class:`~skyscapes.disk.AbstractDisk`. Exactly degenerate with
+            ``amplitude.level``.
     """
 
     r0_AU: Array
@@ -218,6 +221,7 @@ class ExovistaParametricDisk(AbstractParametricDisk):
     n_slices_los: int = eqx.field(static=True)
     inclination_deg: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
     position_angle_deg: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
+    flux_scale: Array = eqx.field(default=1.0, converter=jnp.asarray, kw_only=True)
 
     def __check_init__(self):
         """Validate the static LOS settings."""

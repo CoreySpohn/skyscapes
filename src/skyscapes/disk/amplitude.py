@@ -68,7 +68,8 @@ def density_level(amplitude, profile, *, star, dist_pc, time_d=0.0):
     that same photon flux and zero point: M=-2.5 log10(Phi/F0)-5 log10(d/10).
     Consequently the band rule cancels the host flux from the multiplier;
     the bolometric rule replaces its band luminosity by host L exactly once.
-    Subsequent rendering supplies stellar colour and epoch variation.
+    Subsequent rendering supplies stellar colour and epoch variation, and the
+    star's ``flux_scale``, which the calibration does not see.
 
     For the solar V reference at 10 pc, level=3 and mag=22 give
     3*10^(-0.4*22)=4.7546796e-9 per arcsec^2 (20.8071969 mag/arcsec^2).
@@ -83,7 +84,10 @@ def density_level(amplitude, profile, *, star, dist_pc, time_d=0.0):
     zero = zero_magnitude_photon_flux_density(
         amplitude.passband, zero_point_jy=profile.zero_point_jy
     )
-    flux = star.photon_flux_density(wave, time_d, dist_pc=dist_pc)
+    # The calibration reads the star's own flux, without its ``flux_scale``: the
+    # scale is applied at render time, so a disk defined relative to the star
+    # follows it instead of cancelling it.
+    flux = star._photon_flux_density(wave, time_d, dist_pc=dist_pc)
     absolute_mag = -2.5 * jnp.log10(flux / zero) - 5.0 * jnp.log10(dist_pc / 10.0)
     luminosity = (
         star.luminosity_Lsun if amplitude.luminosity_rule == "bolometric" else 1.0

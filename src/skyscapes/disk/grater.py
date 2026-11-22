@@ -162,6 +162,9 @@ class GraterDisk(AbstractParametricDisk):
             powers (1.5 to 1.8 times faster, same numbers to rounding).
             ``gamma`` and ``beta`` must hold 2 and 1 and are
             no longer fittable. Leave False (default) to fit either.
+        flux_scale: Dimensionless factor on the radiance, default one; see
+            :class:`~skyscapes.disk.AbstractDisk`. Exactly degenerate with
+            ``amplitude.level``.
     """
 
     sma_AU: Array
@@ -181,6 +184,7 @@ class GraterDisk(AbstractParametricDisk):
     n_slices_los: int = eqx.field(static=True)
     inclination_deg: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
     position_angle_deg: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
+    flux_scale: Array = eqx.field(default=1.0, converter=jnp.asarray, kw_only=True)
 
     cutoff_width_AU: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
     fixed_vertical_profile: bool = eqx.field(static=True, default=False)

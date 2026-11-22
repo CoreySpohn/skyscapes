@@ -38,9 +38,9 @@ class HostStars(eqx.Module):
 
     star_id is int32; mass_Msun, luminosity_Lsun and dist_pc have shape (S,).
     star supplies photometry only. Its numeric leaves, including any spectral
-    coordinates, must carry the same leading axis. IDs must be unique and
-    stable when selecting or reordering hosts. Mass, luminosity and distance
-    must be positive.
+    coordinates and ``flux_scale``, must carry the same leading axis. IDs must
+    be unique and stable when selecting or reordering hosts. Mass, luminosity
+    and distance must be positive.
     """
 
     star_id: jax.Array = eqx.field(converter=lambda x: jnp.asarray(x, jnp.int32))

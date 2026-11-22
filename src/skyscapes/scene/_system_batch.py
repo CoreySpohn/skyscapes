@@ -53,9 +53,13 @@ def _host(tree):
     )
 
 
-def _planet(radius, model):
+def _planet(radius, scale, model):
     """Construct without transferring host radius data through JAX."""
-    return eqx.tree_at(lambda p: p.Rp_Rearth, Planet(np.empty(0), model), radius)
+    return eqx.tree_at(
+        lambda p: (p.Rp_Rearth, p.flux_scale),
+        Planet(np.empty(0), model),
+        (radius, scale),
+    )
 
 
 def _planet_group(system, model_template):
@@ -69,7 +73,7 @@ def _planet_group(system, model_template):
             ),
             model_template.physical_model,
         )
-        return _planet(np.empty(0), model)
+        return _planet(np.empty(0), np.empty(0), model)
     groups = system.planets
     definitions = [jax.tree.structure(p.physical_model) for p in groups]
     if any(t != definitions[0] for t in definitions):
@@ -86,6 +90,7 @@ def _planet_group(system, model_template):
             merged.append(np.asarray(x))
     return _planet(
         np.concatenate([np.asarray(p.Rp_Rearth) for p in groups]),
+        np.concatenate([np.asarray(p.flux_scale) for p in groups]),
         jax.tree.unflatten(definition, merged),
     )
 
@@ -158,6 +163,8 @@ def from_scenes(cls, scenes, *, capacity=None, batch_shape=None):
         model = jax.tree_util.tree_map_with_path(pad_planet, group.physical_model)
         radius = np.zeros(capacity)
         radius[:count] = np.asarray(group.Rp_Rearth)[scene]
+        scale = np.ones(capacity)
+        scale[:count] = np.asarray(group.flux_scale)[scene]
         masses = np.zeros(capacity)
         masses[:count] = np.asarray(system.dynamics.planets.mass_Msun)[chain]
         orbit = jax.tree_util.tree_map_with_path(
@@ -176,7 +183,7 @@ def from_scenes(cls, scenes, *, capacity=None, batch_shape=None):
         )
         packed = cls(
             system.star,
-            (_planet(radius, model),),
+            (_planet(radius, scale, model),),
             dynamics,
             midplane_inc_deg=system.midplane_inc_deg,
             midplane_position_angle_deg=system.midplane_position_angle_deg,
@@ -234,7 +241,9 @@ def to_scenes(system):
                 ),
                 group.physical_model,
             )
-            planets.append(_planet(group.Rp_Rearth[slots], model))
+            planets.append(
+                _planet(group.Rp_Rearth[slots], group.flux_scale[slots], model)
+            )
         dynamics = eqx.tree_at(
             lambda d: (d.planets.mass_Msun, d.orbits),
             row.dynamics,
@@ -279,6 +288,16 @@ def to_table(system):
     return table
 
 
+def _table_leaf(table, path, template_leaf):
+    """Read one leaf; a table written before ``flux_scale`` existed reads as ones."""
+    key = jax.tree_util.keystr(path).lstrip(".")
+    if key not in table and key.endswith("flux_scale"):
+        radius = key.replace("flux_scale", "Rp_Rearth")
+        shape = np.shape(table[radius]) if radius in table else np.shape(template_leaf)
+        return np.ones(shape)
+    return np.asarray(table[key]).copy()
+
+
 def from_table(cls, table, *, template):
     """Restore leaf arrays using a template for model classes and static fields."""
     capacity = int(table["K"])
@@ -311,10 +330,7 @@ def from_table(cls, table, *, template):
     paths, definition = jax.tree_util.tree_flatten_with_path(skeleton)
     restored = jax.tree.unflatten(
         definition,
-        [
-            np.asarray(table[jax.tree_util.keystr(path).lstrip(".")]).copy()
-            for path, _ in paths
-        ],
+        [_table_leaf(table, path, template_leaf) for path, template_leaf in paths],
     )
     # body_index is structural and must describe the stored capacity.
     if restored.capacity != capacity:

@@ -20,16 +20,19 @@ class ExovistaDisk(AbstractDisk):
     L = contrast_cube * Phi_star / Omega_native.
     Spatial sampling is bilinear, with zero extension of the native samples.
     There is no target pixel area factor. Geometry is baked into the cube;
-    system angles are ignored.
+    system angles are ignored. ``flux_scale`` is a dimensionless factor on the
+    radiance, default one; see :class:`~skyscapes.disk.AbstractDisk`.
     """
 
     native_grid: PixelGrid = eqx.field(static=True)
     wavelengths_nm: Array
     contrast_cube: Array
     _contrast_interp: interpax.CubicSpline
+    flux_scale: Array
 
-    def __init__(self, native_grid, wavelengths_nm, contrast_cube):
+    def __init__(self, native_grid, wavelengths_nm, contrast_cube, flux_scale=1.0):
         """Store the native geometry and construct the spectral interpolant."""
+        self.flux_scale = jnp.asarray(flux_scale)
         self.native_grid = native_grid
         self.wavelengths_nm = wavelengths_nm
         self.contrast_cube = contrast_cube
@@ -50,7 +53,7 @@ class ExovistaDisk(AbstractDisk):
         ):
             raise ValueError("contrast_cube must match wavelengths and native_grid")
 
-    def photon_radiance_at(
+    def _photon_radiance_at(
         self, wavelength_nm, time_d, east_arcsec, north_arcsec, *, star, dist_pc
     ):
         """Photon radiance in photons/s/m^2/nm/sr from the stored contrast cube."""

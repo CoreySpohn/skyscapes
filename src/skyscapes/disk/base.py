@@ -7,6 +7,8 @@ import numpy as np
 from jaxtyping import Array
 from optixstuff.grids import Image, Measure, PixelGrid
 
+from .._flux_scale import check_flux_scale
+
 
 def check_sky_grid(grid):
     """Require angular sampling with an explicit detector-to-sky orientation."""
@@ -33,7 +35,21 @@ class AbstractDisk(eqx.Module):
     Values are photon radiance per steradian, independent of pixel area.
     Call ``Image.integrated()`` to integrate over the sky pixels.
     Times are scalar days from the scene epoch; wavelengths have any shape.
+
+    ``flux_scale`` is a dimensionless factor, default one, on the disk's own
+    radiance, applied once in :meth:`photon_radiance_at`; a concrete disk
+    implements :meth:`_photon_radiance_at` and never sees it. A disk defined
+    relative to the star also follows ``star.flux_scale`` (it reads the star's
+    flux). The image is linear in it, and jointly linear in the planet and disk
+    scales at a fixed star scale. A parametric disk's scale is exactly
+    degenerate with its ``amplitude.level``. It is checked finite, not positive.
     """
+
+    flux_scale: eqx.AbstractVar[Array]
+
+    def __check_init__(self):
+        """Require a finite ``flux_scale``."""
+        check_flux_scale(self.flux_scale)
 
     def spectral_breaks_nm(self) -> np.ndarray:
         """Wavelength breaks in the disk scattering spectrum [nm]."""
@@ -54,12 +70,21 @@ class AbstractDisk(eqx.Module):
         )
         return radiance_image(data, grid)
 
-    @abstractmethod
     def photon_radiance_at(
         self, wavelength_nm, time_d, east_arcsec, north_arcsec, *, star, dist_pc
     ) -> Array:
         """Photon radiance in photons/s/m^2/nm/sr at the supplied sky offsets.
 
         Wavelength axes precede the broadcast shape of east_arcsec and
-        north_arcsec. time_d is scalar days from the scene epoch.
+        north_arcsec. time_d is scalar days from the scene epoch. The result is
+        ``flux_scale`` times the model's own radiance.
         """
+        return self.flux_scale * self._photon_radiance_at(
+            wavelength_nm, time_d, east_arcsec, north_arcsec, star=star, dist_pc=dist_pc
+        )
+
+    @abstractmethod
+    def _photon_radiance_at(
+        self, wavelength_nm, time_d, east_arcsec, north_arcsec, *, star, dist_pc
+    ) -> Array:
+        """Unscaled photon radiance; the hook a concrete disk implements."""

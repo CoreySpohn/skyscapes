@@ -115,7 +115,9 @@ value.
 the observer flux in photons/s/m^2/nm. Following Rybicki and Lightman
 (1979), *Radiative Processes in Astrophysics*, the surface flux is
 `pi * B_photon`, diluted by `(radius_m / (dist_pc * pc2m))**2` at the
-observer. All stars expose `angular_diameter_arcsec(dist_pc)`. Apparent-flux
+observer. All stars expose `angular_diameter_arcsec(dist_pc)`, and
+`photon_flux_density` multiplies the private `_photon_flux_density` hook by
+`flux_scale` (see [Source brightness](#source-brightness-flux-scale)). Apparent-flux
 `Star` and `FlatStar` ignore the supplied distance and return their
 `fixed_diameter_arcsec` value. Wavelengths are in nanometers,
 and the result retains their shape. The spectrum is static, so `time_d` is ignored. Both `jax.jit`
@@ -392,7 +394,8 @@ planetary system itself. Local zodiacal-light models live in skyscapes and
 are attached to the `Scene`; the `zodi` library supplies their physics.
 
 Three variants implement `AbstractLocalZodi.photon_radiance(wavelength_nm,
-sky_frame, time_d)`, returning ph/s/m^2/nm/sr. The model is given the scene's
+sky_frame, time_d)`, returning ph/s/m^2/nm/sr (the public method applies
+`flux_scale` to the private `_photon_radiance` hook each variant implements). The model is given the scene's
 `SkyFrame` and the time in days from its epoch, and derives what it needs:
 
 | Class | What it is |
@@ -439,6 +442,50 @@ def my_function(zodi: AbstractLocalZodi):
 For the geometry `LeinertZodi` derives (ecliptic latitude, helioecliptic
 longitude), see
 [local zodi + telescope geometry](local_zodi_geometry).
+
+## Source brightness: `flux_scale`
+
+Every emitter in a scene carries one dimensionless leaf, `flux_scale`, with
+default one: the star (`star.flux_scale`), each planet
+(`planet.flux_scale`, shape `(K,)`, beside `Rp_Rearth`), the disk
+(`disk.flux_scale`) and the local zodi (`local_zodi.flux_scale`). It is the one
+handle that exists for every model, including a tabulated star or a
+precomputed disk that has no physical brightness parameter. A fit frees it as a
+leaf like any other, and `eqx.tree_at` sets it.
+
+The scale is applied exactly once, in the public method of the base class:
+`photon_flux_density` on a star, `photon_radiance_at` on a disk and
+`photon_radiance` on a local zodi are concrete, and each calls a private hook
+(`_photon_flux_density`, `_photon_radiance_at`, `_photon_radiance`) that a
+concrete model implements. A model never sees the scale. The planet's scale is
+applied in `Scene`, where the radius is forwarded, to the contrast and the flux
+of its own planet. A model you write implements the private hook and declares
+`flux_scale` as a field with default one.
+
+What each scale multiplies:
+
+- `star.flux_scale` scales all light that comes from the star: the leakage,
+  every reflected-light planet, and a disk defined relative to the star. It does
+  not scale the local zodi, a thermal planet model or the instrument's thermal
+  term. A planet contrast does not see it, because the star appears in both the
+  planet flux and the star flux.
+- `planet.flux_scale` scales that planet's contrast and flux.
+- `disk.flux_scale` scales the disk's radiance. A parametric disk calibrated
+  against the star reads the star's own flux, without its scale, so the star
+  scale reaches the disk instead of cancelling in the calibration.
+- `local_zodi.flux_scale` scales the local zodi alone. The instrument's own
+  `flux_scale` also multiplies the zodi.
+
+Each scale is linear. The image is bilinear in the star scale and any planet or
+disk scale, so the set is not jointly linear; the planet scales and the disk
+scale together are linear at a fixed star scale. A planet scale is exactly
+degenerate with its radius squared and albedo, and a parametric disk's scale
+with `amplitude.level`. A star scale and a planet scale are correlated, not
+degenerate, because the leakage fixes the first. The leaves are checked finite
+and not positive, since a detection test profiles a signed amplitude; a fit that
+must keep a scale positive gives it a positive law.
+
+A stored scene table written before the leaf existed reads as ones.
 
 ## Physical models
 

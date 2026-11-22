@@ -1,6 +1,8 @@
 """Star models for the scene hierarchy.
 
-``AbstractStar`` declares the ``photon_flux_density`` hook. ``FlatStar`` is a
+``AbstractStar`` declares the ``photon_flux_density`` method, concrete over the
+private ``_photon_flux_density`` hook, and the ``flux_scale`` leaf applied in
+it. ``FlatStar`` is a
 flat-spectrum stand-in useful for ETC runs. ``BlackbodyStar`` supplies a
 diluted Planck spectrum.
 ``Star`` converts Jansky flux data to photons once and interpolates over
@@ -24,6 +26,7 @@ from hwoutils.conversions import angular_diameter_arcsec, jy_to_photons_per_nm_p
 from hwoutils.planck import planck_photon_radiance
 from jaxtyping import Array
 
+from .._flux_scale import check_flux_scale
 from .spots import StarSpots
 
 
@@ -31,9 +34,24 @@ class AbstractStar(eqx.Module):
     """Abstract stellar source; observer distance is supplied at evaluation.
 
     All ``time_d`` arguments are days from the scene epoch.
+
+    ``flux_scale`` is a dimensionless factor, default one, on all light that
+    comes from the star: the leakage, every reflected-light planet and a disk
+    defined relative to the star (the disk hook takes ``star=``). It does not
+    scale the local zodi, a thermal planet model or the instrument's thermal
+    term. It is applied once, in :meth:`photon_flux_density`; a concrete star
+    implements :meth:`_photon_flux_density` and never sees it. The scale is
+    linear, and the image is bilinear in it and any planet or disk scale: a
+    star scale and a planet scale are correlated, not degenerate. It is
+    checked finite, not positive.
     """
 
-    @abstractmethod
+    flux_scale: eqx.AbstractVar[Array]
+
+    def __check_init__(self):
+        """Require a finite ``flux_scale``."""
+        check_flux_scale(self.flux_scale)
+
     def photon_flux_density(
         self,
         wavelength_nm: Array,
@@ -41,13 +59,30 @@ class AbstractStar(eqx.Module):
         *,
         dist_pc: Array,
     ) -> Array:
-        """Observer photon flux density [ph s^-1 m^-2 nm^-1].
+        """Observer photon flux density [ph s^-1 m^-2 nm^-1], times ``flux_scale``.
 
         Wavelengths are nm arrays of any shape; the result preserves that
         shape, with tabulated stars also broadcasting against ``time_d``.
         Time is days from the scene epoch. Physical spectra use ``dist_pc``;
-        apparent spectra accept and ignore it. Concrete models evaluate
-        natively in photon units, without a conversion at evaluation time.
+        apparent spectra accept and ignore it.
+        """
+        return self.flux_scale * self._photon_flux_density(
+            wavelength_nm, time_d, dist_pc=dist_pc
+        )
+
+    @abstractmethod
+    def _photon_flux_density(
+        self,
+        wavelength_nm: Array,
+        time_d: Array,
+        *,
+        dist_pc: Array,
+    ) -> Array:
+        """Unscaled observer photon flux density [ph s^-1 m^-2 nm^-1].
+
+        The hook a concrete star implements; :meth:`photon_flux_density`
+        applies ``flux_scale`` to it. Concrete models evaluate natively in
+        photon units, without a conversion at evaluation time.
         """
 
     @abstractmethod
@@ -65,16 +100,19 @@ class FlatStar(AbstractStar):
     Attributes:
         flux_phot_per_nm_m2: Constant observer flux density in ph/s/m^2/nm.
         fixed_diameter_arcsec: Angular diameter in arcseconds, default 0.0 (point star).
+        flux_scale: Dimensionless factor on the flux, default one; see
+            :class:`AbstractStar`.
     """
 
     flux_phot_per_nm_m2: float
     fixed_diameter_arcsec: float = 0.0
+    flux_scale: Array = eqx.field(default=1.0, converter=jnp.asarray, kw_only=True)
 
     def angular_diameter_arcsec(self, dist_pc: Array) -> Array:
         """Return the stored apparent diameter in arcseconds, ignoring dist_pc."""
         return jnp.asarray(self.fixed_diameter_arcsec)
 
-    def photon_flux_density(
+    def _photon_flux_density(
         self,
         wavelength_nm: Array,
         time_d: Array,
@@ -111,10 +149,13 @@ class BlackbodyStar(AbstractStar):
     Attributes:
         teff_K: Effective temperature in kelvin.
         radius_m: Stellar radius in meters.
+        flux_scale: Dimensionless factor on the flux, default one; see
+            :class:`AbstractStar`.
     """
 
     teff_K: float
     radius_m: float
+    flux_scale: Array = eqx.field(default=1.0, converter=jnp.asarray, kw_only=True)
 
     def angular_diameter_arcsec(self, dist_pc: Array) -> Array:
         """Small-angle diameter, 2 R / d, in arcseconds.
@@ -124,7 +165,7 @@ class BlackbodyStar(AbstractStar):
         """
         return jnp.asarray(angular_diameter_arcsec(self.radius_m, dist_pc))
 
-    def photon_flux_density(
+    def _photon_flux_density(
         self,
         wavelength_nm: Array,
         time_d: Array,
@@ -156,8 +197,11 @@ class Star(AbstractStar):
     the owning scene. A single epoch represents a static spectrum. Spot
     records are retained for later surface modeling; they do not alter the
     tabulated flux or automatically add spatially resolved stellar emission.
+    ``flux_scale`` is a dimensionless factor on the tabulated flux, default one;
+    see :class:`AbstractStar`.
     """
 
+    flux_scale: Array
     fixed_diameter_arcsec: float
     luminosity_Lsun: float
     spots: StarSpots | None
@@ -180,6 +224,7 @@ class Star(AbstractStar):
         spots: StarSpots | None = None,
         metadata: dict | None = None,
         interpolation_method: Literal["linear", "cubic"] = "cubic",
+        flux_scale: Array | float = 1.0,
     ):
         """Build the flux interpolant on ``times_d``, days from the scene epoch.
 
@@ -192,6 +237,7 @@ class Star(AbstractStar):
         if interpolation_method not in ("linear", "cubic"):
             raise ValueError("interpolation_method must be linear or cubic.")
         self._interpolation_method = interpolation_method
+        self.flux_scale = jnp.asarray(flux_scale)
         self.fixed_diameter_arcsec = fixed_diameter_arcsec
         self.luminosity_Lsun = luminosity_Lsun
         self.spots = spots
@@ -234,7 +280,7 @@ class Star(AbstractStar):
         """Return the stored apparent diameter in arcseconds, ignoring dist_pc."""
         return jnp.asarray(self.fixed_diameter_arcsec)
 
-    def photon_flux_density(
+    def _photon_flux_density(
         self,
         wavelength_nm: Array,
         time_d: Array,
