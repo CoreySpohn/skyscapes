@@ -39,7 +39,7 @@ def _hosts():
         jnp.array([1.0, 0.8, 1.2]),
         jnp.array([1.0, 0.5, 2.0]),
         jnp.array([10.0, 12.0, 15.0]),
-        FlatStar(jnp.ones(3), jnp.zeros(3), flux_scale=jnp.ones(3)),
+        FlatStar(jnp.ones(3), jnp.zeros(3)),
     )
 
 

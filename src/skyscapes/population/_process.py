@@ -38,16 +38,28 @@ class HostStars(eqx.Module):
 
     star_id is int32; mass_Msun, luminosity_Lsun and dist_pc have shape (S,).
     star supplies photometry only. Its numeric leaves, including any spectral
-    coordinates and ``flux_scale``, must carry the same leading axis. IDs must
-    be unique and stable when selecting or reordering hosts. Mass, luminosity
-    and distance must be positive.
+    coordinates, carry the same leading axis; a scalar leaf (such as the default
+    ``flux_scale``) means the same value for every host and is broadcast to
+    (S,). IDs must be unique and stable when selecting or reordering hosts.
+    Mass, luminosity and distance must be positive.
     """
 
-    star_id: jax.Array = eqx.field(converter=lambda x: jnp.asarray(x, jnp.int32))
-    mass_Msun: jax.Array = eqx.field(converter=jnp.asarray)
-    luminosity_Lsun: jax.Array = eqx.field(converter=jnp.asarray)
-    dist_pc: jax.Array = eqx.field(converter=jnp.asarray)
+    star_id: jax.Array
+    mass_Msun: jax.Array
+    luminosity_Lsun: jax.Array
+    dist_pc: jax.Array
     star: AbstractStar
+
+    def __init__(self, star_id, mass_Msun, luminosity_Lsun, dist_pc, star):
+        """Store the host arrays and broadcast scalar star leaves to (S,)."""
+        self.star_id = jnp.asarray(star_id, jnp.int32)
+        self.mass_Msun = jnp.asarray(mass_Msun)
+        self.luminosity_Lsun = jnp.asarray(luminosity_Lsun)
+        self.dist_pc = jnp.asarray(dist_pc)
+        n = self.star_id.shape[:1]
+        self.star = jax.tree.map(
+            lambda x: jnp.broadcast_to(x, n) if jnp.ndim(x) == 0 else x, star
+        )
 
     def __check_init__(self):
         """Validate static host shapes without inspecting traced values."""
