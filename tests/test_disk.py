@@ -1,13 +1,16 @@
 """Absolute disk photometry, sky orientation and JAX contracts from primitives."""
 
+import dataclasses
 from dataclasses import replace
 
 import equinox as eqx
+import interpax
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 from hwoutils.constants import arcsec2rad, h
+from hwoutils.map_coordinates import map_coordinates
 from optixstuff.grids import Measure, PixelGrid, SkyOrientation, resample
 from zodi import DensityDust, SurfaceBrightnessDust
 
@@ -22,7 +25,7 @@ from skyscapes.disk import (
     surface_brightness_level,
     zero_magnitude_photon_flux_density,
 )
-from skyscapes.scene import Star
+from skyscapes.scene import FlatStar, Star
 
 
 def solar_star(magnitude=4.83, luminosity=1.0):
@@ -495,3 +498,95 @@ def test_a_disk_flux_scale_is_checked_finite_not_positive():
     ):
         with pytest.raises(ValueError, match="finite"):
             build(jnp.nan)
+
+
+def _live_disk():
+    """A four-knot disk whose cube differs per plane, with a non-uniform grid."""
+    wavelengths = jnp.array([450.0, 500.0, 580.0, 700.0, 760.0])
+    native = PixelGrid.regular((6, 7), 0.05, "arcsec", orientation=SkyOrientation(20.0))
+    rng = np.random.default_rng(3)
+    cube = jnp.asarray(rng.uniform(0.5, 2.0, (5, 6, 7)) * 1e-9)
+    return ExovistaDisk(native, wavelengths, cube, flux_scale=1.3)
+
+
+def test_exovista_disk_spline_operator_is_the_interpax_spline():
+    """Fails if the derived spline differs from the one interpax would store.
+
+    The cube-to-coefficients map is linear for fixed knots; agreement to 1e-15
+    of the largest coefficient (float64 rounding of the same recurrence).
+    """
+    from skyscapes.disk.exovista import _Knots, _spline_operator
+
+    disk = _live_disk()
+    operator = _spline_operator(_Knots(disk.wavelengths_nm))
+    assert operator.shape == (4, 4, 5)
+    derived = jnp.einsum("kjm,myx->kjyx", operator, disk.contrast_cube)
+    stored = interpax.CubicSpline(disk.wavelengths_nm, disk.contrast_cube, axis=0).c
+    np.testing.assert_allclose(
+        derived, stored, rtol=0, atol=1e-15 * float(jnp.max(jnp.abs(stored)))
+    )
+
+
+def test_exovista_disk_render_equals_the_stored_spline_render():
+    """Fails if deriving the spline on use changes today's values.
+
+    Reference: the full interpax spline evaluated per wavelength, then the same
+    bilinear sampling (extrapolating polynomially outside the knots), 1e-14.
+    """
+    disk = _live_disk()
+    stored = interpax.CubicSpline(disk.wavelengths_nm, disk.contrast_cube, axis=0)
+    east = jnp.array([0.02, -0.05, 0.1])
+    north = jnp.array([0.0, 0.07, -0.04])
+    wave = jnp.array([430.0, 450.0, 499.0, 580.0, 640.0, 760.0, 780.0])
+    star = FlatStar(2.5e9)
+    actual = disk._photon_radiance_at(wave, 0.0, east, north, star=star, dist_pc=10.0)
+    grid = disk.native_grid
+    pixels = grid.unit_to_pixel(*grid.orientation.sky_to_detector(east, north))
+    expected = []
+    for w in np.asarray(wave):
+        plane = stored(w)
+        sample = map_coordinates(plane, (pixels.y, pixels.x), order=1)
+        flux = star.photon_flux_density(jnp.asarray(w), 0.0, dist_pc=10.0)
+        expected.append(sample * flux / grid.cell_area("sr"))
+    np.testing.assert_allclose(actual, jnp.stack(expected), rtol=1e-14)
+
+
+def test_exovista_disk_cube_is_a_live_leaf_with_exact_gradient():
+    """Fails if a change to the cube is ignored or its gradient is wrong.
+
+    The old stored spline made the cube dead (gradient exactly zero). Render
+    is linear in the cube, so a central difference along a random direction
+    matches the gradient to 1e-8 relative; the path is jitted.
+    """
+    disk, star = _live_disk(), FlatStar(2.5e9)
+    east, north = jnp.array([0.02, -0.05]), jnp.array([0.0, 0.07])
+    weights = jnp.array([[1.0, 0.3], [0.5, -0.2], [0.7, 0.9]])
+
+    @jax.jit
+    def objective(cube):
+        live = eqx.tree_at(lambda d: d.contrast_cube, disk, cube)
+        out = live.photon_radiance_at(
+            jnp.array([470.0, 600.0, 750.0]),
+            0.0,
+            east,
+            north,
+            star=star,
+            dist_pc=10.0,
+        )
+        return jnp.sum(weights * out)
+
+    cube = disk.contrast_cube
+    base = objective(cube)
+    assert float(objective(2.0 * cube)) == pytest.approx(2.0 * float(base), rel=1e-12)
+    grad = jax.jit(jax.grad(objective))(cube)
+    assert float(jnp.max(jnp.abs(grad))) > 0.0
+    direction = jnp.asarray(np.random.default_rng(4).normal(size=cube.shape)) * 1e-9
+    step = 1e-3
+    fd = (objective(cube + step * direction) - objective(cube - step * direction)) / (
+        2 * step
+    )
+    np.testing.assert_allclose(jnp.vdot(grad, direction), fd, rtol=1e-8)
+    assert not any(
+        "interp" in name or name == "wavelengths_nm"
+        for name in (f.name for f in dataclasses.fields(disk))
+    )

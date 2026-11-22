@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from functools import partial
 
 import equinox as eqx
@@ -367,3 +368,54 @@ def test_flux_scale_is_checked_finite_not_positive(index):
     for value in (jnp.nan, jnp.inf):
         with pytest.raises(ValueError, match="finite"):
             _every_star(index, value)
+
+
+@pytest.mark.parametrize("method", ["linear", "cubic"])
+@pytest.mark.parametrize("n_epochs", [1, 3])
+def test_star_table_is_the_live_leaf_and_the_interpolant_is_derived(method, n_epochs):
+    """Fails if the photon table is dead beside a stored interpolant.
+
+    The render must equal the interpolant built directly from the table (the
+    value the old stored interpolant returned, to rounding), a change to the
+    table must change the flux, and the jitted gradient must match a central
+    difference to 1e-8 (the flux is linear in the table).
+    """
+    import interpax
+
+    wavelengths = jnp.array([400.0, 520.0, 610.0, 800.0])
+    times = jnp.linspace(0.0, 90.0, n_epochs)
+    jy = jnp.asarray(np.random.default_rng(5).uniform(1.0, 3.0, (4, n_epochs)))
+    star = Star(
+        wavelengths_nm=wavelengths,
+        times_d=times,
+        flux_density_jy=jy,
+        interpolation_method=method,
+    )
+    wave = jnp.array([450.0, 560.0, 700.0])
+    time = jnp.array([10.0, 40.0, 80.0])
+    table = jy_to_photons_per_nm_per_m2(jy, wavelengths[:, None])
+    if n_epochs == 1:
+        direct = interpax.Interpolator1D(wavelengths, table[:, 0], method=method)(wave)
+    else:
+        direct = interpax.Interpolator2D(wavelengths, times, table, method=method)(
+            wave, time
+        )
+    actual = star.photon_flux_density(wave, time, dist_pc=10.0)
+    np.testing.assert_allclose(actual, direct, rtol=1e-14)
+    np.testing.assert_allclose(star.flux_density_jy, jy, rtol=1e-14)
+    assert "_flux_interp" not in {f.name for f in dataclasses.fields(star)}
+
+    def objective(values):
+        live = eqx.tree_at(lambda s: s._flux_density_phot, star, values)
+        return jnp.sum(live.photon_flux_density(wave, time, dist_pc=10.0) ** 2)
+
+    values = star._flux_density_phot
+    assert float(objective(1.1 * values)) != float(objective(values))
+    grad = jax.jit(jax.grad(objective))(values)
+    assert float(jnp.max(jnp.abs(grad))) > 0.0
+    direction = values * jnp.asarray(np.random.default_rng(6).normal(size=values.shape))
+    step = 1e-6
+    fd = (
+        objective(values + step * direction) - objective(values - step * direction)
+    ) / (2 * step)
+    np.testing.assert_allclose(jnp.vdot(grad, direction), fd, rtol=1e-6)

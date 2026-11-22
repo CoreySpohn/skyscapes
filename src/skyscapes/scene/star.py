@@ -22,7 +22,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from hwoutils.constants import pc2m
-from hwoutils.conversions import angular_diameter_arcsec, jy_to_photons_per_nm_per_m2
+from hwoutils.conversions import (
+    angular_diameter_arcsec,
+    jy_to_photons_per_nm_per_m2,
+    photons_per_nm_per_m2_to_jy,
+)
 from hwoutils.planck import planck_photon_radiance
 from jaxtyping import Array
 
@@ -211,7 +215,6 @@ class Star(AbstractStar):
     _wavelengths_nm: Array
     _times_d: Array
     _flux_density_phot: Array
-    _flux_interp: interpax.Interpolator1D | interpax.Interpolator2D
 
     def __init__(
         self,
@@ -226,9 +229,11 @@ class Star(AbstractStar):
         interpolation_method: Literal["linear", "cubic"] = "cubic",
         flux_scale: Array | float = 1.0,
     ):
-        """Build the flux interpolant on ``times_d``, days from the scene epoch.
+        """Store the photon table on ``times_d``, days from the scene epoch.
 
-        Input F_nu [Jy] is converted once to photon density before interpolation.
+        The photon table is the one stored representation and a live leaf; the
+        interpolant is built from it on each call. Input F_nu [Jy] is converted
+        once to photon density before interpolation.
         F_lambda = F_nu * Jy * c / lambda_m**2; dividing by photon energy
         h*c/lambda_m and multiplying by nm2m gives F_nu*Jy/(h*wavelength_nm)
         in ph s^-1 m^-2 nm^-1. The hwoutils conversion supplies the constants.
@@ -249,19 +254,12 @@ class Star(AbstractStar):
             jy_to_photons_per_nm_per_m2, in_axes=(1, None), out_axes=1
         )(flux_density_jy, wavelengths_nm)
 
-        if times_d.size == 1:
-            self._flux_interp = interpax.Interpolator1D(
-                wavelengths_nm,
-                self._flux_density_phot[:, 0],
-                method=interpolation_method,
-            )
-        else:
-            self._flux_interp = interpax.Interpolator2D(
-                wavelengths_nm,
-                times_d,
-                self._flux_density_phot,
-                method=interpolation_method,
-            )
+    @property
+    def flux_density_jy(self) -> Array:
+        """Tabulated F_nu [Jy], recovered from the stored photon table."""
+        return jax.vmap(photons_per_nm_per_m2_to_jy, in_axes=(1, None), out_axes=1)(
+            self._flux_density_phot, self._wavelengths_nm
+        )
 
     @property
     def wavelengths_nm(self) -> Array:
@@ -292,14 +290,22 @@ class Star(AbstractStar):
         Interpolate photon density, broadcasting wavelength and time shapes.
         ``time_d`` is days from the scene epoch.
         """
+        method = self._interpolation_method
         if self._times_d.size == 1:
             # A single-epoch source is a static spectrum, not a degenerate spline.
             wavelength_nm, _ = jnp.broadcast_arrays(wavelength_nm, time_d)
-            return self._flux_interp(wavelength_nm.reshape(-1)).reshape(
-                wavelength_nm.shape
+            interp = interpax.Interpolator1D(
+                self._wavelengths_nm, self._flux_density_phot[:, 0], method=method
             )
+            return interp(wavelength_nm.reshape(-1)).reshape(wavelength_nm.shape)
         wave, time = jnp.broadcast_arrays(wavelength_nm, time_d)
-        return self._flux_interp(wave.reshape(-1), time.reshape(-1)).reshape(wave.shape)
+        interp = interpax.Interpolator2D(
+            self._wavelengths_nm,
+            self._times_d,
+            self._flux_density_phot,
+            method=method,
+        )
+        return interp(wave.reshape(-1), time.reshape(-1)).reshape(wave.shape)
 
     def spectral_breaks_nm(self) -> np.ndarray:
         """Return table breakpoints [nm] for consumer quadrature.
