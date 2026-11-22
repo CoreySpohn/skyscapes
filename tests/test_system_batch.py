@@ -365,3 +365,48 @@ def test_atmosphere_shared_axes():
     assert packed.species[0].rayleigh_xs.shape == (1, 3)
     assert packed.absorption.xsmatrix_per_species[0].shape == (1, 3, 3)
     _equal(batch.to_scenes()[0], source)
+
+
+def test_flux_scale_survives_packing_and_tables_without_it_read_as_ones():
+    """Fails if packing drops or misorders a planet scale, or an old table fails.
+
+    Basis: exact storage, no rounding budget. The packed scene is sorted by
+    semi-major axis, so a scale must follow its planet through the sort and the
+    padding; a table written before the leaf existed reads as ones.
+    """
+    scene = Scene.from_classical(
+        FlatStar(1e9, flux_scale=2.0),
+        (
+            Planet(jnp.array([2.0]), LambertianPhysicalModel(jnp.array([0.1])), 5.0),
+            Planet(
+                jnp.array([3.0, 4.0]),
+                LambertianPhysicalModel(jnp.array([0.2, 0.3])),
+                jnp.array([7.0, 9.0]),
+            ),
+        ),
+        star_mass_Msun=1.0,
+        planet_mass_Msun=jnp.array([0.001, 0.002, 0.003]),
+        dist_pc=10.0,
+        a_AU=jnp.array([3.0, 1.0, 2.0]),
+        e=0.08,
+        i_rad=0.4,
+        W_rad=0.3,
+        w_rad=0.2,
+        M0_rad=0.7,
+    )
+    other = _scene(1)
+    batch = Scene.from_scenes([scene, other], capacity=4)
+    np.testing.assert_array_equal(batch.star.flux_scale, [2.0, 1.0])
+    # Chain order is by semi-major axis: scene planets 1, 2, 0.
+    np.testing.assert_array_equal(batch.planets[0].flux_scale[0], [7.0, 9.0, 5.0, 1.0])
+    np.testing.assert_array_equal(batch.planets[0].flux_scale[1], [1.0, 1.0, 1.0, 1.0])
+    restored = batch.to_scenes()[0]
+    _equal(restored, scene)
+
+    table = scene.to_table()
+    assert "planets[0].flux_scale" in table and "star.flux_scale" in table
+    old = {k: v for k, v in table.items() if not k.endswith("flux_scale")}
+    back = Scene.from_table(old, template=scene)
+    assert float(back.star.flux_scale) == 1.0
+    np.testing.assert_array_equal(back.planets[0].flux_scale, [1.0])
+    np.testing.assert_array_equal(back.planets[1].flux_scale, [1.0, 1.0])

@@ -149,7 +149,7 @@ def test_blackbody_star_jit_and_vmap(blackbody_star, dtype):
     """Compiled and wavelength-vectorized spectra match eager evaluation."""
     wavelength_nm = jnp.array([200.0, 550.0, 1000.0, 10_000.0], dtype=dtype)
     eager = blackbody_star.photon_flux_density(wavelength_nm, 0.0, dist_pc=10.0)
-    compiled = jax.jit(blackbody_star.photon_flux_density)(
+    compiled = eqx.filter_jit(blackbody_star.photon_flux_density)(
         wavelength_nm, 0.0, dist_pc=10.0
     )
     vectorized = jax.vmap(
@@ -316,3 +316,54 @@ def test_photon_jax_and_stellar_gradient(blackbody_star):
     derivative = jax.grad(normalized_flux)(1.0)
     assert jnp.isfinite(derivative)
     np.testing.assert_allclose(derivative, fd, rtol=1e-7, atol=0)
+
+
+def _every_star(index, flux_scale=1.0):
+    """The flat, blackbody and tabulated star, by index."""
+    return (
+        lambda: FlatStar(flux_phot_per_nm_m2=3.0, flux_scale=flux_scale),
+        lambda: BlackbodyStar(5772.0, 6.957e8, flux_scale=flux_scale),
+        lambda: Star(
+            wavelengths_nm=jnp.array([400.0, 600.0, 900.0]),
+            times_d=jnp.array([0.0]),
+            flux_density_jy=jnp.array([[1.0], [2.0], [3.0]]),
+            flux_scale=flux_scale,
+        ),
+    )[index]()
+
+
+@pytest.mark.parametrize("index", range(3), ids=("flat", "blackbody", "table"))
+def test_flux_scale_is_applied_once_in_the_base(index):
+    """Fails if the scale is skipped, doubled, or not live as a leaf.
+
+    Basis: exact equality, the public method is the hook times one scalar
+    multiplication; a scale of one is the hook itself. The gradient of the flux
+    with respect to the leaf is the unscaled flux, so it is nonzero.
+    """
+    star = _every_star(index)
+    wave, dist = jnp.array([450.0, 700.0]), 10.0
+    hook = star._photon_flux_density(wave, 0.0, dist_pc=dist)
+    assert float(star.flux_scale) == 1.0
+    np.testing.assert_array_equal(
+        star.photon_flux_density(wave, 0.0, dist_pc=dist), hook
+    )
+
+    scaled = eqx.tree_at(lambda s: s.flux_scale, star, jnp.asarray(2.5))
+    np.testing.assert_allclose(
+        scaled.photon_flux_density(wave, 0.0, dist_pc=dist), 2.5 * hook, rtol=1e-15
+    )
+
+    def total(model):
+        return jnp.sum(model.photon_flux_density(wave, 0.0, dist_pc=dist))
+
+    grad = eqx.filter_grad(total)(star)
+    np.testing.assert_allclose(grad.flux_scale, jnp.sum(hook), rtol=1e-14)
+
+
+@pytest.mark.parametrize("index", range(3), ids=("flat", "blackbody", "table"))
+def test_flux_scale_is_checked_finite_not_positive(index):
+    """Fails if a signed scale is refused or a nonfinite one is accepted."""
+    assert float(_every_star(index, -1.0).flux_scale) == -1.0
+    for value in (jnp.nan, jnp.inf):
+        with pytest.raises(ValueError, match="finite"):
+            _every_star(index, value)

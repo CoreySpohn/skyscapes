@@ -47,7 +47,8 @@ def test_contrast_matches_planck_ratio(temperature, wavelength, x64):
     relative flux error. Other float32 cases allow 1e-5, float64 1e-12.
     """
     with jax.enable_x64(x64):
-        star = STAR
+        # Built in the precision under test: the scale leaf carries the dtype.
+        star = BlackbodyStar(STAR.teff_K, STAR.radius_m)
         dist_pc = 107.5
         if temperature == 100.0:
             star = BlackbodyStar(1000.0, 0.1 * Rsun2m)

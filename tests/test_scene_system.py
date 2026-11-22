@@ -923,7 +923,9 @@ def test_classical_builder_traced_order_and_ownership():
     assert {path for path in paths if not path.startswith(".dynamics.")} == {
         ".star.flux_phot_per_nm_m2",
         ".star.fixed_diameter_arcsec",
+        ".star.flux_scale",
         ".planets[0].Rp_Rearth",
+        ".planets[0].flux_scale",
         ".planets[0].physical_model.Ag",
         ".midplane_inc_deg",
         ".midplane_position_angle_deg",

@@ -390,3 +390,105 @@ def test_unknown_mass_zero_observables_and_orbit_gradients(observable):
     for leaf in jax.tree.leaves(gradient):
         assert jnp.all(jnp.isfinite(leaf))
         np.testing.assert_array_equal(leaf, 0.0)
+
+
+def _two_planet_scene():
+    return Scene.from_classical(
+        FlatStar(1e9),
+        (Planet(jnp.ones(2), LambertianPhysicalModel(jnp.array([0.3, 0.3]))),),
+        star_mass_Msun=1.0,
+        planet_mass_Msun=jnp.array([1e-6, 1e-6]),
+        dist_pc=10.0,
+        a_AU=jnp.array([1.0, 2.0]),
+        e=0.0,
+        W_rad=0.0,
+        i_rad=jnp.pi / 3,
+        w_rad=0.0,
+        M0_rad=jnp.array([0.5, 1.0]),
+    )
+
+
+def _with_scales(scene, star=1.0, planets=(1.0, 1.0)):
+    scene = eqx.tree_at(lambda s: s.star.flux_scale, scene, jnp.asarray(star))
+    return eqx.tree_at(lambda s: s.planets[0].flux_scale, scene, jnp.asarray(planets))
+
+
+def test_planet_flux_scale_is_applied_once_beside_the_radius():
+    """Fails if a planet's scale is skipped, doubled, shared or not a live leaf.
+
+    Basis: exact equality at a scale of one against the physical model called
+    with the same geometry; a power-of-two scale is exact, so the factors are
+    compared to rounding of one multiplication (rtol 1e-15). The planet scale
+    multiplies contrast and flux of its own planet alone.
+    """
+    scene = _two_planet_scene()
+    assert scene.planets[0].flux_scale.shape == (2,)
+    time_d, wave = jnp.array([0.0, 30.0]), jnp.asarray(550.0)
+    eph = scene.ephemeris(time_d)
+    model = scene.planets[0].physical_model
+    direct = model.contrast_at_time(
+        phase_angle_rad=eph.phase_angle_rad(eph.scene_planet_indices, 0),
+        star_planet_distance_AU=eph.distance_AU(eph.scene_planet_indices, 0),
+        wavelength_nm=wave,
+        Rp_Rearth=scene.planets[0].Rp_Rearth,
+        time_d=time_d,
+        star=scene.star,
+        dist_pc=10.0,
+    )
+    base = scene.contrasts(wave, time_d)
+    np.testing.assert_array_equal(base, direct)
+
+    flux = scene.planet_flux_densities(wave, time_d)
+    scaled = _with_scales(scene, planets=(1.0, 3.0))
+    np.testing.assert_allclose(
+        scaled.contrasts(wave, time_d), base * jnp.array([[1.0], [3.0]]), rtol=1e-15
+    )
+    np.testing.assert_allclose(
+        scaled.planet_flux_densities(wave, time_d),
+        flux * jnp.array([[1.0], [3.0]]),
+        rtol=1e-15,
+    )
+
+    grad = eqx.filter_grad(lambda s: jnp.sum(s.planet_flux_densities(wave, time_d)))(
+        scene
+    )
+    np.testing.assert_allclose(
+        grad.planets[0].flux_scale, jnp.sum(flux, axis=1), rtol=1e-12
+    )
+
+
+def test_star_and_planet_scales_are_bilinear_not_jointly_linear():
+    """Fails if the star scale reaches a contrast or the pair is jointly linear.
+
+    The planet flux is the star flux times the contrast, so the flux is
+    bilinear in the two scales and the contrast does not see the star scale.
+    Rounding of three products bounds the checks at rtol 1e-14; the joint
+    first-order prediction 2 + 3 - 1 = 4 misses the product 6 by a third.
+    """
+    scene = _two_planet_scene()
+    time_d, wave = jnp.array([0.0]), jnp.asarray(550.0)
+
+    def flux(star, planet):
+        return _with_scales(scene, star, (planet, planet)).planet_flux_densities(
+            wave, time_d
+        )
+
+    one = flux(1.0, 1.0)
+    np.testing.assert_allclose(flux(2.0, 1.0), 2.0 * one, rtol=1e-14)
+    np.testing.assert_allclose(flux(1.0, 3.0), 3.0 * one, rtol=1e-14)
+    np.testing.assert_allclose(flux(2.0, 3.0), 6.0 * one, rtol=1e-14)
+    first_order = flux(2.0, 1.0) + flux(1.0, 3.0) - one
+    assert float(jnp.max(jnp.abs(first_order / flux(2.0, 3.0) - 1.0))) > 0.3
+    np.testing.assert_array_equal(
+        _with_scales(scene, 2.0).contrasts(wave, time_d), scene.contrasts(wave, time_d)
+    )
+
+
+def test_planet_flux_scale_defaults_broadcast_and_is_checked():
+    """Fails if a scalar scale does not follow the radii, or a nonfinite one passes."""
+    model = LambertianPhysicalModel(jnp.array([0.3, 0.3]))
+    assert Planet(jnp.ones(2), model).flux_scale.shape == (2,)
+    assert float(jnp.sum(Planet(jnp.ones(2), model, 2.0).flux_scale)) == 4.0
+    assert float(Planet(jnp.ones(2), model, -1.0).flux_scale[0]) == -1.0
+    with pytest.raises(ValueError, match="finite"):
+        Planet(jnp.ones(2), model, jnp.nan)

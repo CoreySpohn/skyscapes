@@ -204,3 +204,37 @@ def test_precomputed_interpolation_and_support():
     actual = eqx.filter_jit(model.photon_radiance)(wave, FRAME, TIME_D)
     np.testing.assert_allclose(actual, expected, rtol=0, atol=0, equal_nan=True)
     assert model.photon_radiance(jnp.array(450.0), FRAME, TIME_D) == 800.0
+
+
+def _zodi(kind, flux_scale=1.0):
+    if kind is PrecomputedZodi:
+        return kind(
+            jnp.array([500.0, 700.0]), jnp.array([1e-3, 2e-3]), flux_scale=flux_scale
+        )
+    return kind(flux_scale=flux_scale)
+
+
+@pytest.mark.parametrize("kind", AbstractLocalZodi.__subclasses__())
+def test_flux_scale_is_applied_once_in_the_base(kind):
+    """Fails if the scale is skipped, doubled, or not live as a leaf.
+
+    Basis: exact equality; the public method is the hook times one scalar, a
+    scale of one is the hook itself, and the leaf has the unscaled radiance as
+    its gradient. A nonfinite scale is refused; a negative one is not.
+    """
+    wave = jnp.array([520.0, 600.0])
+    model = _zodi(kind)
+    hook = model._photon_radiance(wave, FRAME, TIME_D)
+    assert float(model.flux_scale) == 1.0
+    np.testing.assert_array_equal(model.photon_radiance(wave, FRAME, TIME_D), hook)
+    scaled = eqx.tree_at(lambda m: m.flux_scale, model, jnp.asarray(2.5))
+    np.testing.assert_allclose(
+        scaled.photon_radiance(wave, FRAME, TIME_D), 2.5 * hook, rtol=1e-15
+    )
+    grad = eqx.filter_grad(lambda m: jnp.sum(m.photon_radiance(wave, FRAME, TIME_D)))(
+        model
+    )
+    np.testing.assert_allclose(grad.flux_scale, jnp.sum(hook), rtol=1e-14)
+    assert float(_zodi(kind, -1.0).flux_scale) == -1.0
+    with pytest.raises(ValueError, match="finite"):
+        _zodi(kind, jnp.nan)

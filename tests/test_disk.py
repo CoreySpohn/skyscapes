@@ -13,6 +13,8 @@ from zodi import DensityDust, SurfaceBrightnessDust
 
 from skyscapes.disk import (
     AbstractDisk,
+    AYOExozodi,
+    CompositeDisk,
     ExovistaDisk,
     ExovistaParametricDisk,
     GraterDisk,
@@ -429,3 +431,67 @@ def test_system_point_radiance_matches_grid(kind):
         )
     if kind is None:
         np.testing.assert_array_equal(actual, 0.0)
+
+
+def _scaled_disks():
+    """One disk of each kind with a calibrated or tabulated radiance."""
+    wavelengths = jnp.array([500.0, 650.0])
+    native = PixelGrid.regular((9, 9), 0.1, "arcsec", orientation=SkyOrientation(0.0))
+    cube = jnp.linspace(1.0, 2.0, 2 * 81).reshape(2, 9, 9) * 1e-9
+    tabulated = ExovistaDisk(native, wavelengths, cube)
+    return {
+        "exovista": tabulated,
+        "parametric": profile("exovista", SurfaceBrightnessDust(level=3)),
+        "grater": profile("grater", SurfaceBrightnessDust(level=3)),
+        "ayo": AYOExozodi(level_zodis=3.0),
+        "composite": CompositeDisk(
+            (profile("grater", SurfaceBrightnessDust(level=3)), tabulated)
+        ),
+    }
+
+
+@pytest.mark.parametrize(
+    "name", ["exovista", "parametric", "grater", "ayo", "composite"]
+)
+def test_flux_scale_is_applied_once_in_the_base(name):
+    """Fails if the scale is skipped, doubled, not live, or cancelled by calibration.
+
+    Basis: exact equality for the disk's own scale (the public method is the
+    hook times one scalar), and linearity to rounding in the star's scale, which a
+    disk defined relative to the star must follow even where it is calibrated
+    against the star's flux; the analytic exozodi is not relative to the star.
+    """
+    disk, star = _scaled_disks()[name], solar_star()
+    args = (jnp.array([550.0]), 0.0, jnp.array([0.05, 0.1]), jnp.array([0.0, 0.02]))
+    kwargs = dict(star=star, dist_pc=10.0)
+    hook = disk._photon_radiance_at(*args, **kwargs)
+    assert float(disk.flux_scale) == 1.0
+    np.testing.assert_array_equal(disk.photon_radiance_at(*args, **kwargs), hook)
+
+    scaled = eqx.tree_at(lambda d: d.flux_scale, disk, jnp.asarray(2.5))
+    np.testing.assert_array_equal(
+        scaled.photon_radiance_at(*args, **kwargs), 2.5 * hook
+    )
+    grad = eqx.filter_grad(lambda d: jnp.sum(d.photon_radiance_at(*args, **kwargs)))(
+        disk
+    )
+    np.testing.assert_allclose(grad.flux_scale, jnp.sum(hook), rtol=1e-14)
+
+    assert float(jnp.max(jnp.abs(hook))) > 0.0
+    brighter = eqx.tree_at(lambda s: s.flux_scale, star, jnp.asarray(2.0))
+    follows = disk.photon_radiance_at(*args, star=brighter, dist_pc=10.0)
+    # The analytic exozodi is defined against a magnitude zero point, not the star.
+    np.testing.assert_allclose(
+        follows, (1.0 if name == "ayo" else 2.0) * hook, rtol=1e-13
+    )
+
+
+def test_a_disk_flux_scale_is_checked_finite_not_positive():
+    """Fails if a signed scale is refused or a nonfinite one is accepted."""
+    assert float(AYOExozodi(flux_scale=-1.0).flux_scale) == -1.0
+    for build in (
+        lambda v: AYOExozodi(flux_scale=v),
+        lambda v: replace(profile("grater"), flux_scale=v),
+    ):
+        with pytest.raises(ValueError, match="finite"):
+            build(jnp.nan)
