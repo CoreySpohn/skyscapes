@@ -37,7 +37,7 @@ Example::
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import equinox as eqx
 import interpax
@@ -266,6 +266,9 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
     rt_engine: Any = eqx.field(static=True)
     nu_grid: Array
     n_nu: int = eqx.field(static=True)
+
+    # The spectrum is linear in wavenumber between grid points.
+    _knot_method: ClassVar[str] = "linear-in-wavenumber"
 
     def spectral_breaks_nm(self) -> np.ndarray:
         """Declare the native line-by-line grid, in nm, as integration breaks.

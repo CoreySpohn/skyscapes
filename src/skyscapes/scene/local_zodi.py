@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import final
+from typing import ClassVar, final
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -17,6 +17,7 @@ from zodi.tables import TABLE19_WAVELENGTH_UM
 from zodi.units import intensity_from_ab_mag_arcsec2, power_to_photon_intensity
 
 from .._flux_scale import check_flux_scale
+from .._tables import table_digest
 
 
 class AbstractLocalZodi(eqx.Module):
@@ -76,6 +77,28 @@ class AbstractLocalZodi(eqx.Module):
         self, wavelength_nm: Array, sky_frame: SkyFrame, time_d: Array
     ) -> Array:
         """Unscaled photon radiance; the hook a concrete model implements."""
+
+    def node_radiance(
+        self, quadrature, resolution, sky_frame: SkyFrame, time_d: Array
+    ) -> Array:
+        """Node-effective photon radiance on a band rule's nodes, with ``flux_scale``.
+
+        The default samples the nodes. That is exact for a model whose knots
+        are piece edges of the rule, as the Table 19 knots of ``AYOZodi`` and
+        ``LeinertZodi`` are when the model is declared to
+        ``Quadrature.build``.
+
+        Args:
+            quadrature: Band rule from ``optixstuff.spectral.Quadrature.build``.
+            resolution: ``optixstuff.spectral.Resolution`` built for the rule;
+                only a tabulated model reads it.
+            sky_frame: The scene's sky frame.
+            time_d: Observation time, scalar days from ``sky_frame.epoch``.
+
+        Returns:
+            Photon radiance [ph s^-1 m^-2 nm^-1 sr^-1], shape ``(W, Q)``.
+        """
+        return self.photon_radiance(quadrature.nodes_nm, sky_frame, time_d)
 
 
 @final
@@ -178,16 +201,25 @@ class PrecomputedZodi(AbstractLocalZodi):
     The sky frame and time are accepted and ignored. Values outside the
     supplied wavelength support are NaN.
 
+    The table is an ``optixstuff.spectral.SpectralTable``: its knot digest is
+    computed at construction, and :meth:`node_radiance` reduces the table on a
+    band rule with the operator a ``Resolution`` holds for it.
+
     Attributes:
         wavelengths_nm: Wavelengths of the table [nm], increasing, shape ``(N,)``.
         radiance_phot_per_s_m2_nm_sr: Photon radiance at those wavelengths
             [ph s^-1 m^-2 nm^-1 sr^-1], shape ``(N,)``.
         flux_scale: Dimensionless factor on the local zodi alone.
+        knot_digest: Static digest of the wavelength knots, or None for a table
+            constructed under a trace.
+        spectral_degree: Polynomial degree between knots: one, linear.
     """
 
     wavelengths_nm: Array = eqx.field(converter=jnp.asarray)
     radiance_phot_per_s_m2_nm_sr: Array = eqx.field(converter=jnp.asarray)
     flux_scale: Array = eqx.field(converter=jnp.asarray)
+    knot_digest: str | None = eqx.field(static=True)
+    spectral_degree: ClassVar[int] = 1
 
     def __init__(
         self,
@@ -205,6 +237,7 @@ class PrecomputedZodi(AbstractLocalZodi):
         """
         self.flux_scale = jnp.asarray(flux_scale)
         self.wavelengths_nm = jnp.asarray(wavelengths_nm)
+        self.knot_digest = table_digest(self.wavelengths_nm, "linear")
         self.radiance_phot_per_s_m2_nm_sr = jnp.asarray(radiance_phot_per_s_m2_nm_sr)
 
     def spectral_breaks_nm(self) -> np.ndarray:
@@ -227,3 +260,40 @@ class PrecomputedZodi(AbstractLocalZodi):
             left=jnp.nan,
             right=jnp.nan,
         )
+
+    def spectral_interpolant(self):
+        """Return the linear interpolation of a radiance table on the knots.
+
+        Returns:
+            A function ``f(values, wavelength_nm)``, linear in values of shape
+            ``(N,)``.
+        """
+        knots = self.spectral_breaks_nm()
+
+        def interpolant(values, wavelength_nm):
+            return jnp.interp(wavelength_nm, knots, values)
+
+        return interpolant
+
+    def node_radiance(
+        self, quadrature, resolution, sky_frame: SkyFrame, time_d: Array
+    ) -> Array:
+        """Node-effective radiance from this table's operator, times ``flux_scale``.
+
+        Args:
+            quadrature: Band rule from ``optixstuff.spectral.Quadrature.build``.
+            resolution: ``optixstuff.spectral.Resolution`` holding a rule for
+                this table on ``quadrature``.
+            sky_frame: The scene's sky frame; ignored.
+            time_d: Observation time, days from ``sky_frame.epoch``; ignored.
+
+        Returns:
+            Photon radiance [ph s^-1 m^-2 nm^-1 sr^-1], shape ``(W, Q)``.
+        """
+        rule = resolution.rule(quadrature, self)
+        if rule.kind == "table":
+            values = rule.apply(self.radiance_phot_per_s_m2_nm_sr)
+        else:
+            points = quadrature.nodes_nm if rule.kind == "identity" else rule.fine_nm
+            values = rule.apply(self._photon_radiance(points, sky_frame, time_d))
+        return self.flux_scale * values

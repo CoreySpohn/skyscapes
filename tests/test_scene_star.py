@@ -19,8 +19,12 @@ from optixstuff.spectral import Band, Quadrature
 
 from skyscapes.scene import AbstractStar, BlackbodyStar, FlatStar, Star
 
+# Every public star model. The private node star of Scene.sources holds values
+# at band-rule nodes, not a spectrum, and is tested there.
+STARS = [k for k in AbstractStar.__subclasses__() if not k.__name__.startswith("_")]
 
-@pytest.mark.parametrize("kind", AbstractStar.__subclasses__())
+
+@pytest.mark.parametrize("kind", STARS)
 def test_angular_diameter_contract(kind):
     """Fails if a star detaches its size from JAX or misinterprets distance.
 
@@ -197,11 +201,7 @@ def test_spectrum_star_wavelength_coverage(n_epochs):
 
 @pytest.mark.parametrize(
     "kind,n_epochs",
-    [
-        (kind, n)
-        for kind in AbstractStar.__subclasses__()
-        for n in ((1, 2) if kind is Star else (1,))
-    ],
+    [(kind, n) for kind in STARS for n in ((1, 2) if kind is Star else (1,))],
 )
 def test_photon_contract(kind, n_epochs):
     """Fails on a unit error, Jy interpolation, or lost wavelength/time axes.

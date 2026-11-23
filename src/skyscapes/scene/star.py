@@ -11,6 +11,11 @@ epochs, with optional surface metadata.
 
 Distance is supplied by the system when evaluating physical spectra;
 apparent flux tables and flat spectra retain their measured normalization.
+
+``node_flux_density`` reads a star on the nodes of a band rule. A smooth star
+is sampled at the nodes; a tabulated ``Star`` is reduced to node-effective
+values by the operator ``optixstuff.spectral.Resolution`` holds for its knots,
+so the band integral is exact in the table however rough it is.
 """
 
 from abc import abstractmethod
@@ -31,7 +36,12 @@ from hwoutils.planck import planck_photon_radiance
 from jaxtyping import Array
 
 from .._flux_scale import check_flux_scale
+from .._tables import table_digest
 from .spots import StarSpots
+
+# Digest names of the interpolations a Star offers; a linear interpolant is
+# unique, so every linear table on one grid shares a rule.
+_TABLE_METHODS = {"linear": "linear", "cubic": "interpax-cubic"}
 
 
 class AbstractStar(eqx.Module):
@@ -99,6 +109,43 @@ class AbstractStar(eqx.Module):
         applies ``flux_scale`` to it. Concrete models evaluate natively in
         photon units, without a conversion at evaluation time.
         """
+
+    def node_flux_density(
+        self,
+        quadrature,
+        resolution,
+        time_d: Array,
+        *,
+        dist_pc: Array,
+    ) -> Array:
+        """Node-effective photon flux density [ph s^-1 m^-2 nm^-1], with ``flux_scale``.
+
+        The values on the band rule's nodes whose weighted sum with any
+        response of degree below a piece's order is the band integral of the
+        star times that response. A smooth star returns its samples at the
+        nodes; a tabulated star returns the reduction of its table by the
+        operator ``resolution`` holds for its knots on ``quadrature``.
+
+        Args:
+            quadrature: Band rule from ``optixstuff.spectral.Quadrature.build``.
+            resolution: ``optixstuff.spectral.Resolution`` built for the rule and
+                the scene's tables; a smooth star does not read it.
+            time_d: Observation times, days from the scene epoch, shape ``(T,)``.
+            dist_pc: Observer distance [pc].
+
+        Returns:
+            Node-effective photon flux density, shape ``(W, Q, T)``.
+        """
+        return self.flux_scale * self._node_flux_density(
+            quadrature, resolution, time_d, dist_pc=dist_pc
+        )
+
+    def _node_flux_density(self, quadrature, resolution, time_d, *, dist_pc):
+        """Unscaled node values; the default samples a smooth star at the nodes."""
+        nodes = quadrature.nodes_nm
+        time = jnp.atleast_1d(jnp.asarray(time_d))
+        values = self._photon_flux_density(nodes[..., None], time, dist_pc=dist_pc)
+        return jnp.broadcast_to(values, nodes.shape + time.shape)
 
     @abstractmethod
     def angular_diameter_arcsec(self, dist_pc: Array) -> Array:
@@ -247,6 +294,13 @@ class Star(AbstractStar):
     ``flux_scale`` is a dimensionless factor on the tabulated flux, default one;
     see :class:`AbstractStar`.
 
+    The star is an ``optixstuff.spectral.SpectralTable``: ``knot_digest`` names
+    its wavelength grid and interpolation, computed once at construction from
+    the stored knots, and :meth:`node_flux_density` reads the operator a
+    ``Resolution`` holds for that digest. A star constructed under a trace has
+    no digest. Replacing the wavelength leaf afterwards (``eqx.tree_at``) leaves
+    the digest stale; the next ``Resolution.build`` refuses it.
+
     Attributes:
         flux_scale: Dimensionless factor on the tabulated flux, default one.
         fixed_diameter_arcsec: Apparent stellar diameter [arcsec]; zero is a
@@ -254,6 +308,8 @@ class Star(AbstractStar):
         luminosity_Lsun: Stellar luminosity [solar luminosities].
         spots: Imported spot history, or None.
         metadata: Free-form source metadata, held as a static field.
+        knot_digest: Static digest of the wavelength knots and the interpolation
+            method, or None for a star constructed under a trace.
     """
 
     flux_scale: Array
@@ -261,6 +317,7 @@ class Star(AbstractStar):
     luminosity_Lsun: float
     spots: StarSpots | None
     metadata: dict = eqx.field(static=True)
+    knot_digest: str | None = eqx.field(static=True)
 
     _interpolation_method: str = eqx.field(static=True)
     _wavelengths_nm: Array
@@ -314,6 +371,9 @@ class Star(AbstractStar):
         self.metadata = {} if metadata is None else dict(metadata)
         self._wavelengths_nm = wavelengths_nm
         self._times_d = times_d
+        self.knot_digest = table_digest(
+            wavelengths_nm, _TABLE_METHODS[interpolation_method]
+        )
 
         self._flux_density_phot = jax.vmap(
             jy_to_photons_per_nm_per_m2, in_axes=(1, None), out_axes=1
@@ -379,6 +439,59 @@ class Star(AbstractStar):
         )
         return interp(wave.reshape(-1), time.reshape(-1)).reshape(wave.shape)
 
+    @property
+    def spectral_degree(self) -> int:
+        """Polynomial degree of the photon table between knots: 1 linear, 3 cubic."""
+        return 1 if self._interpolation_method == "linear" else 3
+
+    def spectral_interpolant(self):
+        """Return the table's wavelength interpolation as a function of its values.
+
+        The function ``f(values, wavelength_nm)`` interpolates a photon table of
+        shape ``(N,)`` on the star's knots with the star's own method; it is
+        linear in the values, so ``Resolution.build`` composes it into the
+        operator without restating the scheme.
+
+        Returns:
+            The interpolation function, on the host knots.
+        """
+        knots = self.spectral_breaks_nm()
+        method = self._interpolation_method
+
+        def interpolant(values, wavelength_nm):
+            wave = jnp.asarray(wavelength_nm)
+            interp = interpax.Interpolator1D(knots, values, method=method)
+            return interp(wave.reshape(-1)).reshape(wave.shape)
+
+        return interpolant
+
+    def _table_at(self, time_d):
+        """Photon table at the query times, shape ``(N, T)``.
+
+        Interpolating each column in time first and then in wavelength equals
+        the two-dimensional interpolant: it is a tensor product.
+        """
+        if self._times_d.size == 1:
+            column = self._flux_density_phot[:, :1]
+            return jnp.broadcast_to(column, (column.shape[0], time_d.size))
+        interp = interpax.Interpolator1D(
+            self._times_d,
+            self._flux_density_phot.T,
+            method=self._interpolation_method,
+        )
+        return interp(time_d).T
+
+    def _node_flux_density(self, quadrature, resolution, time_d, *, dist_pc):
+        """Unscaled node-effective values from the operator for this table."""
+        rule = resolution.rule(quadrature, self)
+        time = jnp.atleast_1d(jnp.asarray(time_d))
+        if rule.kind == "table":
+            return rule.apply(self._table_at(time))
+        points = quadrature.nodes_nm if rule.kind == "identity" else rule.fine_nm
+        return rule.apply(
+            self._photon_flux_density(points[..., None], time, dist_pc=dist_pc)
+        )
+
     def spectral_breaks_nm(self) -> np.ndarray:
         """Return table breakpoints [nm] for consumer quadrature.
 
@@ -407,3 +520,57 @@ class Star(AbstractStar):
             f"diam={self.fixed_diameter_arcsec:.3g} arcsec, "
             f"wl={wl_min:.0f}-{wl_max:.0f} nm, n_times={n_t})"
         )
+
+
+class _NodeStar(AbstractStar):
+    """The host star read at band-rule nodes, built by ``Sources.node_star``.
+
+    ``photon_flux_density`` returns the node-effective value in place of a
+    spectrum: a scalar at one node, broadcast to any wavelength shape, or one
+    value per node, for a read vectorised over the nodes whose wavelength
+    array has the same shape. A source defined relative to the star (a disk)
+    rendered with it therefore carries the star's band integral, not its point
+    sample. No value is divided, so a node where the star is zero is no
+    special case.
+
+    Attributes:
+        values: Unscaled node-effective photon flux density
+            [ph s^-1 m^-2 nm^-1], a scalar or one value per node.
+        diameter_arcsec: Apparent diameter of the host star [arcsec].
+        luminosity_Lsun: Luminosity of the host star [solar luminosities], or
+            None when the host does not carry one.
+        flux_scale: The host star's ``flux_scale``.
+    """
+
+    values: Array
+    diameter_arcsec: Array
+    luminosity_Lsun: Array | None
+    flux_scale: Array
+
+    def angular_diameter_arcsec(self, dist_pc: Array) -> Array:
+        """Return the host star's apparent diameter, ignoring dist_pc.
+
+        Args:
+            dist_pc: Observer distance [pc]; ignored.
+
+        Returns:
+            Apparent diameter [arcsec].
+        """
+        return self.diameter_arcsec
+
+    def _photon_flux_density(
+        self,
+        wavelength_nm: Array,
+        time_d: Array,
+        *,
+        dist_pc: Array,
+    ) -> Array:
+        """Node values in the wavelength array's shape; time and distance are fixed."""
+        shape = jnp.shape(wavelength_nm)
+        if jnp.ndim(self.values) and jnp.shape(self.values) != shape:
+            raise ValueError(
+                f"this node star holds values of shape {jnp.shape(self.values)}; "
+                f"read it at wavelengths of that shape, not {shape}, or take the "
+                "star of one node with Sources.node_star(w, q)"
+            )
+        return jnp.broadcast_to(self.values, shape)

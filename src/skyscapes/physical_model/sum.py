@@ -4,6 +4,7 @@ import numpy as np
 from jaxtyping import Array
 from optixstuff.spectral import spectral_breaks
 
+from .._tables import SMOOTH_DEGREE
 from .base import AbstractPhysicalModel
 
 
@@ -14,11 +15,34 @@ class SumPhysicalModel(AbstractPhysicalModel):
     star. Their parameters remain differentiable PyTree leaves. Contrast is
     the summed observer flux divided by the stellar flux.
 
+    The sum declares the union of its components' knots. When any component
+    is tabulated, the summed flux is integrated as one table on that union;
+    otherwise each component keeps its own node form (contrast or flux).
+
     Attributes:
         components: Physical models describing the same ``K`` planets.
     """
 
     components: tuple[AbstractPhysicalModel, ...]
+
+    @property
+    def _tabulated(self) -> bool:
+        """Whether any component declares knots."""
+        return any(component._tabulated for component in self.components)
+
+    @property
+    def spectral_degree(self) -> int:
+        """Largest degree between knots; a smooth component counts as a cubic."""
+        return max(
+            component.spectral_degree if component._tabulated else SMOOTH_DEGREE
+            for component in self.components
+        )
+
+    @property
+    def _knot_method(self) -> str:
+        """The components' interpolations, named together."""
+        methods = sorted({c._knot_method for c in self.components if c._tabulated})
+        return "sum of " + " and ".join(methods)
 
     def spectral_breaks_nm(self) -> np.ndarray:
         """Union of all component spectral breaks [nm].
@@ -32,6 +56,52 @@ class SumPhysicalModel(AbstractPhysicalModel):
         """Reject an empty sum before tracing or evaluation."""
         if not self.components:
             raise ValueError("SumPhysicalModel needs at least one component")
+
+    def node_photon_flux_density(
+        self,
+        quadrature,
+        resolution,
+        time_d: Array,
+        *,
+        phase_angle_rad: Array,
+        star_planet_distance_AU: Array,
+        Rp_Rearth: Array,
+        star,
+        star_nodes: Array,
+        dist_pc: Array,
+    ) -> Array:
+        """Summed node-effective flux; one table when any component declares knots.
+
+        Args:
+            quadrature: Band rule from ``optixstuff.spectral.Quadrature.build``.
+            resolution: ``optixstuff.spectral.Resolution`` built for the rule
+                and ``Scene.spectral_tables()``.
+            time_d: Observation times in days from the scene epoch, shape ``(T,)``.
+            phase_angle_rad: Phase angle [rad], shape ``(K, T)``.
+            star_planet_distance_AU: Star-planet distance [AU], shape ``(K, T)``.
+            Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
+            star: Host ``AbstractStar``.
+            star_nodes: The host star's node-effective flux, shape ``(W, Q, T)``.
+            dist_pc: Distance of the system from the observer [pc].
+
+        Returns:
+            Node-effective photon flux density, shape ``(W, Q, K, T)``.
+        """
+        arguments = dict(
+            time_d=time_d,
+            phase_angle_rad=phase_angle_rad,
+            star_planet_distance_AU=star_planet_distance_AU,
+            Rp_Rearth=Rp_Rearth,
+            star=star,
+            star_nodes=star_nodes,
+            dist_pc=dist_pc,
+        )
+        if self._tabulated:
+            return super().node_photon_flux_density(quadrature, resolution, **arguments)
+        return sum(
+            component.node_photon_flux_density(quadrature, resolution, **arguments)
+            for component in self.components
+        )
 
     def _photon_flux_density(
         self,

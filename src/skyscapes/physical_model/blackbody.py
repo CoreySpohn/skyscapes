@@ -69,6 +69,48 @@ class BlackbodyPhysicalModel(AbstractPhysicalModel):
             return flux
         return flux[:, None] * jnp.ones_like(phase_angle_rad)
 
+    def node_photon_flux_density(
+        self,
+        quadrature,
+        resolution,
+        time_d: Array,
+        *,
+        phase_angle_rad: Array,
+        star_planet_distance_AU: Array,
+        Rp_Rearth: Array,
+        star,
+        star_nodes: Array,
+        dist_pc: Array,
+    ) -> Array:
+        """Thermal flux at the nodes [ph s^-1 m^-2 nm^-1]; the star does not enter.
+
+        A Planck spectrum is smooth, so its samples at the nodes integrate it
+        against a response with the rule's own order.
+
+        Args:
+            quadrature: Band rule whose nodes are read.
+            resolution: Unused; a smooth spectrum needs no operator.
+            time_d: Observation times in days from the scene epoch, shape ``(T,)``.
+            phase_angle_rad: Phase angle [rad], shape ``(K, T)``; sets the shape.
+            star_planet_distance_AU: Star-planet distance [AU]; ignored.
+            Rp_Rearth: Planet radius [Earth radii], shape ``(K,)``.
+            star: The host star; ignored.
+            star_nodes: The host star at the nodes; ignored.
+            dist_pc: Observer distance supplied by the system [pc].
+
+        Returns:
+            Photon flux density, shape ``(W, Q, K, T)``.
+        """
+        return self._flux_at(
+            quadrature.nodes_nm,
+            time_d,
+            phase_angle_rad=phase_angle_rad,
+            star_planet_distance_AU=star_planet_distance_AU,
+            Rp_Rearth=Rp_Rearth,
+            star=star,
+            dist_pc=dist_pc,
+        )
+
     def contrast(
         self,
         phase_angle_rad: Array,
