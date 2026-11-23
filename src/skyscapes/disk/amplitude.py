@@ -1,34 +1,80 @@
 """Profile-dependent calibration of scattered dust amplitudes."""
 
+import math
 from dataclasses import replace
 
 import equinox as eqx
 import jax.numpy as jnp
+import numpy as np
 from hwoutils.constants import JOHNSON_V_VEGA_ZERO_POINT_JY, arcsec2rad, pc2AU
 from hwoutils.conversions import jy_to_photons_per_nm_per_m2, mag_to_flux_jy
+from optixstuff.spectral import Band
 from zodi import DensityDust, SurfaceBrightnessDust
 
 from skyscapes.habitable_zone import eeid_AU
 
+# Half-width of the Johnson V calibration top hat: 506 to 594 nm around the
+# 550.0 nm the Johnson zero point is keyed on.
+_V_HALF_WIDTH_NM = 44.0
 
-def zero_magnitude_photon_flux_density(passband, *, zero_point_jy=None):
-    """Monochromatic photon zero point at the calibration band's center.
+
+def default_calibration_band(passband):
+    """Return the calibration band a passband gets when none is declared.
+
+    Args:
+        passband: Calibration passband of the amplitude.
+
+    Returns:
+        A top hat from 506 to 594 nm for Johnson V centred on 550.0 nm, else
+        None: no other passband has a default band.
+    """
+    if passband.name == "V" and passband.center_nm == 550.0:
+        return Band(
+            passband.center_nm - _V_HALF_WIDTH_NM, passband.center_nm + _V_HALF_WIDTH_NM
+        )
+    return None
+
+
+def calibration_band(amplitude, profile):
+    """Return the band the amplitude's calibration averages over, or None.
+
+    Args:
+        amplitude: ``SurfaceBrightnessDust`` amplitude.
+        profile: Parametric disk; its ``calibration_band`` overrides the
+            default of the amplitude's passband.
+
+    Returns:
+        The declared or default ``optixstuff.spectral.Band``; None when there is
+        neither, so the zero point is the monochromatic value at the center.
+    """
+    declared = getattr(profile, "calibration_band", None)
+    if declared is not None:
+        return declared
+    return default_calibration_band(amplitude.passband)
+
+
+def zero_magnitude_photon_flux_density(passband, *, zero_point_jy=None, band=None):
+    """Photon zero point at the calibration band's center, or its mean over a band.
 
     AB uses hwoutils' exact AB definition. For Johnson V (Vega, 550 nm)
     we adopt 3636 Jy as the monochromatic calibration convention; other
-    Vega bands require an explicit zero_point_jy. This is a zero-point
-    choice, not an integration through a filter: zodi.Passband specifies
-    only a center. F0_ph = F0_Jy * Jy / (h * lambda_m) * nm2m.
+    Vega bands require an explicit zero_point_jy. The zero point is a flat
+    flux density in Jy, F0_ph = F0_Jy * Jy / (h * lambda_m) * nm2m, so its mean
+    over a band is F0_Jy * Jy / h times the mean of 1 / lambda, which is
+    ln(high / low) / (high - low) in closed form. A magnitude is a band
+    quantity, and the host star is averaged over the same band.
 
     Args:
         passband: Calibration band, giving the magnitude system, name and center
             wavelength.
         zero_point_jy: Monochromatic flux density of a zero-magnitude source
             [Jy]. ``None`` uses the AB definition, or 3636 Jy for Johnson V.
+        band: ``optixstuff.spectral.Band`` to average over; ``None`` returns the
+            value at ``passband.center_nm``.
 
     Returns:
-        Photon flux density of a zero-magnitude source at the band center
-        [ph s^-1 m^-2 nm^-1].
+        Photon flux density of a zero-magnitude source [ph s^-1 m^-2 nm^-1]: at
+        the band center, or the mean over ``band``.
     """
     if zero_point_jy is None:
         if passband.magnitude_system == "ab":
@@ -37,7 +83,12 @@ def zero_magnitude_photon_flux_density(passband, *, zero_point_jy=None):
             zero_point_jy = JOHNSON_V_VEGA_ZERO_POINT_JY
         else:
             raise ValueError("a non-V Vega calibration requires zero_point_jy")
-    return jy_to_photons_per_nm_per_m2(zero_point_jy, passband.center_nm)
+    if band is None:
+        return jy_to_photons_per_nm_per_m2(zero_point_jy, passband.center_nm)
+    if band.width_nm == 0:
+        return jy_to_photons_per_nm_per_m2(zero_point_jy, band.low_nm)
+    mean_inverse_nm = np.log(band.high_nm / band.low_nm) / band.width_nm
+    return jy_to_photons_per_nm_per_m2(zero_point_jy, 1.0 / mean_inverse_nm)
 
 
 def check_amplitude(amplitude, profile):
@@ -60,8 +111,24 @@ def check_amplitude(amplitude, profile):
         radius = amplitude.reference_radius_au
         if radius != "eeid" and radius <= 0:
             raise ValueError("reference_radius_au must be positive")
+        band = calibration_band(amplitude, profile)
+        if band is not None:
+            if not isinstance(band, Band):
+                raise TypeError("calibration_band must be an optixstuff Band")
+            if not math.isclose(
+                band.center_nm, amplitude.passband.center_nm, rel_tol=0, abs_tol=1e-9
+            ):
+                raise ValueError(
+                    f"calibration_band is centred on {band.center_nm} nm but the "
+                    f"passband center is {amplitude.passband.center_nm} nm"
+                )
+        elif amplitude.luminosity_rule == "bolometric":
+            raise ValueError(
+                "the bolometric rule averages the host star over a band: pass "
+                "calibration_band for a passband other than Johnson V"
+            )
         zero_magnitude_photon_flux_density(
-            amplitude.passband, zero_point_jy=profile.zero_point_jy
+            amplitude.passband, zero_point_jy=profile.zero_point_jy, band=band
         )
     else:
         raise TypeError("amplitude must be DensityDust or SurfaceBrightnessDust")
@@ -83,8 +150,11 @@ def density_level(amplitude, profile, *, star, dist_pc, time_d=0.0):
     * F0_ph / arcsec2rad^2. Dividing this by Phi_star(ref,d)*d_AU^2*J
     chooses the density multiplier. The host magnitude is inferred from
     that same photon flux and zero point: M=-2.5 log10(Phi/F0)-5 log10(d/10).
-    Consequently the band rule cancels the host flux from the multiplier;
-    the bolometric rule replaces its band luminosity by host L exactly once.
+    Consequently the band rule cancels the host flux from the multiplier, so
+    it does not read the star; the bolometric rule replaces its band luminosity
+    by host L exactly once and divides by the star's mean over the calibration
+    band (``star.calibration_flux_density``), the same band over which the zero
+    point is averaged.
     Subsequent rendering supplies stellar colour and epoch variation, and the
     star's ``flux_scale``, which the calibration does not see.
 
@@ -98,7 +168,8 @@ def density_level(amplitude, profile, *, star, dist_pc, time_d=0.0):
         amplitude: Dust amplitude, either a ``DensityDust`` or a
             ``SurfaceBrightnessDust``.
         profile: Parametric disk whose unit scattering density is scaled.
-        star: Host star, supplying the photon flux used in the calibration.
+        star: Host star; read only under the bolometric rule, through its
+            ``calibration_flux_density`` and ``luminosity_Lsun``.
         dist_pc: Distance of the system from the observer [pc].
         time_d: Time of the calibration in days from the scene epoch; default 0.
 
@@ -109,17 +180,22 @@ def density_level(amplitude, profile, *, star, dist_pc, time_d=0.0):
     if isinstance(amplitude, DensityDust):
         return jnp.asarray(amplitude.level)
     wave = amplitude.passband.center_nm
+    band = calibration_band(amplitude, profile)
     zero = zero_magnitude_photon_flux_density(
-        amplitude.passband, zero_point_jy=profile.zero_point_jy
+        amplitude.passband, zero_point_jy=profile.zero_point_jy, band=band
     )
-    # The calibration reads the star's own flux, without its ``flux_scale``: the
-    # scale is applied at render time, so a disk defined relative to the star
-    # follows it instead of cancelling it.
-    flux = star._photon_flux_density(wave, time_d, dist_pc=dist_pc)
+    if amplitude.luminosity_rule == "bolometric":
+        # The star's own mean over the calibration band, without its
+        # ``flux_scale``: the scale is applied at render time, so a disk defined
+        # relative to the star follows it instead of cancelling it.
+        flux = star.calibration_flux_density(band, time_d, dist_pc=dist_pc)
+        luminosity = star.luminosity_Lsun
+    else:
+        # The host magnitude is built from this same flux, which therefore
+        # cancels from the level: the star is not read.
+        flux = 1.0
+        luminosity = 1.0
     absolute_mag = -2.5 * jnp.log10(flux / zero) - 5.0 * jnp.log10(dist_pc / 10.0)
-    luminosity = (
-        star.luminosity_Lsun if amplitude.luminosity_rule == "bolometric" else 1.0
-    )
     radius = amplitude.reference_radius_au
     if radius == "eeid":
         radius = eeid_AU(amplitude.reference_star.luminosity_lsun)

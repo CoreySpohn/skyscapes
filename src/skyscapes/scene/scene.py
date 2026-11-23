@@ -865,6 +865,7 @@ class Scene(eqx.Module):
                 out_axes=-1,
             )(time_d)
         luminosity = getattr(self.star, "luminosity_Lsun", None)
+        bands = self.calibration_bands()
         return Sources(
             unscaled_star=unscaled,
             star_scale=scale,
@@ -876,7 +877,56 @@ class Scene(eqx.Module):
             star_luminosity_Lsun=None
             if luminosity is None
             else jnp.asarray(luminosity),
+            calibration=self._calibration(resolution, bands, dist_pc),
+            calibration_bands=bands,
         )
+
+    def calibration_bands(self) -> tuple:
+        """Return the calibration band of each bolometric-rule disk, on the host.
+
+        A disk under the default band rule does not read the star to calibrate
+        and contributes nothing. Build one quadrature per band
+        (``Quadrature.build((band,))``) and pass them to ``Resolution.build``
+        with the exposure's, so :meth:`sources` can reduce a tabulated star over
+        each; a smooth star needs none.
+
+        Returns:
+            Each distinct ``optixstuff.spectral.Band``, in scene order.
+        """
+        if self.disk is None:
+            return ()
+        return tuple(dict.fromkeys(self.disk.calibration_bands()))
+
+    def _calibration(self, resolution, bands, dist_pc):
+        """Band mean of the unscaled star in each calibration band, shape ``(C,)``.
+
+        A smooth star is averaged with its own Gauss rule; a tabulated star is
+        reduced by the operator of the calibration quadrature the resolution
+        holds for the band, at the scene epoch, like every other star read.
+        """
+        if not bands:
+            return jnp.zeros((0,))
+        if not is_table(self.star):
+            return jnp.stack(
+                [
+                    self.star.calibration_flux_density(band, 0.0, dist_pc=dist_pc)
+                    for band in bands
+                ]
+            )
+        values = []
+        for band in bands:
+            rule = next((q for q in resolution.quadratures if q.bands == (band,)), None)
+            if rule is None:
+                raise LookupError(
+                    f"no calibration quadrature for {band}: build the Resolution "
+                    "with Quadrature.build((band,)) for each band of "
+                    "Scene.calibration_bands() beside the exposure's quadrature"
+                )
+            node_values = self.star._node_flux_density(
+                rule, resolution, jnp.zeros(1), dist_pc=dist_pc
+            )
+            values.append(rule.mean(node_values)[0, 0])
+        return jnp.stack(values)
 
     @_batch_method
     def band_contrasts(

@@ -8,9 +8,10 @@ import jax.numpy as jnp
 import numpy as np
 from hwoutils.constants import pc2AU
 from hwoutils.conversions import arcsec_to_au
-from zodi import AbstractDustAmplitude
+from optixstuff.spectral import Band
+from zodi import AbstractDustAmplitude, SurfaceBrightnessDust
 
-from .amplitude import check_amplitude, density_level
+from .amplitude import calibration_band, check_amplitude, density_level
 from .base import AbstractDisk
 
 
@@ -19,6 +20,9 @@ class AbstractParametricDisk(AbstractDisk):
 
     The declared unit profile is extinction per AU. zero_point_jy optionally
     overrides the calibration passband's monochromatic flux zero point.
+    ``calibration_band`` is the wavelength interval a surface-brightness
+    amplitude is calibrated over: the zero-magnitude source and, under the
+    bolometric luminosity rule, the host star are averaged across it.
 
     Attributes:
         profile_id: Class-level identifier of the profile family; a
@@ -31,6 +35,11 @@ class AbstractParametricDisk(AbstractDisk):
             [deg].
         zero_point_jy: Optional monochromatic flux zero point of the calibration
             passband [Jy]. ``None`` uses the passband default. Static.
+        calibration_band: Optional ``optixstuff.spectral.Band`` the calibration
+            averages over, centred on the calibration passband's center. ``None``
+            uses a 506 to 594 nm top hat for Johnson V, and a monochromatic zero
+            point at the center for any other passband (which the bolometric
+            rule refuses). Static.
     """
 
     profile_id: eqx.AbstractClassVar[str]
@@ -39,6 +48,22 @@ class AbstractParametricDisk(AbstractDisk):
     inclination_deg: eqx.AbstractVar[jax.Array]
     position_angle_deg: eqx.AbstractVar[jax.Array]
     zero_point_jy: float | None = eqx.field(static=True, default=None, kw_only=True)
+    calibration_band: Band | None = eqx.field(static=True, default=None, kw_only=True)
+
+    def calibration_bands(self) -> tuple:
+        """Return the calibration band when the amplitude uses the bolometric rule.
+
+        Returns:
+            A one-element tuple of ``optixstuff.spectral.Band``, or an empty tuple
+            for a density amplitude or the band luminosity rule, whose level does
+            not read the host star.
+        """
+        if (
+            isinstance(self.amplitude, SurfaceBrightnessDust)
+            and self.amplitude.luminosity_rule == "bolometric"
+        ):
+            return (calibration_band(self.amplitude, self),)
+        return ()
 
     def spectral_breaks_nm(self) -> np.ndarray:
         """Wavelength breaks of the tabulated scattering parameters [nm].

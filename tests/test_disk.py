@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from hwoutils.constants import arcsec2rad, h
+from hwoutils.conversions import jy_to_photons_per_nm_per_m2
 from hwoutils.map_coordinates import map_coordinates
 from optixstuff.grids import Measure, PixelGrid, SkyOrientation, resample
 from zodi import DensityDust, SurfaceBrightnessDust
@@ -26,6 +27,7 @@ from skyscapes.disk import (
     zero_magnitude_photon_flux_density,
 )
 from skyscapes.scene import FlatStar, Star
+from skyscapes.scene.star import AbstractStar
 
 
 def solar_star(magnitude=4.83, luminosity=1.0):
@@ -39,7 +41,21 @@ def solar_star(magnitude=4.83, luminosity=1.0):
     )
 
 
-def profile(kind="exovista", amplitude=None, order=48):
+class _JanskyFlatStar(AbstractStar):
+    """A smooth host flat in flux density per frequency, carrying a luminosity."""
+
+    jansky: float
+    luminosity_Lsun: float
+    flux_scale: jax.Array = eqx.field(default=1.0, converter=jnp.asarray, kw_only=True)
+
+    def angular_diameter_arcsec(self, dist_pc):
+        return jnp.asarray(0.0)
+
+    def _photon_flux_density(self, wavelength_nm, time_d, *, dist_pc):
+        return jy_to_photons_per_nm_per_m2(self.jansky, jnp.asarray(wavelength_nm))
+
+
+def profile(kind="exovista", amplitude=None, order=48, **extra):
     """Profiles with support at the reference radius, independently of sampling."""
     amplitude = (
         SurfaceBrightnessDust(level=jnp.asarray(3.0))
@@ -53,6 +69,7 @@ def profile(kind="exovista", amplitude=None, order=48):
         rmax_AU=jnp.asarray(3.0),
         wavelengths_nm=jnp.array([500.0, 650.0]),
         Ag_grid=jnp.array([0.5, 0.5]),
+        **extra,
     )
     if kind == "exovista":
         return ExovistaParametricDisk(
@@ -181,14 +198,18 @@ def test_host_scaling_once(kind):
     Ratio tolerance 3e-14 is float64 cancellation, not a profile approximation.
     """
     star = solar_star(magnitude=7.0, luminosity=0.2)
+    # The bolometric rule averages the host over the calibration band, so it
+    # needs a smooth star here: flat in Jy, whose band mean the eight-point rule
+    # reproduces to round-off and whose point value at 550 nm is the same star.
+    smooth = _JanskyFlatStar(3636.0 * 10 ** (-0.4 * 7.0), 0.2)
     band = SurfaceBrightnessDust(level=3, luminosity_rule="band")
     bolo = replace(band, luminosity_rule="bolometric")
     grid = point_grid(radius=np.sqrt(0.2) / 10)
     values = [
         profile(kind, a)
-        .photon_radiance(550.0, 0.0, star=star, dist_pc=10.0, grid=grid)
+        .photon_radiance(550.0, 0.0, star=host, dist_pc=10.0, grid=grid)
         .data
-        for a in (band, bolo)
+        for a, host in ((band, star), (bolo, smooth))
     ]
     solar = (
         profile(kind, band)

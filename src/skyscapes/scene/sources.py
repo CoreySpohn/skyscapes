@@ -32,6 +32,11 @@ class Sources(eqx.Module):
         star_diameter_arcsec: Apparent diameter of the host star [arcsec].
         star_luminosity_Lsun: Luminosity of the host star [solar luminosities],
             or None when the star does not carry one.
+        calibration: Unscaled band mean of the host star at the scene epoch in
+            each calibration band [ph s^-1 m^-2 nm^-1], shape ``(C,)``; empty
+            unless a disk uses the bolometric luminosity rule.
+        calibration_bands: Static ``Scene.calibration_bands()``, the bands of
+            ``calibration`` in order.
     """
 
     unscaled_star: Array
@@ -40,6 +45,8 @@ class Sources(eqx.Module):
     local_zodi: Array | None
     star_diameter_arcsec: Array
     star_luminosity_Lsun: Array | None
+    calibration: Array
+    calibration_bands: tuple = eqx.field(static=True)
 
     @property
     def star(self) -> Array:
@@ -95,4 +102,6 @@ class Sources(eqx.Module):
             diameter_arcsec=self.star_diameter_arcsec,
             luminosity_Lsun=self.star_luminosity_Lsun,
             flux_scale=self.star_scale,
+            calibration=self.calibration,
+            calibration_bands=self.calibration_bands,
         )

@@ -42,6 +42,8 @@ from .spots import StarSpots
 # Digest names of the interpolations a Star offers; a linear interpolant is
 # unique, so every linear table on one grid shares a rule.
 _TABLE_METHODS = {"linear": "linear", "cubic": "interpax-cubic"}
+# Gauss-Legendre points of the band mean a smooth star is calibrated with.
+_CALIBRATION_POINTS = 8
 
 
 class AbstractStar(eqx.Module):
@@ -146,6 +148,28 @@ class AbstractStar(eqx.Module):
         time = jnp.atleast_1d(jnp.asarray(time_d))
         values = self._photon_flux_density(nodes[..., None], time, dist_pc=dist_pc)
         return jnp.broadcast_to(values, nodes.shape + time.shape)
+
+    def calibration_flux_density(self, band, time_d, *, dist_pc: Array) -> Array:
+        """Mean of the unscaled photon flux density over a band [ph s^-1 m^-2 nm^-1].
+
+        The calibration a disk under the bolometric luminosity rule divides
+        by: a magnitude is a band quantity, so the star is averaged over the
+        band instead of read at its center. A smooth star uses an eight-point
+        Gauss-Legendre rule; ``flux_scale`` is not applied, as in
+        :meth:`_photon_flux_density`.
+
+        Args:
+            band: ``optixstuff.spectral.Band`` to average over.
+            time_d: Time of the calibration, days from the scene epoch.
+            dist_pc: Observer distance [pc].
+
+        Returns:
+            The band-mean photon flux density, a scalar.
+        """
+        x, w = np.polynomial.legendre.leggauss(_CALIBRATION_POINTS)
+        nodes = band.center_nm + 0.5 * band.width_nm * jnp.asarray(x)
+        values = self._photon_flux_density(nodes, jnp.asarray(time_d), dist_pc=dist_pc)
+        return jnp.sum(jnp.asarray(w / 2) * values)
 
     @abstractmethod
     def angular_diameter_arcsec(self, dist_pc: Array) -> Array:
@@ -481,6 +505,30 @@ class Star(AbstractStar):
         )
         return interp(time_d).T
 
+    def calibration_flux_density(self, band, time_d, *, dist_pc: Array) -> Array:
+        """Refuse: a band mean of a rough table needs the operator, not a point rule.
+
+        Args:
+            band: Calibration band.
+            time_d: Time of the calibration, days from the scene epoch.
+            dist_pc: Observer distance [pc].
+
+        Returns:
+            Nothing: the call always raises.
+
+        Raises:
+            LookupError: Always. Read the star through ``Scene.sources`` and
+                render the disk with ``Sources.node_star``, which carry the
+                band mean computed by the table's operator.
+        """
+        raise LookupError(
+            "a tabulated Star has no point-rule band mean: its lines are "
+            "narrower than any affordable rule. Compute the calibration through "
+            "Scene.sources (build the Resolution with the calibration band's "
+            "quadrature from Scene.calibration_bands) and render the disk with "
+            "Sources.node_star"
+        )
+
     def _node_flux_density(self, quadrature, resolution, time_d, *, dist_pc):
         """Unscaled node-effective values from the operator for this table."""
         rule = resolution.rule(quadrature, self)
@@ -540,12 +588,18 @@ class _NodeStar(AbstractStar):
         luminosity_Lsun: Luminosity of the host star [solar luminosities], or
             None when the host does not carry one.
         flux_scale: The host star's ``flux_scale``.
+        calibration: Unscaled band mean of the star at the scene epoch in each
+            of ``calibration_bands`` [ph s^-1 m^-2 nm^-1], shape ``(C,)``.
+        calibration_bands: Static calibration bands, in the order of
+            ``calibration``.
     """
 
     values: Array
     diameter_arcsec: Array
     luminosity_Lsun: Array | None
     flux_scale: Array
+    calibration: Array = eqx.field(default_factory=lambda: jnp.zeros((0,)))
+    calibration_bands: tuple = eqx.field(static=True, default=())
 
     def angular_diameter_arcsec(self, dist_pc: Array) -> Array:
         """Return the host star's apparent diameter, ignoring dist_pc.
@@ -574,3 +628,27 @@ class _NodeStar(AbstractStar):
                 "star of one node with Sources.node_star(w, q)"
             )
         return jnp.broadcast_to(self.values, shape)
+
+    def calibration_flux_density(self, band, time_d, *, dist_pc: Array) -> Array:
+        """Return the band mean ``Scene.sources`` computed for this calibration band.
+
+        The star is read at the scene epoch whatever ``time_d`` is, as the
+        calibration of a disk always is.
+
+        Args:
+            band: Calibration band; one of ``Scene.calibration_bands()``.
+            time_d: Ignored.
+            dist_pc: Observer distance [pc]; ignored.
+
+        Returns:
+            The unscaled band-mean photon flux density, a scalar.
+
+        Raises:
+            LookupError: ``band`` was not among the scene's calibration bands.
+        """
+        if band not in self.calibration_bands:
+            raise LookupError(
+                f"these sources hold no calibration for {band}: it is not one of "
+                "Scene.calibration_bands()"
+            )
+        return self.calibration[self.calibration_bands.index(band)]

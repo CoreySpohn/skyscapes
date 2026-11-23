@@ -62,6 +62,16 @@ class CompositeDisk(AbstractDisk):
         """
         return spectral_breaks(*self.components)
 
+    def calibration_bands(self) -> tuple:
+        """Calibration bands of all components, each distinct band once.
+
+        Returns:
+            The union of the component calibration bands, in component order.
+        """
+        return tuple(
+            dict.fromkeys(b for c in self.components for b in c.calibration_bands())
+        )
+
     def __check_init__(self):
         """Validate the declared disk inputs."""
         if not self.components:

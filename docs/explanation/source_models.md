@@ -374,9 +374,33 @@ image = disk.photon_radiance(550.0, 0.0, star=star, dist_pc=10.0, grid=grid)
 `density_level(amplitude, profile, star=star, dist_pc=distance)`; its inverse
 is `surface_brightness_level(density, profile, calibration=template, ...)`.
 The face-on LOS integral at the calibration radius fixes the normalization.
-The default Vega V monochromatic zero point is 3636 Jy at 550 nm;
-`zero_point_jy` overrides it for another calibration. AB uses the hwoutils
-AB definition. The passband center is a monochromatic anchor, not a filter integral.
+The default Vega V zero point is 3636 Jy, flat in frequency; `zero_point_jy`
+overrides it for another calibration. AB uses the hwoutils AB definition.
+
+A magnitude is a band quantity, so the calibration averages over a
+`calibration_band` (an `optixstuff.spectral.Band` centred on the passband
+center; construction checks it). The default for V is a top hat from 506 to
+594 nm, and the zero-magnitude photon density is its mean over that band. Which
+star enters depends on `luminosity_rule`:
+
+- The default `"band"` rule builds the host magnitude from the same flux that
+  divides the level, so the flux cancels: `density_level` does not read the
+  star, a star with no flux at 550 nm is no special case, and the level is
+  the same for any star. The rendered disk is that level times the star at
+  each wavelength.
+- The `"bolometric"` rule divides by the host flux in the band, so a point
+  sample on a spectral line would put the line into the level. The star is
+  averaged instead: `star.calibration_flux_density(band, time_d, dist_pc=...)`.
+  A smooth star uses an eight-point Gauss rule. A tabulated `Star` refuses, and
+  the mean comes from `Scene.sources`: build one quadrature per band of
+  `Scene.calibration_bands()`, `Quadrature.build((band,))`, and pass them with
+  the exposure's to `Resolution.build((quadrature, *calibration), *scene.spectral_tables())`.
+  `Sources.node_star()` then carries the band means, and
+  `density_level(..., star=sources.node_star())` reads them. The calibration is
+  at the scene epoch, as before. A passband other than V needs an explicit
+  `calibration_band` under this rule.
+
+Set the band on a parametric disk (`GraterDisk(..., calibration_band=Band(...))`).
 
 For retrievals on a real disk, fit `ExovistaParametricDisk` to the
 ExoVista data once, then use the parametric form in the inference

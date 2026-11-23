@@ -78,6 +78,15 @@ class AbstractDisk(eqx.Module):
         """
         return np.empty(0)
 
+    def calibration_bands(self) -> tuple:
+        """Bands over which the disk's calibration averages the host star, on the host.
+
+        Returns:
+            A tuple of ``optixstuff.spectral.Band``; empty here, and overridden by
+            a parametric disk calibrated under the bolometric luminosity rule.
+        """
+        return ()
+
     def photon_radiance(
         self, wavelength_nm, time_d, *, star, dist_pc, grid: PixelGrid
     ) -> Image:
