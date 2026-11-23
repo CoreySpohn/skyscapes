@@ -6,7 +6,7 @@ A concrete model implements the private hook and never sees the scale.
 """
 
 import jax
-import jax.numpy as jnp
+import numpy as np
 
 
 def check_flux_scale(scale) -> None:
@@ -23,5 +23,5 @@ def check_flux_scale(scale) -> None:
     """
     if isinstance(scale, jax.core.Tracer):
         return
-    if not bool(jnp.all(jnp.isfinite(scale))):
+    if not np.all(np.isfinite(np.asarray(scale))):
         raise ValueError("flux_scale must be finite")

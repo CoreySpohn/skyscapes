@@ -491,3 +491,30 @@ def test_smooth_sources_keep_the_point_read(rule):
         nodes[1, 2], 0.0, east, north, star=sources.node_star(1, 2)
     )
     np.testing.assert_allclose(one, every[1, 2], rtol=1e-14)
+
+
+def test_the_node_star_builds_under_jit_and_a_concrete_nonfinite_scale_still_raises(
+    rule,
+):
+    """Fails if a concrete scale inside jit trips the finite check, or nan passes.
+
+    A concrete scale met while tracing is checked with NumPy, so building the
+    node star in a jitted function works; a nonfinite concrete scale is still
+    refused, inside jit as outside it.
+    """
+    from skyscapes._flux_scale import check_flux_scale
+
+    star = BlackbodyStar(5772.0, 6.957e8, flux_scale=1.3)
+    scene = _scene(star, (LambertianPhysicalModel(jnp.array([0.3])),))
+    sources = scene.sources(rule, Resolution(), TIMES)
+    eager = sources.node_star().photon_flux_density(rule.nodes_nm, 0.0, dist_pc=10.0)
+    jitted = jax.jit(
+        lambda: sources.node_star().photon_flux_density(
+            rule.nodes_nm, 0.0, dist_pc=10.0
+        )
+    )()
+    np.testing.assert_allclose(jitted, eager, rtol=1e-14)
+    jax.jit(lambda: check_flux_scale(2.0))()
+    for bad in (float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="finite"):
+            jax.jit(lambda bad=bad: check_flux_scale(bad))()
