@@ -14,17 +14,19 @@ import numpy as np
 from hwoutils.conversions import contrast_to_delta_mag
 from hwoutils.epoch import Epoch
 from jaxtyping import Array
-from optixstuff.spectral import Quadrature, spectral_breaks
+from optixstuff.spectral import Quadrature, Resolution, spectral_breaks
 from orbix.kepler import Markley
 from orbix.system import Body, Ephemeris, SkyFrame
 from orbix.system import System as DynamicsSystem
 
 from .._repr import indent
+from .._tables import ProductTable, is_table
 from ..disk import AbstractDisk
 from . import _system_batch
 from ._system_batch import _PAD_ORBIT
 from .local_zodi import AbstractLocalZodi
 from .planet import Planet
+from .sources import Sources
 from .star import AbstractStar
 
 _DEFAULT_EPOCH = Epoch()
@@ -160,7 +162,7 @@ class Scene(eqx.Module):
     midplane_position_angle_deg: float = 0.0
     body_index: tuple[int, ...] = eqx.field(static=True, default=())
 
-    def photon_radiance(self, wavelength_nm, time_d, *, grid):
+    def photon_radiance(self, wavelength_nm, time_d, *, grid, star=None):
         """Disk photon radiance on grid, using the scene's midplane angles.
 
         Returns ph s^-1 m^-2 nm^-1 sr^-1 with shape wavelength_nm.shape
@@ -171,6 +173,10 @@ class Scene(eqx.Module):
             wavelength_nm: Wavelengths [nm], any shape.
             time_d: Observation time, scalar days from the scene epoch.
             grid: Sky pixel grid on which the radiance is sampled.
+            star: Star the disk is rendered against; None uses the scene's star.
+                A band-rule route passes ``Sources.node_star(w, q)``, so a disk
+                defined relative to the star carries the star's node-effective
+                value instead of its point sample.
 
         Returns:
             Disk photon radiance [ph s^-1 m^-2 nm^-1 sr^-1], shape
@@ -181,11 +187,12 @@ class Scene(eqx.Module):
         check_sky_grid(grid)
         east, north = grid.orientation.detector_to_sky(*grid.coordinates())
         return radiance_image(
-            self.photon_radiance_at(wavelength_nm, time_d, east, north), grid
+            self.photon_radiance_at(wavelength_nm, time_d, east, north, star=star),
+            grid,
         )
 
     def photon_radiance_at(
-        self, wavelength_nm, time_d, east_arcsec, north_arcsec
+        self, wavelength_nm, time_d, east_arcsec, north_arcsec, *, star=None
     ) -> Array:
         """Disk photon radiance in photons/s/m^2/nm/sr at the given sky offsets.
 
@@ -199,6 +206,9 @@ class Scene(eqx.Module):
             east_arcsec: Sky offsets east of the star [arcsec].
             north_arcsec: Sky offsets north of the star [arcsec], broadcast with
                 ``east_arcsec``.
+            star: Star the disk is rendered against; None uses the scene's star.
+                A read vectorised over a band rule's nodes passes
+                ``Sources.node_star()`` with ``wavelength_nm`` the rule's nodes.
 
         Returns:
             Disk photon radiance [ph s^-1 m^-2 nm^-1 sr^-1], shape
@@ -219,7 +229,7 @@ class Scene(eqx.Module):
             time_d,
             east_arcsec,
             north_arcsec,
-            star=self.star,
+            star=self.star if star is None else star,
             dist_pc=self.dist_pc,
         )
 
@@ -659,17 +669,16 @@ class Scene(eqx.Module):
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
         return eph.radial_velocity_m_per_s(0, "barycenter")
 
-    def _photometry(self, wavelength_nm, time_d, ephemeris, *, flux=False):
-        """Dispatch physical models on star-relative phase/distance, each (K, T).
+    def _planet_groups(self, time_d, ephemeris):
+        """Yield each planet group's masked model, geometry and scale.
 
-        ``time_d`` is days from the scene epoch.
+        Geometry is star-relative phase and distance, each (K, T), with the
+        radius, times, host star and distance. ``time_d`` is days from the
+        scene epoch.
         """
-        if jnp.size(wavelength_nm) != 1:
-            raise ValueError("need one wavelength; use contrast_cube")
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
         phase = eph.phase_angle_rad(eph.scene_planet_indices, 0)
         distance = eph.distance_AU(eph.scene_planet_indices, 0)
-        values = []
         start = 0
         for planet in self.planets:
             stop = start + planet.n_planets
@@ -694,15 +703,25 @@ class Scene(eqx.Module):
                 ),
                 planet.physical_model,
             )
+            # The planet's own scale, applied once by the caller, beside the radius.
+            yield model, geometry, planet.flux_scale
+            start = stop
+
+    def _photometry(self, wavelength_nm, time_d, ephemeris, *, flux=False):
+        """Dispatch physical models on star-relative phase/distance, each (K, T).
+
+        ``time_d`` is days from the scene epoch.
+        """
+        if jnp.size(wavelength_nm) != 1:
+            raise ValueError("need one wavelength; use contrast_cube")
+        values = []
+        for model, geometry, scale in self._planet_groups(time_d, ephemeris):
             value = (
                 model.photon_flux_density(wavelength_nm, **geometry)
                 if flux
                 else model.contrast_at_time(wavelength_nm=wavelength_nm, **geometry)
             )
-            # The planet's own scale, applied once here, beside the radius.
-            scale = planet.flux_scale
             values.append(value * scale.reshape(scale.shape + (1,) * (value.ndim - 1)))
-            start = stop
         result = (
             jnp.concatenate(values, axis=0) if values else jnp.empty((0, time_d.size))
         )
@@ -715,6 +734,10 @@ class Scene(eqx.Module):
         """Per-planet contrast at a scalar wavelength [nm], shape ``(K_total, T)``.
 
         ``time_d`` is days from the scene epoch.
+
+        A point read: right for a monochromatic question and for a smooth
+        contrast. A band quantity under a rough star (a thermal planet's
+        contrast, any band integral) comes from :meth:`sources`.
 
         Args:
             wavelength_nm: A single wavelength [nm].
@@ -759,6 +782,102 @@ class Scene(eqx.Module):
             models = (*models, self.local_zodi)
         return spectral_breaks(*models)
 
+    def spectral_tables(self) -> tuple:
+        """Return the tabulated sources a band rule needs operators for, on the host.
+
+        Pass them to ``optixstuff.spectral.Resolution.build`` with the rule:
+        the star when it is a table, one product per planet group whose model
+        declares knots (its table times the star's, on the merged knots), and
+        the local zodi when it is a table. Each digest is checked against its
+        concrete knots, so a knot grid replaced after construction is refused
+        here with the remedy.
+
+        Returns:
+            The ``SpectralTable`` objects, in scene order.
+        """
+        tables = []
+        if is_table(self.star):
+            tables.append(self.star)
+        for planet in self.planets:
+            if planet.physical_model._tabulated:
+                tables.append(ProductTable(planet.physical_model, self.star))
+        if self.local_zodi is not None and is_table(self.local_zodi):
+            tables.append(self.local_zodi)
+        return tuple(tables)
+
+    @_batch_method
+    def sources(
+        self,
+        quadrature: Quadrature,
+        resolution: Resolution,
+        time_d: Array,
+        *,
+        ephemeris=None,
+    ) -> Sources:
+        """Read every source once on the nodes of a band rule.
+
+        The star, each planet and the local zodi return node-effective values
+        through their own node methods: summed with the rule's weights and a
+        response at the nodes, each gives the band integral of the source
+        times the response, exact in a tabulated spectrum and to the rule's
+        degree in the response. Build the rule and the resolution on the host,
+        ``Resolution.build(quadrature, *scene.spectral_tables())``; a tabulated
+        source without a rule raises at trace time. Times are days from the
+        scene epoch.
+
+        Args:
+            quadrature: Band rule from ``optixstuff.spectral.Quadrature.build``.
+            resolution: Operators for the scene's tables on ``quadrature``.
+            time_d: Observation times, days from the scene epoch, shape ``(T,)``.
+            ephemeris: Optional ephemeris from :meth:`ephemeris` solved at these
+                dates; None solves it here.
+
+        Returns:
+            The node-effective values of every source.
+        """
+        time_d = jnp.atleast_1d(jnp.asarray(time_d))
+        dist_pc = self.dynamics.frame.dist_pc
+        unscaled = self.star._node_flux_density(
+            quadrature, resolution, time_d, dist_pc=dist_pc
+        )
+        scale = jnp.asarray(self.star.flux_scale)
+        star = scale * unscaled
+        values = []
+        for model, geometry, planet_scale in self._planet_groups(time_d, ephemeris):
+            value = model.node_photon_flux_density(
+                quadrature, resolution, **geometry, star_nodes=star
+            )
+            values.append(value * planet_scale[:, None])
+        nodes = quadrature.nodes_nm
+        planets = (
+            jnp.concatenate(values, axis=2)
+            if values
+            else jnp.zeros((*nodes.shape, 0, time_d.size))
+        )
+        valid = self.valid[:, None]
+        planets = jnp.where(valid, planets, 0.0) * valid
+        zodi = None
+        if self.local_zodi is not None:
+            zodi = jax.vmap(
+                lambda t: self.local_zodi.node_radiance(
+                    quadrature, resolution, self.sky_frame, t
+                ),
+                out_axes=-1,
+            )(time_d)
+        luminosity = getattr(self.star, "luminosity_Lsun", None)
+        return Sources(
+            unscaled_star=unscaled,
+            star_scale=scale,
+            planets=planets,
+            local_zodi=zodi,
+            star_diameter_arcsec=jnp.asarray(
+                self.star.angular_diameter_arcsec(dist_pc)
+            ),
+            star_luminosity_Lsun=None
+            if luminosity is None
+            else jnp.asarray(luminosity),
+        )
+
     @_batch_method
     def band_contrasts(
         self,
@@ -766,6 +885,7 @@ class Scene(eqx.Module):
         time_d: Array,
         *,
         transmission: Callable | None = None,
+        resolution: Resolution | None = None,
         ephemeris=None,
     ) -> Array:
         """Ratio of integrated planet and star photons, shape ``(W, K_total, T)``.
@@ -773,11 +893,17 @@ class Scene(eqx.Module):
         Build the quadrature on the host with this system and any tabulated
         transmission. The optional photon-counting response is evaluated on all
         ``(W, Q)`` wavelength nodes and must broadcast to that shape. Each
-        finite-width band must transmit nonzero stellar flux. Spectra may be
-        undefined where transmission is zero. A monochromatic channel returns
-        the model contrast directly, including for a reflected spectrum at a
-        stellar zero. An opaque response has undefined contrast.
-        Times are days from the scene epoch.
+        finite-width band must transmit nonzero stellar flux. A monochromatic
+        channel returns the model contrast directly, including for a reflected
+        spectrum at a stellar zero. Times are days from the scene epoch.
+
+        With ``resolution`` the sources are read once through :meth:`sources`,
+        so a tabulated star or planet is integrated exactly without declaring
+        its knots as breaks, and every band must lie inside every source
+        table (``Resolution.build`` refuses one that leaves it). Without it the
+        sources are sampled at the nodes: exact only when the quadrature splits
+        at their knots. Spectra may then be undefined where transmission is
+        zero, and an opaque response has undefined contrast.
 
         Args:
             quadrature: Host-built quadrature giving the band nodes [nm] and
@@ -786,6 +912,9 @@ class Scene(eqx.Module):
             transmission: Optional photon-counting response evaluated on the
                 ``(W, Q)`` node wavelengths [nm]; it must broadcast to that
                 shape.
+            resolution: Operators for the scene's tables on ``quadrature``, from
+                ``Resolution.build(quadrature, *scene.spectral_tables())``; None
+                samples the sources at the nodes.
             ephemeris: Optional ephemeris from :meth:`ephemeris` solved at these
                 dates; None solves it here.
 
@@ -801,6 +930,15 @@ class Scene(eqx.Module):
                 return contrast
             response = jnp.broadcast_to(transmission(wave), wave.shape)[0, 0]
             return jnp.where(response > 0, contrast, jnp.nan)
+
+        if resolution is not None:
+            read = self.sources(quadrature, resolution, time_d, ephemeris=eph)
+            planet, star = read.planets, read.star
+            if transmission is not None:
+                throughput = jnp.broadcast_to(transmission(wave), wave.shape)
+                planet = planet * throughput[..., None, None]
+                star = star * throughput[..., None]
+            return quadrature.integrate(planet) / quadrature.integrate(star)[:, None, :]
 
         def densities(nodes):
             planet = jax.vmap(
@@ -848,7 +986,8 @@ class Scene(eqx.Module):
     ) -> Array:
         """Per-planet flux density [ph/s/m^2/nm], shape ``(K_total, T)``.
 
-        ``time_d`` is days from the scene epoch.
+        ``time_d`` is days from the scene epoch. A point read, like
+        :meth:`contrasts`; band quantities come from :meth:`sources`.
 
         Args:
             wavelength_nm: A single wavelength [nm].

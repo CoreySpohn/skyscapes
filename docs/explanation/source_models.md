@@ -129,7 +129,9 @@ density at construction. `photon_flux_density` interpolates that photon table
 and returns photons/s/m^2/nm.
 `spectral_breaks_nm()` exposes table breakpoints for every interpolation method.
 A Gauss-Legendre rule split at the knots integrates a linear photon table
-exactly, even at order one. Direct construction uses cubic interpolation by
+exactly, even at order one. A rule that is not split at the knots integrates
+the table exactly through `Scene.sources` instead (see
+[Band integrals of tabulated spectra](#band-integrals-of-tabulated-spectra)). Direct construction uses cubic interpolation by
 default; stars imported with `from_exovista` use linear interpolation
 (`interpolation_method="linear"`) to avoid overshooting nonnegative
 samples. Multi-epoch tables return NaN outside their time range.
@@ -544,3 +546,113 @@ def green_band_contrasts(system, time_d):
 `skyscapes.io.transmission_from_table(path)` also returns a `Transmission`.
 Quadrature splits at the response and system spectral breaks. The result has
 shape `(bands, planets, times)`. Omit `transmission` for a unit photon response.
+
+## Band integrals of tabulated spectra
+
+A tabulated stellar spectrum is rough: a PHOENIX table has more lines in a
+band than any affordable number of wavelength nodes, so reading it at the
+nodes misses its band integral by up to ten percent, and more nodes do not
+converge. Splitting the band at every knot is exact but costs a set of nodes
+per knot. `Scene.sources` keeps the nodes of the band rule and changes the
+number read at each one instead.
+
+On one piece of a band, with nodes $\lambda_k$, weights $w_k$ and the Lagrange
+polynomials $\ell_k$ of the nodes, a spectrum $\phi$ has the node-effective value
+
+$$\bar\phi_k = \frac{1}{w_k} \int \phi(\lambda)\, \ell_k(\lambda)\, d\lambda .$$
+
+Summed with the weights and a response $R$ at the nodes, these values give the
+integral of $\phi R$ over the piece: exactly in $\phi$, however rough, and
+exactly for any $R$ that is a polynomial of degree below the number of nodes.
+A table is linear in its values through its own interpolant, so $\bar\phi$ is a
+fixed matrix applied to the table values. The matrix depends on the nodes and
+on the table's knots, never on a value, so it is built once on the host
+(`optixstuff.spectral.Resolution`) and applied inside the traced program,
+where the table values stay live leaves: they can be fitted, and they change
+without a retrace.
+
+```python
+import jax.numpy as jnp
+import numpy as np
+from optixstuff.spectral import Band, Quadrature, Resolution
+
+from skyscapes.physical_model import LambertianPhysicalModel
+from skyscapes.scene import Planet, Scene, Star
+
+wavelengths_nm = np.linspace(400.0, 900.0, 2001)
+flux_jy = 1.0 + 0.5 * np.sin(wavelengths_nm)  # many lines per band
+star = Star(
+    wavelengths_nm=wavelengths_nm,
+    times_d=np.zeros(1),
+    flux_density_jy=flux_jy[:, None],
+    interpolation_method="linear",
+)
+scene = Scene.from_classical(
+    star,
+    Planet(jnp.ones(1), LambertianPhysicalModel(jnp.array([0.3]))),
+    star_mass_Msun=1.0,
+    planet_mass_Msun=0.0,
+    dist_pc=10.0,
+    a_AU=1.0,
+    e=0.0,
+    i_rad=0.5,
+    W_rad=0.0,
+    w_rad=0.0,
+    M0_rad=0.3,
+)
+
+rule = Quadrature.build([Band(500.0, 600.0)])  # four nodes, no star knots
+resolution = Resolution.build(rule, *scene.spectral_tables())
+sources = scene.sources(rule, resolution, jnp.zeros(1))
+star_band = rule.integrate(sources.star)  # (bands, times), exact in the table
+planet_band = rule.integrate(sources.planets)  # (bands, planets, times)
+```
+
+`Scene.spectral_tables()` lists the sources that need an operator: the star
+when it is a `Star`, each planet group whose physical model declares knots, and
+a `PrecomputedZodi`. `Resolution.build` builds one operator per pair of a band
+rule and a knot grid; stars that share a grid (all PHOENIX models) share it.
+Each source then has its own node method:
+
+| Source | Node method | What it returns |
+|---|---|---|
+| `Star` | `node_flux_density` | The table reduced by its operator. A smooth star (`BlackbodyStar`, `FlatStar`) is sampled at the nodes, which is exact Gauss on a smooth spectrum. |
+| Planet model without knots | `node_photon_flux_density` | Reflected light: its contrast at the nodes times the node-effective star. Thermal light (`BlackbodyPhysicalModel`): its own flux at the nodes; the star does not enter. |
+| Planet model with knots | `node_photon_flux_density` | Its flux evaluated on a fine grid between the merged knots of its table and the star's, and reduced: exact in both tables. A `SumPhysicalModel` holding a tabulated component is reduced as one table on the union of its components' knots. |
+| Local zodi | `node_radiance` | `PrecomputedZodi`: its table reduced. `AYOZodi` and `LeinertZodi`: sampled at the nodes, which is exact when they are declared to `Quadrature.build`, because their knots are then piece edges. |
+
+`Scene.sources` assembles them once into a `Sources` record: `star`
+(bands, nodes, times), `planets` (bands, nodes, planets, times) in flux form,
+`local_zodi`, and the star's scale. `Sources.contrast` is `planets / star`, the
+star-weighted node contrast. It is a transport quantity: multiplied by the
+node-effective star it returns the planet's node flux, which a route that
+takes a contrast needs, but it is not a physical contrast to plot. For a disk
+defined relative to the star, `Sources.node_star(w, q)` returns the star at one
+node, and `Sources.node_star()` the star at every node, to pass as `star=` to
+`Scene.photon_radiance` or `Scene.photon_radiance_at`; the disk then carries the
+star's node-effective value instead of its point sample.
+
+`Scene.band_contrasts(..., resolution=resolution)` reads the sources the same
+way. Without `resolution` it samples them at the nodes, which is exact only when
+the rule is split at their knots.
+
+`Scene.contrasts`, `Scene.planet_flux_densities` and `photon_flux_density` remain
+point reads: right for a monochromatic question and for a smooth contrast,
+wrong by the stellar line error for a band quantity under a rough star.
+
+Three rules keep an operator from being applied to the wrong table:
+
+- Every piece of every band must lie inside every source table, from its first
+  knot to its last. `Resolution.build` refuses a band that leaves a table,
+  naming the table's end; end the band there, or load the table over the band.
+- Each table carries a static digest of its knots, computed once at
+  construction, and the operator is found by that digest inside a traced
+  program. A tabulated source on a rule built without it raises at trace time.
+- A table constructed under a trace has no digest and is refused, as is a
+  knot grid replaced with `eqx.tree_at` after construction: the digest no longer
+  matches the knots, and `Scene.spectral_tables` and `Resolution.build` ask for
+  the table to be rebuilt.
+
+An operator belongs to the full rule: `Quadrature.band(i)` has no operator of
+its own, so a route that works band by band reads `Scene.sources` once on the
+full rule and carries the rows of each band.
