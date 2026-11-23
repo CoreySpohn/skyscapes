@@ -518,3 +518,40 @@ def test_the_node_star_builds_under_jit_and_a_concrete_nonfinite_scale_still_rai
     for bad in (float("nan"), float("inf")):
         with pytest.raises(ValueError, match="finite"):
             jax.jit(lambda bad=bad: check_flux_scale(bad))()
+
+
+def test_knot_leaves_name_exactly_the_leaves_that_set_the_knots():
+    """Fails if a knot leaf is missed, misnamed, or a value leaf is listed.
+
+    Truth, named by hand: the knot grids of the tabulated star, of the
+    tabulated planet group and of the tabulated local zodi, in scene order;
+    the Lambertian planet and every value leaf carry none. Each path must read
+    back (through the dotted-path reader a fit uses) exactly the table's
+    knots, compared bit for bit. A smooth scene has no knot leaf.
+    """
+    from hwoutils.model_paths import resolve
+
+    star = Star(
+        wavelengths_nm=jnp.array([400.0, 520.0, 700.0]),
+        times_d=jnp.zeros(1),
+        flux_density_jy=jnp.array([[1.0], [2.0], [1.5]]),
+    )
+    planet = _table_planet(np.array([450.0, 600.0, 650.0]), np.array([0.1, 0.2, 0.3]))
+    zodi = PrecomputedZodi(jnp.array([450.0, 550.0, 650.0]), jnp.full(3, 1e12))
+    scene = _scene(
+        star, (LambertianPhysicalModel(jnp.array([0.3])), planet), local_zodi=zodi
+    )
+    leaves = scene.knot_leaves()
+    assert leaves == (
+        "star._wavelengths_nm",
+        "planets[1].physical_model.wavelengths_nm",
+        "local_zodi.wavelengths_nm",
+    )
+    for path, table in zip(leaves, (star, planet, zodi), strict=True):
+        np.testing.assert_array_equal(
+            np.asarray(resolve(scene, path)), np.asarray(table.spectral_breaks_nm())
+        )
+    smooth = _scene(
+        BlackbodyStar(5772.0, 6.957e8), (LambertianPhysicalModel(jnp.array([0.3])),)
+    )
+    assert smooth.knot_leaves() == ()

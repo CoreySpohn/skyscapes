@@ -119,6 +119,43 @@ def _masked_solve(dynamics, chain_valid, time_d, solver):
     return _mask_dynamics(dynamics, chain_valid).solve(time_d, solver=solver)
 
 
+def _dotted(key_path):
+    """The dotted path of a pytree key path, as ``hwoutils.model_paths`` reads it."""
+    out = ""
+    for key in key_path:
+        if isinstance(key, jax.tree_util.GetAttrKey):
+            out += ("." if out else "") + key.name
+        elif isinstance(key, jax.tree_util.SequenceKey):
+            out += f"[{key.idx}]"
+        else:
+            raise TypeError(f"cannot name the pytree key {key!r}")
+    return out
+
+
+def _knot_leaves(source, path):
+    """Paths, under ``path``, of the floating leaves that move a table's knots."""
+    base = np.asarray(source.spectral_breaks_nm())
+    flat, treedef = jax.tree_util.tree_flatten_with_path(source)
+    leaves = [leaf for _, leaf in flat]
+    found = []
+    for i, (key_path, leaf) in enumerate(flat):
+        if not (
+            isinstance(leaf, float)
+            or (
+                isinstance(leaf, jax.Array) and jnp.issubdtype(leaf.dtype, jnp.floating)
+            )
+        ):
+            continue
+        moved_leaves = list(leaves)
+        moved_leaves[i] = leaf * 1.07 + 0.013
+        moved = np.asarray(
+            jax.tree_util.tree_unflatten(treedef, moved_leaves).spectral_breaks_nm()
+        )
+        if moved.shape != base.shape or not np.array_equal(moved, base):
+            found.append(".".join(filter(None, (path, _dotted(key_path)))))
+    return tuple(found)
+
+
 class Scene(eqx.Module):
     """Everything in the field of view: star, planets, disk and local zodi.
 
@@ -804,6 +841,36 @@ class Scene(eqx.Module):
         if self.local_zodi is not None and is_table(self.local_zodi):
             tables.append(self.local_zodi)
         return tuple(tables)
+
+    def knot_leaves(self) -> tuple[str, ...]:
+        """Return the paths of the leaves that set the tables' knots, on the host.
+
+        An operator built by ``Resolution.build`` is fixed to the knots it saw,
+        so a fit or a held build that reads the scene's tables must hold these
+        leaves fixed: declare them as the build's reads. A leaf is a knot leaf
+        when moving it moves the table's ``spectral_breaks_nm()``; the probe
+        uses only that method, so every kind of table is covered. Paths are
+        dotted and relative to the scene, with a planet group as
+        ``planets[i].physical_model``; prefix the scene's own path in a larger
+        model.
+
+        Returns:
+            The dotted paths of the star's, each tabulated planet model's and the
+            tabulated local zodi's knot leaves, in scene order.
+        """
+        sources = [("star", self.star)]
+        sources += [
+            (f"planets[{i}].physical_model", planet.physical_model)
+            for i, planet in enumerate(self.planets)
+        ]
+        if self.local_zodi is not None:
+            sources.append(("local_zodi", self.local_zodi))
+        return tuple(
+            path
+            for name, source in sources
+            if getattr(source, "knot_digest", None) is not None
+            for path in _knot_leaves(source, name)
+        )
 
     @_batch_method
     def sources(
