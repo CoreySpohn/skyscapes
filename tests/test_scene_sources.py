@@ -440,11 +440,12 @@ def test_smooth_sources_keep_the_point_read(rule):
     """Fails if a smooth scene moves or the node star is indexed wrongly.
 
     A blackbody star of scale 1.3 with a gray and a thermal planet:
-    ``band_contrasts`` with an empty resolution equals the point path to a few
-    ULP (rtol 1e-14), so the reflected planet carries the star's scale once,
-    and the star's node values are its point samples. A disk rendered against
-    the node star reproduces the disk at each node: all nodes at once, and
-    band 1 node 2 alone (a transposed index reads another node).
+    ``band_contrasts`` with an empty resolution equals the band ratio of the
+    point reads at the nodes to a few ULP (rtol 1e-14), so the reflected
+    planet carries the star's scale once, and the star's node values are its
+    point samples. A disk rendered against the node star reproduces the disk
+    at each node: all nodes at once, and band 1 node 2 alone (a transposed
+    index reads another node).
     """
     star = BlackbodyStar(5772.0, 6.957e8, flux_scale=1.3)
     disk = GraterDisk(
@@ -473,13 +474,18 @@ def test_smooth_sources_keep_the_point_read(rule):
         disk=disk,
     )
     empty = Resolution()
+    nodes = rule.nodes_nm
+    planet_points = jax.vmap(jax.vmap(lambda w: scene.planet_flux_densities(w, TIMES)))(
+        nodes
+    )
+    star_points = scene.star.photon_flux_density(
+        nodes[..., None], TIMES, dist_pc=scene.dist_pc
+    )
+    point_path = rule.integrate(planet_points) / rule.integrate(star_points)[:, None, :]
     np.testing.assert_allclose(
-        scene.band_contrasts(rule, TIMES, resolution=empty),
-        scene.band_contrasts(rule, TIMES),
-        rtol=1e-14,
+        scene.band_contrasts(rule, TIMES, resolution=empty), point_path, rtol=1e-14
     )
     sources = scene.sources(rule, empty, TIMES)
-    nodes = rule.nodes_nm
     np.testing.assert_allclose(sources.star[..., 0], _star_at(star, nodes), rtol=1e-15)
     grid = PixelGrid.regular((4, 4), 0.1, "arcsec", orientation=SkyOrientation(0.0))
     east, north = grid.coordinates()

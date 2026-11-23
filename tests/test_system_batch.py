@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from hwoutils.epoch import Epoch
 from optixstuff.grids import PixelGrid, SkyOrientation
-from optixstuff.spectral import Band, Quadrature
+from optixstuff.spectral import Band, Quadrature, Resolution
 
 from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.scene import FlatStar, Planet, Scene
@@ -84,8 +84,9 @@ def test_round_trips():
     assert all(isinstance(x, np.ndarray) for x in jax.tree.leaves(batch))
 
 
-def _read(system, times, ephemeris=None):
+def _read(system, times, ephemeris=None, resolution=None):
     options = dict(ephemeris=ephemeris)
+    resolution = Resolution() if resolution is None else resolution
     return dict(
         positions=system.positions(times, **options),
         position_angles=system.position_angles(times, **options),
@@ -94,6 +95,7 @@ def _read(system, times, ephemeris=None):
         band_contrasts=system.band_contrasts(
             jax.tree.map(lambda x: x.astype(times.dtype), _RULE),
             times,
+            resolution=resolution,
             **options,
         ),
         planet_flux_densities=system.planet_flux_densities(
@@ -330,7 +332,9 @@ def test_other_model_padding(kind):
     _equal(batch.to_scenes()[0], source)
     _equal(Scene.from_table(batch.to_table(), template=batch), batch)
     times = jnp.array([17.0, 230.0])
-    values = _read_jit(batch, times)
+    # The batch shares the source's tables, so their operators are the source's.
+    resolution = Resolution.build(_RULE, *source.spectral_tables())
+    values = _read_jit(batch, times, resolution=resolution)
     for name in ("contrasts", "band_contrasts", "planet_flux_densities"):
         np.testing.assert_array_equal(values[name][..., 3:, :], 0.0)
 

@@ -904,25 +904,9 @@ class Scene(eqx.Module):
         """
         time_d = jnp.atleast_1d(jnp.asarray(time_d))
         dist_pc = self.dynamics.frame.dist_pc
-        unscaled = self.star._node_flux_density(
-            quadrature, resolution, time_d, dist_pc=dist_pc
+        unscaled, scale, planets = self._node_star_and_planets(
+            quadrature, resolution, time_d, ephemeris
         )
-        scale = jnp.asarray(self.star.flux_scale)
-        star = scale * unscaled
-        values = []
-        for model, geometry, planet_scale in self._planet_groups(time_d, ephemeris):
-            value = model.node_photon_flux_density(
-                quadrature, resolution, **geometry, star_nodes=star
-            )
-            values.append(value * planet_scale[:, None])
-        nodes = quadrature.nodes_nm
-        planets = (
-            jnp.concatenate(values, axis=2)
-            if values
-            else jnp.zeros((*nodes.shape, 0, time_d.size))
-        )
-        valid = self.valid[:, None]
-        planets = jnp.where(valid, planets, 0.0) * valid
         zodi = None
         if self.local_zodi is not None:
             zodi = jax.vmap(
@@ -947,6 +931,29 @@ class Scene(eqx.Module):
             calibration=self._calibration(resolution, bands, dist_pc),
             calibration_bands=bands,
         )
+
+    def _node_star_and_planets(self, quadrature, resolution, time_d, ephemeris):
+        """Unscaled node star (W, Q, T), its scale and node planet flux (W, Q, K, T)."""
+        unscaled = self.star._node_flux_density(
+            quadrature, resolution, time_d, dist_pc=self.dynamics.frame.dist_pc
+        )
+        scale = jnp.asarray(self.star.flux_scale)
+        star = scale * unscaled
+        values = []
+        for model, geometry, planet_scale in self._planet_groups(time_d, ephemeris):
+            value = model.node_photon_flux_density(
+                quadrature, resolution, **geometry, star_nodes=star
+            )
+            values.append(value * planet_scale[:, None])
+        nodes = quadrature.nodes_nm
+        planets = (
+            jnp.concatenate(values, axis=2)
+            if values
+            else jnp.zeros((*nodes.shape, 0, time_d.size))
+        )
+        valid = self.valid[:, None]
+        planets = jnp.where(valid, planets, 0.0) * valid
+        return unscaled, scale, planets
 
     def calibration_bands(self) -> tuple:
         """Return the calibration band of each bolometric-rule disk, on the host.
@@ -1001,37 +1008,35 @@ class Scene(eqx.Module):
         quadrature: Quadrature,
         time_d: Array,
         *,
+        resolution: Resolution,
         transmission: Callable | None = None,
-        resolution: Resolution | None = None,
         ephemeris=None,
     ) -> Array:
         """Ratio of integrated planet and star photons, shape ``(W, K_total, T)``.
 
-        Build the quadrature on the host with this system and any tabulated
-        transmission. The optional photon-counting response is evaluated on all
-        ``(W, Q)`` wavelength nodes and must broadcast to that shape. Each
-        finite-width band must transmit nonzero stellar flux. A monochromatic
-        channel returns the model contrast directly, including for a reflected
-        spectrum at a stellar zero. Times are days from the scene epoch.
-
-        With ``resolution`` the sources are read once through :meth:`sources`,
-        so a tabulated star or planet is integrated exactly without declaring
-        its knots as breaks, and every band must lie inside every source
-        table (``Resolution.build`` refuses one that leaves it). Without it the
-        sources are sampled at the nodes: exact only when the quadrature splits
-        at their knots. Spectra may then be undefined where transmission is
-        zero, and an opaque response has undefined contrast.
+        Build the quadrature and the resolution on the host:
+        ``Resolution.build(quadrature, *scene.spectral_tables())``. The sources
+        are read once through :meth:`sources`, so a tabulated star or planet is
+        integrated exactly without declaring its knots as breaks, and every
+        band must lie inside every source table: ``Resolution.build`` refuses a
+        band that leaves one, naming the table and its end. A scene with no
+        table takes an empty ``Resolution()``. The optional photon-counting
+        response is evaluated on all ``(W, Q)`` wavelength nodes and must
+        broadcast to that shape. Each finite-width band must transmit nonzero
+        stellar flux. A monochromatic channel returns the model contrast
+        directly, including for a reflected spectrum at a stellar zero, and an
+        opaque response there has undefined contrast. Times are days from the
+        scene epoch.
 
         Args:
             quadrature: Host-built quadrature giving the band nodes [nm] and
                 weights.
             time_d: Observation times, days from the scene epoch, shape ``(T,)``.
+            resolution: Operators for the scene's tables on ``quadrature``, from
+                ``Resolution.build(quadrature, *scene.spectral_tables())``.
             transmission: Optional photon-counting response evaluated on the
                 ``(W, Q)`` node wavelengths [nm]; it must broadcast to that
                 shape.
-            resolution: Operators for the scene's tables on ``quadrature``, from
-                ``Resolution.build(quadrature, *scene.spectral_tables())``; None
-                samples the sources at the nodes.
             ephemeris: Optional ephemeris from :meth:`ephemeris` solved at these
                 dates; None solves it here.
 
@@ -1048,51 +1053,13 @@ class Scene(eqx.Module):
             response = jnp.broadcast_to(transmission(wave), wave.shape)[0, 0]
             return jnp.where(response > 0, contrast, jnp.nan)
 
-        if resolution is not None:
-            read = self.sources(quadrature, resolution, time_d, ephemeris=eph)
-            planet, star = read.planets, read.star
-            if transmission is not None:
-                throughput = jnp.broadcast_to(transmission(wave), wave.shape)
-                planet = planet * throughput[..., None, None]
-                star = star * throughput[..., None]
-            return quadrature.integrate(planet) / quadrature.integrate(star)[:, None, :]
-
-        def densities(nodes):
-            planet = jax.vmap(
-                jax.vmap(lambda w: self.planet_flux_densities(w, time_d, ephemeris=eph))
-            )(nodes)
-            star = self.star.photon_flux_density(
-                nodes[..., None], time_d, dist_pc=self.dynamics.frame.dist_pc
-            )
-            return planet, star
-
+        time_d = jnp.atleast_1d(jnp.asarray(time_d))
+        unscaled, scale, planet = self._node_star_and_planets(
+            quadrature, resolution, time_d, eph
+        )
+        star = scale * unscaled
         if transmission is not None:
             throughput = jnp.broadcast_to(transmission(wave), wave.shape)
-
-            def opaque_wings(nodes):
-                # Keep valid samples, including zeros of a fitted response:
-                # changing their transmission still changes detected photons.
-                planet, star = densities(nodes)
-                finite = jnp.all(jnp.isfinite(planet), axis=(-2, -1))
-                finite &= jnp.all(jnp.isfinite(star), axis=-1)
-                return (throughput == 0) & ~finite
-
-            masked = jax.lax.cond(
-                jnp.any(throughput == 0),
-                opaque_wings,
-                lambda nodes: jnp.zeros_like(nodes, dtype=bool),
-                wave,
-            )
-            # A zero cotangent times an undefined spectral slope can give NaN.
-            # Sample opaque, undefined nodes at a transmitted wavelength before
-            # differentiation. Their flux and throughput derivative are zero.
-            index = jnp.argmax(throughput > 0, axis=1, keepdims=True)
-            reference = jnp.take_along_axis(wave, index, axis=1)
-            wave = jnp.where(masked, reference, wave)
-            throughput = jnp.where(masked, 0.0, throughput)
-
-        planet, star = densities(wave)
-        if transmission is not None:
             planet = planet * throughput[..., None, None]
             star = star * throughput[..., None]
         return quadrature.integrate(planet) / quadrature.integrate(star)[:, None, :]

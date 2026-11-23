@@ -558,18 +558,23 @@ For a system observed through a triangular photon response, build the quadrature
 from the system and response before evaluating the contrast.
 
 ```python
-from optixstuff.spectral import Band, Quadrature, Transmission
+from optixstuff.spectral import Band, Quadrature, Resolution, Transmission
 
 
 def green_band_contrasts(system, time_d):
     response = Transmission([500.0, 550.0, 600.0], [0.0, 1.0, 0.0])
-    rule = Quadrature.build([Band(500.0, 600.0)], system, response)
-    return system.band_contrasts(rule, time_d, transmission=response)
+    rule = Quadrature.build([Band(500.0, 600.0)], response)
+    resolution = Resolution.build(rule, *system.spectral_tables())
+    return system.band_contrasts(
+        rule, time_d, resolution=resolution, transmission=response
+    )
 ```
 
 `skyscapes.io.transmission_from_table(path)` also returns a `Transmission`.
-Quadrature splits at the response and system spectral breaks. The result has
-shape `(bands, planets, times)`. Omit `transmission` for a unit photon response.
+Quadrature splits at the response's knots; the resolution integrates the
+system's tabulated spectra over each piece, and every band must lie inside
+every table. The result has shape `(bands, planets, times)`. Omit
+`transmission` for a unit photon response.
 
 ## Band integrals of tabulated spectra
 
@@ -656,9 +661,14 @@ node, and `Sources.node_star()` the star at every node, to pass as `star=` to
 `Scene.photon_radiance` or `Scene.photon_radiance_at`; the disk then carries the
 star's node-effective value instead of its point sample.
 
-`Scene.band_contrasts(..., resolution=resolution)` reads the sources the same
-way. Without `resolution` it samples them at the nodes, which is exact only when
-the rule is split at their knots.
+`Scene.band_contrasts(..., resolution=resolution)` reads the star and the
+planets the same way; the resolution is required, and a scene with no table
+takes an empty `Resolution()`.
+
+A fit, or a build held across reads, must not move a knot grid the operators
+were built on. `Scene.knot_leaves()` lists the dotted paths, relative to the
+scene, of every leaf that sets a table's knots, for a build to declare as its
+reads.
 
 `Scene.contrasts`, `Scene.planet_flux_densities` and `photon_flux_density` remain
 point reads: right for a monochromatic question and for a smooth contrast,

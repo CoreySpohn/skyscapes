@@ -23,7 +23,7 @@ from hwoutils.constants import (
 from hwoutils.conversions import photons_per_nm_per_m2_to_jy
 from hwoutils.epoch import Epoch
 from optixstuff.grids import PixelGrid, SkyOrientation
-from optixstuff.spectral import Band, Quadrature, Transmission
+from optixstuff.spectral import Band, Quadrature, Resolution, Transmission
 
 from skyscapes.disk import ExovistaDisk
 from skyscapes.physical_model import (
@@ -38,6 +38,11 @@ from skyscapes.scene import BlackbodyStar, FlatStar, Planet, Scene, Star
 
 from .conftest import two_body_reference
 from .test_io_exovista_versions import scene_file as exovista_scene_file  # noqa: F401
+
+
+def _resolved(system, rule):
+    """The host-built resolution of a system's tables on ``rule``."""
+    return Resolution.build(rule, *system.spectral_tables())
 
 
 def _system(star, planets, *, a_AU=None, planet_mass_Msun=None, **kwargs):
@@ -242,7 +247,9 @@ def test_bin_contrast_weights_flux_and_has_point_limit(tabulated):
     bands = (Band(450.0, 650.0), Band(600.0, 700.0))
     rule = Quadrature.build(bands, system)
     times = jnp.array([0.0, 100.0])
-    actual = eqx.filter_jit(system.band_contrasts)(rule, times)
+    actual = eqx.filter_jit(system.band_contrasts)(
+        rule, times, resolution=_resolved(system, rule)
+    )
     centers = jnp.array([b.center_nm for b in bands])
     widths = jnp.array([b.width_nm for b in bands])
     expected = (centers + (widths**2 / (12 * centers) if tabulated else 0)) / 500
@@ -251,7 +258,7 @@ def test_bin_contrast_weights_flux_and_has_point_limit(tabulated):
     )
     mono = Quadrature.monochromatic(575.0)
     np.testing.assert_allclose(
-        system.band_contrasts(mono, times)[0],
+        system.band_contrasts(mono, times, resolution=Resolution())[0],
         system.contrasts(575.0, times),
         rtol=1e-12,
     )
@@ -270,16 +277,27 @@ def test_band_contrasts_resolves_planetary_break():
     np.testing.assert_array_equal(system.spectral_breaks_nm(), wave)
     rule = Quadrature.build([Band(450.0, 650.0)], system)
     np.testing.assert_allclose(
-        system.band_contrasts(rule, jnp.zeros(1)), 0.5, rtol=2e-15, atol=0
+        system.band_contrasts(rule, jnp.zeros(1), resolution=_resolved(system, rule)),
+        0.5,
+        rtol=2e-15,
+        atol=0,
     )
 
     dark = _system(FlatStar(0.0), (Planet(jnp.ones(1), model),))
     point = Quadrature.monochromatic(530.0)
-    np.testing.assert_array_equal(dark.band_contrasts(point, jnp.zeros(1)), 1.0)
+    empty = Resolution()
     np.testing.assert_array_equal(
-        dark.band_contrasts(point, jnp.zeros(1), transmission=lambda w: 0.3), 1.0
+        dark.band_contrasts(point, jnp.zeros(1), resolution=empty), 1.0
     )
-    opaque = dark.band_contrasts(point, jnp.zeros(1), transmission=lambda w: 0.0)
+    np.testing.assert_array_equal(
+        dark.band_contrasts(
+            point, jnp.zeros(1), resolution=empty, transmission=lambda w: 0.3
+        ),
+        1.0,
+    )
+    opaque = dark.band_contrasts(
+        point, jnp.zeros(1), resolution=empty, transmission=lambda w: 0.0
+    )
     assert np.isnan(opaque).all()
 
 
@@ -330,9 +348,14 @@ def test_sum_flux_preserves_components_bins_and_gradients():
         atol=0,
     )
     rule = Quadrature.build([Band(4600.0, 5400.0), Band(5400.0, 5600.0)], system)
-    expected_bins = parts.band_contrasts(rule, times).sum(axis=1, keepdims=True)
+    expected_bins = parts.band_contrasts(
+        rule, times, resolution=_resolved(parts, rule)
+    ).sum(axis=1, keepdims=True)
     np.testing.assert_allclose(
-        system.band_contrasts(rule, times), expected_bins, rtol=1e-12, atol=0
+        system.band_contrasts(rule, times, resolution=_resolved(system, rule)),
+        expected_bins,
+        rtol=1e-12,
+        atol=0,
     )
 
     def log_flux(scales):
@@ -520,8 +543,11 @@ def test_band_contrast_tophat_and_narrow_limits(tabulated):
     band = Band(4200.0, 5800.0)
     response = Transmission.from_band(band)
     rule = Quadrature.build([band], system, response)
-    actual = eqx.filter_jit(system.band_contrasts)(rule, times, transmission=response)
-    expected = system.band_contrasts(rule, times)
+    resolution = _resolved(system, rule)
+    actual = eqx.filter_jit(system.band_contrasts)(
+        rule, times, resolution=resolution, transmission=response
+    )
+    expected = system.band_contrasts(rule, times, resolution=resolution)
     np.testing.assert_allclose(actual, expected, rtol=3e-14, atol=0)
     if not tabulated:
         # Measured with the stellar-only order-four top-hat mean, at 800 K.
@@ -534,15 +560,16 @@ def test_band_contrast_tophat_and_narrow_limits(tabulated):
         system.dynamics,
     )
     np.testing.assert_allclose(
-        batched.band_contrasts(rule, times, transmission=response),
+        batched.band_contrasts(
+            rule, times, resolution=resolution, transmission=response
+        ),
         actual,
         rtol=3e-14,
         atol=0,
     )
+    narrow = Quadrature.build([Band(4999.99995, 5000.00005)], system)
     np.testing.assert_allclose(
-        system.band_contrasts(
-            Quadrature.build([Band(4999.99995, 5000.00005)], system), times
-        )[0],
+        system.band_contrasts(narrow, times, resolution=_resolved(system, narrow))[0],
         system.contrasts(jnp.asarray(5000.0), times),
         rtol=1e-10,
         atol=0,
@@ -550,12 +577,16 @@ def test_band_contrast_tophat_and_narrow_limits(tabulated):
 
 
 def test_band_contrast_triangle_and_temperature_gradient():
-    """Fails if opaque wings, omitted response breaks or weighting corrupt gradients.
+    """Fails if a band leaving a table, response breaks or weighting go wrong.
 
     Truth is NumPy Planck photon spectra with 20001-point trapezoids, rtol
     2e-8 (second-order mesh error plus order-four quadrature on each side).
     The temperature derivative uses central differences at 0.008 K; rtol
-    1e-8 allows second-order truncation and float64 cancellation.
+    1e-8 allows second-order truncation and float64 cancellation. A band
+    wider than a linear star and planet table must be refused at the build;
+    the band ended at the tables matches a 20001-point trapezoid of the
+    tables' own point reads under the same response (rtol 1e-8; the mesh has
+    a knot at the kink, so its error is second order, about 1e-10).
     """
     star = BlackbodyStar(5772.0, 6.957e8)
     planet = eqx.tree_at(
@@ -582,13 +613,17 @@ def test_band_contrast_triangle_and_temperature_gradient():
         varied = eqx.tree_at(
             lambda s: s.planets[0].physical_model.teff_K, system, jnp.array([teff])
         )
-        return varied.band_contrasts(rule, times, transmission=band)[0, 0, 0]
+        return varied.band_contrasts(
+            rule, times, resolution=Resolution(), transmission=band
+        )[0, 0, 0]
 
     np.testing.assert_allclose(contrast(800.0), reference, rtol=2e-8, atol=0)
     fd = (contrast(800.008) - contrast(799.992)) / 0.016
     np.testing.assert_allclose(jax.grad(contrast)(800.0), fd, rtol=1e-8, atol=0)
 
-    # Both source tables are undefined in the wider band's opaque wings.
+    # A band that leaves the source tables is refused at the build, with its
+    # remedy; the band ended at the tables gives the band integral of the
+    # tables' own interpolants.
     wave = jnp.array([4000.0, 4700.0, 6000.0])
     table_star = Star(
         wavelengths_nm=wave,
@@ -600,26 +635,37 @@ def test_band_contrast_triangle_and_temperature_gradient():
         wave, times, jnp.array([0.1, 0.3, 0.7])[None, :, None]
     )
     bounded = _system(table_star, (Planet(jnp.ones(1), table_planet),))
-    narrow = Quadrature.build([Band(4000.0, 6000.0)], bounded, band)
-    wide = Quadrature.build([Band(3500.0, 6500.0)], bounded, band)
+    wide = Quadrature.build([Band(3500.0, 6500.0)], band)
+    with pytest.raises(ValueError, match=r"leaves the table.*End the band"):
+        _resolved(bounded, wide)
+    narrow = Quadrature.build([Band(4000.0, 6000.0)], band)
+    resolution = _resolved(bounded, narrow)
 
-    def bounded_contrast(scale, rule, response):
+    def bounded_contrast(scale, response):
         varied = eqx.tree_at(
             lambda s: s.planets[0].physical_model.contrast_grid,
             bounded,
             table_planet.contrast_grid * scale,
         )
-        return varied.band_contrasts(rule, times, transmission=response)[0, 0, 0]
+        return varied.band_contrasts(
+            narrow, times, resolution=resolution, transmission=response
+        )[0, 0, 0]
 
-    read = eqx.filter_jit(jax.value_and_grad(bounded_contrast))
-    on_support = read(1.0, narrow, band)
-    with_wings = read(1.0, wide, band)
-    # Both rules use identical transmitted nodes, up to summation order.
-    np.testing.assert_allclose(
-        with_wings, on_support, rtol=2e-14, atol=0, equal_nan=False
+    dense = jnp.linspace(4000.0, 6000.0, 20001)
+    star_dense = bounded.star.photon_flux_density(
+        dense[:, None], times, dist_pc=bounded.dist_pc
+    )[:, 0]
+    planet_dense = jax.vmap(lambda w: bounded.planet_flux_densities(w, times))(dense)
+    weight = np.interp(dense, [4000.0, 4700.0, 6000.0], [0.0, 1.0, 0.0])
+    truth = np.trapezoid(weight * planet_dense[:, 0, 0], dense) / np.trapezoid(
+        weight * star_dense, dense
     )
-    transmitted_wings = Transmission.from_band(wide.bands[0])
-    assert np.isnan(bounded_contrast(1.0, wide, transmitted_wings))
+    value, slope = eqx.filter_jit(jax.value_and_grad(bounded_contrast))(1.0, band)
+    # The mesh of 0.1 nm has a knot at 4700 nm, so the trapezoid error is
+    # second order on each smooth side: about 1e-10 relative here.
+    np.testing.assert_allclose(value, truth, rtol=1e-8, atol=0)
+    # The contrast is linear in the planet table, so its slope is the value.
+    np.testing.assert_allclose(slope, value, rtol=1e-14, atol=0)
 
     # Opening a previously opaque segment inside the measured spectrum has a
     # nonzero first derivative. Check it against a symmetric perturbation.
@@ -627,7 +673,7 @@ def test_band_contrast_triangle_and_temperature_gradient():
         fitted = eqx.tree_at(
             lambda r: r.transmission, band, jnp.array([blue_response, 0.0, 1.0])
         )
-        return bounded_contrast(1.0, wide, fitted)
+        return bounded_contrast(1.0, fitted)
 
     step = 1e-5
     fd = (fitted_contrast(step) - fitted_contrast(-step)) / (2 * step)
@@ -676,7 +722,9 @@ def _scene_observables(system, times, **kwargs):
         star_radial_velocity=system.star_radial_velocity(times, **kwargs),
         contrasts=system.contrasts(waves[0], times, **kwargs),
         contrast_cube=system.contrast_cube(waves, times, **kwargs),
-        band_contrasts=system.band_contrasts(rule, times, **kwargs),
+        band_contrasts=system.band_contrasts(
+            rule, times, resolution=Resolution(), **kwargs
+        ),
         photon_flux=system.planet_flux_densities(waves[0], times, **kwargs),
         planet_flux_densities=system.planet_flux_densities(waves[0], times, **kwargs),
         alpha_dMag=jnp.stack(system.alpha_dMag(times, **kwargs)),
