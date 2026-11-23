@@ -586,7 +586,10 @@ def test_band_contrast_triangle_and_temperature_gradient():
     wider than a linear star and planet table must be refused at the build;
     the band ended at the tables matches a 20001-point trapezoid of the
     tables' own point reads under the same response (rtol 1e-8; the mesh has
-    a knot at the kink, so its error is second order, about 1e-10).
+    knots at both kinks, so its error is second order, measured 1.2e-9). The
+    tables' middle knot, 5300 nm, is not a response break, so the quadrature
+    does not split there: sampling the tables at the nodes misses by 4.0e-3
+    (measured), which the tolerance refuses.
     """
     star = BlackbodyStar(5772.0, 6.957e8)
     planet = eqx.tree_at(
@@ -623,8 +626,8 @@ def test_band_contrast_triangle_and_temperature_gradient():
 
     # A band that leaves the source tables is refused at the build, with its
     # remedy; the band ended at the tables gives the band integral of the
-    # tables' own interpolants.
-    wave = jnp.array([4000.0, 4700.0, 6000.0])
+    # tables' own interpolants, whose kink at 5300 nm lies inside a piece.
+    wave = jnp.array([4000.0, 5300.0, 6000.0])
     table_star = Star(
         wavelengths_nm=wave,
         times_d=times,
@@ -661,8 +664,8 @@ def test_band_contrast_triangle_and_temperature_gradient():
         weight * star_dense, dense
     )
     value, slope = eqx.filter_jit(jax.value_and_grad(bounded_contrast))(1.0, band)
-    # The mesh of 0.1 nm has a knot at 4700 nm, so the trapezoid error is
-    # second order on each smooth side: about 1e-10 relative here.
+    # The mesh of 0.1 nm has knots at 4700 and 5300 nm, so the trapezoid error
+    # is second order on each smooth side: 1.2e-9 relative here.
     np.testing.assert_allclose(value, truth, rtol=1e-8, atol=0)
     # The contrast is linear in the planet table, so its slope is the value.
     np.testing.assert_allclose(slope, value, rtol=1e-14, atol=0)
