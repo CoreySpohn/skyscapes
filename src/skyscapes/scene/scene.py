@@ -122,7 +122,7 @@ class Scene(eqx.Module):
 
     All ``time_d`` arguments are plain arrays of days from the scene epoch,
     ``dynamics.frame.epoch``. Convert absolute dates on the host with
-    ``scene.epoch.days(...)`` before passing offsets to JAX. The read-only
+    ``scene.epoch.days(jd=...)`` before passing offsets to JAX. The read-only
     ``epoch`` property returns ``dynamics.frame.epoch``.
 
     Attributes:
@@ -427,7 +427,7 @@ class Scene(eqx.Module):
         nonpositive) planet masses become zero here. Scalars broadcast to the
         flattened planet count. ``epoch_d`` and observation ``time_d`` are
         days from the scene epoch. ``epoch`` is host-side SkyFrame metadata;
-        convert absolute dates once with ``scene.epoch.days(...)`` before
+        convert absolute dates once with ``scene.epoch.days(jd=...)`` before
         transferring the resulting offsets to JAX. ``ra_deg`` and ``dec_deg``
         place the scene on the sky (ICRS degrees, both or neither); without
         them the scene is unplaced.

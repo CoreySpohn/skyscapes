@@ -165,7 +165,7 @@ def test_exovista_flux_preserved_with_standard_phase(
     system = from_exovista(
         fits_fixture, planet_indices=[0, 2, 4], load_disk=False, planet_spectra=mode
     )
-    times = jnp.asarray(system.epoch.days([2451545.0, 2451645.0, 2451795.0]))
+    times = jnp.asarray(system.epoch.days(jd=[2451545.0, 2451645.0, 2451795.0]))
     np.testing.assert_allclose(
         system.contrasts(600.0, times), expected_contrast, rtol=1e-6, atol=0
     )
@@ -195,7 +195,7 @@ def test_exovista_disk_and_planet_share_east_north_chart(fits_fixture):
     brightness = np.asarray(
         disk.photon_radiance(
             jnp.asarray(550.0),
-            jnp.asarray(system.epoch.days(2451545.0)),
+            jnp.asarray(system.epoch.days(jd=2451545.0)),
             star=system.star,
             grid=disk.native_grid,
             dist_pc=system.dist_pc,
@@ -267,8 +267,8 @@ def test_exovista_supplied_epoch_keeps_absolute_dates(fits_fixture):
     moved = from_exovista(fits_fixture, **kwargs, epoch=shared)
     assert moved.epoch == shared
     dates = [2451545.0, 2451645.5, 2451795.0]
-    t_default = jnp.asarray(default.epoch.days(dates))
-    t_moved = jnp.asarray(moved.epoch.days(dates))
+    t_default = jnp.asarray(default.epoch.days(jd=dates))
+    t_moved = jnp.asarray(moved.epoch.days(jd=dates))
     np.testing.assert_allclose(t_moved - t_default, 1000.25, rtol=0, atol=1e-9)
     np.testing.assert_allclose(
         moved.positions(t_moved), default.positions(t_default), rtol=1e-10, atol=0

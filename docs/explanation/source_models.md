@@ -295,7 +295,7 @@ from traced elements. The scene keeps the original planet order for
 observables. `epoch_d`, `time_d`, and stored `times_d` are days from the
 scene epoch. The read-only `system.epoch` returns `dynamics.frame.epoch`.
 Convert absolute dates once on the host with
-`time_d = system.epoch.days(absolute_dates)`; pass only offsets to JAX.
+`time_d = system.epoch.days(jd=absolute_dates)`; pass only offsets to JAX.
 
 ```python
 import jax.numpy as jnp

@@ -992,8 +992,8 @@ def test_scene_epoch_offsets_match_zero_epoch(epoch):
     dates = epoch.jd(np.array([100.0, 100.125, 3652.5]))
     assert scene.epoch is scene.dynamics.frame.epoch
     np.testing.assert_allclose(
-        scene.positions(jnp.asarray(scene.epoch.days(dates))),
-        reference.positions(jnp.asarray(zero.days(dates))),
+        scene.positions(jnp.asarray(scene.epoch.days(jd=dates))),
+        reference.positions(jnp.asarray(zero.days(jd=dates))),
         rtol=3e-13,
         atol=3e-13,
     )

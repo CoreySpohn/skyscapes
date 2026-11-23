@@ -183,7 +183,7 @@ nonnegative values. Linear interpolation preserves nonnegativity
 within the table. Float32 contrast storage is retained; query
 arithmetic promotes the inputs to a common dtype. Both `times_d` and
 query `time_d` are days from the owning scene epoch. Convert absolute
-dates on the host with `system.epoch.days(...)` before transfer to JAX.
+dates on the host with `system.epoch.days(jd=...)` before transfer to JAX.
 
 With multiple epochs, queries outside the recorded time range return
 NaN. A single epoch represents a static snapshot and is valid at any
