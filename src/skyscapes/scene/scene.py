@@ -139,12 +139,8 @@ def _knot_leaves(source, path):
     leaves = [leaf for _, leaf in flat]
     found = []
     for i, (key_path, leaf) in enumerate(flat):
-        if not (
-            isinstance(leaf, float)
-            or (
-                isinstance(leaf, jax.Array) and jnp.issubdtype(leaf.dtype, jnp.floating)
-            )
-        ):
+        # NumPy grids count too: tables keep host knots and to_scenes returns NumPy.
+        if not (isinstance(leaf, float) or eqx.is_inexact_array(leaf)):
             continue
         moved_leaves = list(leaves)
         moved_leaves[i] = leaf * 1.07 + 0.013

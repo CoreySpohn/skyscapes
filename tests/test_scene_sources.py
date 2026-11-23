@@ -31,6 +31,7 @@ from skyscapes.disk import GraterDisk
 from skyscapes.io import from_phoenix
 from skyscapes.physical_model import (
     BlackbodyPhysicalModel,
+    GridPhysicalModel,
     LambertianPhysicalModel,
     SumPhysicalModel,
     TimeSeriesPhysicalModel,
@@ -526,37 +527,59 @@ def test_the_node_star_builds_under_jit_and_a_concrete_nonfinite_scale_still_rai
             jax.jit(lambda bad=bad: check_flux_scale(bad))()
 
 
-def test_knot_leaves_name_exactly_the_leaves_that_set_the_knots():
+@pytest.mark.parametrize("host", [False, True], ids=["jax", "numpy"])
+def test_knot_leaves_name_exactly_the_leaves_that_set_the_knots(host):
     """Fails if a knot leaf is missed, misnamed, or a value leaf is listed.
 
     Truth, named by hand: the knot grids of the tabulated star, of the
-    tabulated planet group and of the tabulated local zodi, in scene order;
-    the Lambertian planet and every value leaf carry none. Each path must read
-    back (through the dotted-path reader a fit uses) exactly the table's
-    knots, compared bit for bit. A smooth scene has no knot leaf.
+    tabulated and gridded planet models and of the tabulated local zodi, in
+    scene order; the Lambertian planet and every value leaf carry none. Each
+    path must read back (through the dotted-path reader a fit uses) exactly the
+    table's knots, compared bit for bit. The tables are built from JAX arrays
+    and from NumPy arrays (a star and a grid model keep NumPy knots as given),
+    and a scene round-tripped through ``Scene.from_scenes`` and
+    ``to_scenes``, whose leaves come back as NumPy, names the same knots. A
+    smooth scene has no knot leaf.
     """
     from hwoutils.model_paths import resolve
 
+    array = np.array if host else jnp.array
     star = Star(
-        wavelengths_nm=jnp.array([400.0, 520.0, 700.0]),
-        times_d=jnp.zeros(1),
-        flux_density_jy=jnp.array([[1.0], [2.0], [1.5]]),
+        wavelengths_nm=array([400.0, 520.0, 700.0]),
+        times_d=array([0.0]),
+        flux_density_jy=array([[1.0], [2.0], [1.5]]),
     )
-    planet = _table_planet(np.array([450.0, 600.0, 650.0]), np.array([0.1, 0.2, 0.3]))
-    zodi = PrecomputedZodi(jnp.array([450.0, 550.0, 650.0]), jnp.full(3, 1e12))
+    planet = _table_planet(array([450.0, 600.0, 650.0]), array([0.1, 0.2, 0.3]))
+    grid = GridPhysicalModel(
+        array([450.0, 600.0, 650.0]),
+        array([0.0, 90.0, 180.0]),
+        np.full((1, 3, 3), 1e-10),
+    )
+    zodi = PrecomputedZodi(array([450.0, 550.0, 650.0]), np.full(3, 1e12))
     scene = _scene(
-        star, (LambertianPhysicalModel(jnp.array([0.3])), planet), local_zodi=zodi
+        star,
+        (LambertianPhysicalModel(jnp.array([0.3])), planet, grid),
+        local_zodi=zodi,
     )
     leaves = scene.knot_leaves()
     assert leaves == (
         "star._wavelengths_nm",
         "planets[1].physical_model.wavelengths_nm",
+        "planets[2].physical_model.wavelengths_nm",
         "local_zodi.wavelengths_nm",
     )
-    for path, table in zip(leaves, (star, planet, zodi), strict=True):
+    for path, table in zip(leaves, (star, planet, grid, zodi), strict=True):
         np.testing.assert_array_equal(
             np.asarray(resolve(scene, path)), np.asarray(table.spectral_breaks_nm())
         )
+    # A batch holds one star and one model class, so round-trip a one-planet scene.
+    single = _scene(star, (planet,))
+    back = Scene.from_scenes([single]).to_scenes()[0]
+    assert back.knot_leaves() == single.knot_leaves()
+    assert single.knot_leaves() == (
+        "star._wavelengths_nm",
+        "planets[0].physical_model.wavelengths_nm",
+    )
     smooth = _scene(
         BlackbodyStar(5772.0, 6.957e8), (LambertianPhysicalModel(jnp.array([0.3])),)
     )
