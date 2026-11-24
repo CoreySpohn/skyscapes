@@ -124,7 +124,13 @@ def test_composite_resamples_mismatched_native_grids():
         coarse, jnp.array([400.0, 700.0]), jnp.ones((2, 5, 5)) * coarse.pixel_area
     )
     image = CompositeDisk((a, b)).photon_radiance(
-        550.0, 0.0, star=FlatStar(1.0), dist_pc=10.0, grid=grid
+        550.0,
+        0.0,
+        star=FlatStar(1.0),
+        dist_pc=10.0,
+        inclination_deg=0.0,
+        position_angle_deg=0.0,
+        grid=grid,
     )
     np.testing.assert_allclose(image.data * arcsec2rad**2, 2.0, rtol=2e-15)
 

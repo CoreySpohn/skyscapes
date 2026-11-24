@@ -151,8 +151,6 @@ class GraterDisk(AbstractParametricDisk):
         profile_id: Class-level profile identifier, ``"grater-1999"``.
         amplitude: Typed density or calibrated surface-brightness amplitude.
         n_slices_los: Number of Gauss-Legendre LOS nodes.
-        inclination_deg: Inclination, zero face-on.
-        position_angle_deg: Major axis north through east.
         flux_scale: Dimensionless factor on the radiance, default one; see
             :class:`~skyscapes.disk.AbstractDisk`. Exactly degenerate with
             ``amplitude.level``.
@@ -183,8 +181,6 @@ class GraterDisk(AbstractParametricDisk):
     profile_id: ClassVar[str] = "grater-1999"
     amplitude: AbstractDustAmplitude
     n_slices_los: int = eqx.field(static=True)
-    inclination_deg: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
-    position_angle_deg: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
     flux_scale: Array = eqx.field(default=1.0, converter=jnp.asarray, kw_only=True)
 
     cutoff_width_AU: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))

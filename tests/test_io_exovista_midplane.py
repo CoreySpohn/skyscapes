@@ -30,17 +30,19 @@ def midplane_measurements(fits_fixture):
     loaded = system.disk
     wavelength_nm = jnp.asarray(550.0)
     args = tuple(
-        jnp.asarray(value)
-        for value in (
-            wavelength_nm,
-            system.epoch.days(jd=2451545.0),
-            system.midplane_inc_deg,
-            system.midplane_position_angle_deg,
-        )
+        jnp.asarray(value) for value in (wavelength_nm, system.epoch.days(jd=2451545.0))
     )
+    angles = {
+        "inclination_deg": system.midplane_inc_deg,
+        "position_angle_deg": system.midplane_position_angle_deg,
+    }
     reference = np.asarray(
         loaded.photon_radiance(
-            *args[:2], star=system.star, grid=loaded.native_grid, dist_pc=system.dist_pc
+            *args,
+            star=system.star,
+            grid=loaded.native_grid,
+            dist_pc=system.dist_pc,
+            **angles,
         ).data,
         dtype=float,
     )
@@ -64,13 +66,15 @@ def midplane_measurements(fits_fixture):
         amplitude=DensityDust(
             level=1.0, profile_id="grater-1999", calibration_id="unit-profile"
         ),
-        inclination_deg=system.midplane_inc_deg,
-        position_angle_deg=system.midplane_position_angle_deg,
         n_slices_los=31,
     )
     rendered = np.asarray(
         parametric.photon_radiance(
-            *args[:2], star=system.star, grid=loaded.native_grid, dist_pc=system.dist_pc
+            *args,
+            star=system.star,
+            grid=loaded.native_grid,
+            dist_pc=system.dist_pc,
+            **angles,
         ).data,
         dtype=float,
     )

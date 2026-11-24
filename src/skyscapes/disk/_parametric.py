@@ -16,7 +16,10 @@ from .base import AbstractDisk
 
 
 class AbstractParametricDisk(AbstractDisk):
-    """Profile owning its amplitude and astronomical orientation.
+    """Profile owning its amplitude; the scene owns the orientation.
+
+    The inclination and position angle are not leaves of the disk: every radiance
+    read takes them as keyword arguments, and a scene passes its midplane angles.
 
     The declared unit profile is extinction per AU. zero_point_jy optionally
     overrides the calibration passband's monochromatic flux zero point.
@@ -30,9 +33,6 @@ class AbstractParametricDisk(AbstractDisk):
         wavelengths_nm: Static wavelength grid of the tabulated scattering
             parameters [nm], a ``Knots``.
         amplitude: Typed density or calibrated surface-brightness amplitude.
-        inclination_deg: Inclination of the disk plane [deg]; zero is face-on.
-        position_angle_deg: Position angle of the major axis, north through east
-            [deg].
         zero_point_jy: Optional monochromatic flux zero point of the calibration
             passband [Jy]. ``None`` uses the passband default. Static.
         calibration_band: Optional ``optixstuff.spectral.Band`` the calibration
@@ -45,8 +45,6 @@ class AbstractParametricDisk(AbstractDisk):
     profile_id: eqx.AbstractClassVar[str]
     wavelengths_nm: eqx.AbstractVar[Knots]
     amplitude: eqx.AbstractVar[AbstractDustAmplitude]
-    inclination_deg: eqx.AbstractVar[jax.Array]
-    position_angle_deg: eqx.AbstractVar[jax.Array]
     zero_point_jy: float | None = eqx.field(static=True, default=None, kw_only=True)
     calibration_band: Band | None = eqx.field(static=True, default=None, kw_only=True)
 
@@ -84,7 +82,16 @@ class AbstractParametricDisk(AbstractDisk):
         """Unit-profile scattering integral at broadcastable sky coordinates."""
 
     def _photon_radiance_at(
-        self, wavelength_nm, time_d, east_arcsec, north_arcsec, *, star, dist_pc
+        self,
+        wavelength_nm,
+        time_d,
+        east_arcsec,
+        north_arcsec,
+        *,
+        star,
+        dist_pc,
+        inclination_deg,
+        position_angle_deg,
     ):
         """Photon radiance in photons/s/m^2/nm/sr from the parametric profile.
 
@@ -98,7 +105,7 @@ class AbstractParametricDisk(AbstractDisk):
         level = density_level(self.amplitude, self, star=star, dist_pc=dist_pc)
         integral = jax.vmap(
             lambda w: self._scattered_integral(
-                w, east_AU, north_AU, self.inclination_deg, self.position_angle_deg
+                w, east_AU, north_AU, inclination_deg, position_angle_deg
             )
         )(wave.reshape(-1)).reshape(wave.shape + east.shape)
         flux = star.photon_flux_density(wave, time_d, dist_pc=dist_pc)

@@ -13,6 +13,7 @@ import jax.numpy as jnp
 import numpy as np
 from hwoutils.conversions import contrast_to_delta_mag
 from hwoutils.epoch import Epoch
+from hwoutils.leaves import as_float_leaf
 from jaxtyping import Array
 from optixstuff.spectral import Quadrature, Resolution, spectral_breaks
 from orbix.kepler import Markley
@@ -141,10 +142,12 @@ class Scene(eqx.Module):
             :class:`~skyscapes.scene.AbstractLocalZodi` model. Unbatched scenes only.
         midplane_inc_deg: Disk midplane inclination [deg] in [0, 180],
             with 0 face-on (the default). Together with ``midplane_position_angle_deg``,
-            orients parametric disks and visualization outlines in the
-            right-handed (east, north, away) sky frame. ``io.from_exovista``
-            preserves the FITS star header's I. Planet orbits and loaded
-            disk images already carry their own geometry.
+            it is the one live orientation of the disk and of the visualization
+            outlines in the right-handed (east, north, away) sky frame; parametric
+            disks carry no orientation of their own and the scene passes these to
+            every disk read. Both are array leaves, so a fit can free them.
+            ``io.from_exovista`` preserves the FITS star header's I. Planet
+            orbits and loaded disk images already carry their own geometry.
         midplane_position_angle_deg: Major-axis position angle north through
             east [deg]. ExoVista headers map to (90 + PA) modulo 360.
         body_index: Static permutation mapping flattened scene planet indices to
@@ -158,8 +161,10 @@ class Scene(eqx.Module):
     _source_layout: Array | None = None
     disk: AbstractDisk | None = None
     local_zodi: AbstractLocalZodi | None = None
-    midplane_inc_deg: float = 0.0
-    midplane_position_angle_deg: float = 0.0
+    midplane_inc_deg: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
+    midplane_position_angle_deg: Array = eqx.field(
+        default_factory=lambda: jnp.asarray(0.0)
+    )
     body_index: tuple[int, ...] = eqx.field(static=True, default=())
 
     def photon_radiance(self, wavelength_nm, time_d, *, grid, star=None):
@@ -214,23 +219,20 @@ class Scene(eqx.Module):
             Disk photon radiance [ph s^-1 m^-2 nm^-1 sr^-1], shape
             ``wavelength_nm.shape`` followed by the broadcast offset shape.
         """
-        from ..disk.composite import orient_disk
-
         if self.disk is None:
             sky_shape = jnp.broadcast_shapes(
                 jnp.shape(east_arcsec), jnp.shape(north_arcsec)
             )
             return jnp.zeros(jnp.shape(wavelength_nm) + sky_shape)
-        disk = orient_disk(
-            self.disk, self.midplane_inc_deg, self.midplane_position_angle_deg
-        )
-        return disk.photon_radiance_at(
+        return self.disk.photon_radiance_at(
             wavelength_nm,
             time_d,
             east_arcsec,
             north_arcsec,
             star=self.star if star is None else star,
             dist_pc=self.dist_pc,
+            inclination_deg=self.midplane_inc_deg,
+            position_angle_deg=self.midplane_position_angle_deg,
         )
 
     @property
@@ -282,8 +284,8 @@ class Scene(eqx.Module):
         )
         self.disk = disk
         self.local_zodi = local_zodi
-        self.midplane_inc_deg = midplane_inc_deg
-        self.midplane_position_angle_deg = midplane_position_angle_deg
+        self.midplane_inc_deg = as_float_leaf(midplane_inc_deg)
+        self.midplane_position_angle_deg = as_float_leaf(midplane_position_angle_deg)
         self.body_index = (
             tuple(range(self.n_planets)) if body_index is None else tuple(body_index)
         )

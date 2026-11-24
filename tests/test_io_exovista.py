@@ -197,6 +197,8 @@ def test_exovista_disk_and_planet_share_east_north_chart(fits_fixture):
             star=system.star,
             grid=disk.native_grid,
             dist_pc=system.dist_pc,
+            inclination_deg=system.midplane_inc_deg,
+            position_angle_deg=system.midplane_position_angle_deg,
         ).data,
         dtype=float,
     )

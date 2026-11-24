@@ -70,10 +70,26 @@ def test_ayo_exozodi_units():
     zero_jy = 10 ** (-0.4 * 48.60) * 1e4 / 1e7 / 1e-26
     expected = zero_jy * 1e-26 / (6.62607015e-34 * np.asarray(waves))
     expected *= 3 * 10 ** (-0.4 * 22) / (np.pi / (180 * 3600)) ** 2
-    got = disk.photon_radiance_at(waves, 0.0, 0.1, 0.0, star=None, dist_pc=10.0)
+    got = disk.photon_radiance_at(
+        waves,
+        0.0,
+        0.1,
+        0.0,
+        star=None,
+        dist_pc=10.0,
+        inclination_deg=0.0,
+        position_angle_deg=0.0,
+    )
     np.testing.assert_allclose(got, expected, rtol=1e-12, atol=0)
     got = AYOExozodi(6.0, 23.0).photon_radiance_at(
-        waves, 0.0, 0.0, 0.1, star=None, dist_pc=10.0
+        waves,
+        0.0,
+        0.0,
+        0.1,
+        star=None,
+        dist_pc=10.0,
+        inclination_deg=0.0,
+        position_angle_deg=0.0,
     )
     np.testing.assert_allclose(got, expected * 2 * 10 ** (-0.4), rtol=1e-12, atol=0)
 
@@ -89,7 +105,14 @@ def test_ayo_exozodi_projected_separation_law():
 
     def read(distance, separation):
         return disk.photon_radiance_at(
-            550.0, 0.0, separation, 0.0, star=None, dist_pc=distance
+            550.0,
+            0.0,
+            separation,
+            0.0,
+            star=None,
+            dist_pc=distance,
+            inclination_deg=0.0,
+            position_angle_deg=0.0,
         )
 
     base = (

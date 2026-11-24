@@ -49,6 +49,9 @@ class AbstractDisk(eqx.Module):
     Values are photon radiance per steradian, independent of pixel area.
     Call ``Image.integrated()`` to integrate over the sky pixels.
     Times are scalar days from the scene epoch; wavelengths have any shape.
+    The disk orientation is not a leaf of the disk: a scene owns it
+    (``Scene.midplane_inc_deg``, ``Scene.midplane_position_angle_deg``) and every
+    read takes ``inclination_deg`` and ``position_angle_deg`` as keyword arguments.
 
     ``flux_scale`` is a dimensionless factor, default one, on the disk's own
     radiance, applied once in :meth:`photon_radiance_at`; a concrete disk
@@ -88,7 +91,15 @@ class AbstractDisk(eqx.Module):
         return ()
 
     def photon_radiance(
-        self, wavelength_nm, time_d, *, star, dist_pc, grid: PixelGrid
+        self,
+        wavelength_nm,
+        time_d,
+        *,
+        star,
+        dist_pc,
+        inclination_deg,
+        position_angle_deg,
+        grid: PixelGrid,
     ) -> Image:
         """Return an Image with shape ``wavelength_nm.shape + grid.shape``.
 
@@ -100,6 +111,10 @@ class AbstractDisk(eqx.Module):
             time_d: Scalar time in days from the scene epoch.
             star: Host star, supplying the photon flux that the disk scatters.
             dist_pc: Distance of the system from the observer [pc].
+            inclination_deg: Disk midplane inclination [deg]; zero is face-on.
+            position_angle_deg: Disk major-axis position angle, north through
+                east [deg]. A stored cube or an azimuthally symmetric disk
+                accepts both and ignores them.
             grid: Sky grid on which to evaluate the radiance.
 
         Returns:
@@ -109,12 +124,28 @@ class AbstractDisk(eqx.Module):
         check_sky_grid(grid)
         east, north = grid.orientation.detector_to_sky(*grid.coordinates())
         data = self.photon_radiance_at(
-            wavelength_nm, time_d, east, north, star=star, dist_pc=dist_pc
+            wavelength_nm,
+            time_d,
+            east,
+            north,
+            star=star,
+            dist_pc=dist_pc,
+            inclination_deg=inclination_deg,
+            position_angle_deg=position_angle_deg,
         )
         return radiance_image(data, grid)
 
     def photon_radiance_at(
-        self, wavelength_nm, time_d, east_arcsec, north_arcsec, *, star, dist_pc
+        self,
+        wavelength_nm,
+        time_d,
+        east_arcsec,
+        north_arcsec,
+        *,
+        star,
+        dist_pc,
+        inclination_deg,
+        position_angle_deg,
     ) -> Array:
         """Photon radiance in photons/s/m^2/nm/sr at the supplied sky offsets.
 
@@ -131,17 +162,37 @@ class AbstractDisk(eqx.Module):
                 [arcsec].
             star: Host star, supplying the photon flux that the disk scatters.
             dist_pc: Distance of the system from the observer [pc].
+            inclination_deg: Disk midplane inclination [deg]; zero is face-on.
+            position_angle_deg: Disk major-axis position angle, north through
+                east [deg]. A stored cube or an azimuthally symmetric disk
+                accepts both and ignores them.
 
         Returns:
             Photon radiance [ph s^-1 m^-2 nm^-1 sr^-1], shape
             ``wavelength_nm.shape + broadcast(east_arcsec, north_arcsec).shape``.
         """
         return self.flux_scale * self._photon_radiance_at(
-            wavelength_nm, time_d, east_arcsec, north_arcsec, star=star, dist_pc=dist_pc
+            wavelength_nm,
+            time_d,
+            east_arcsec,
+            north_arcsec,
+            star=star,
+            dist_pc=dist_pc,
+            inclination_deg=inclination_deg,
+            position_angle_deg=position_angle_deg,
         )
 
     @abstractmethod
     def _photon_radiance_at(
-        self, wavelength_nm, time_d, east_arcsec, north_arcsec, *, star, dist_pc
+        self,
+        wavelength_nm,
+        time_d,
+        east_arcsec,
+        north_arcsec,
+        *,
+        star,
+        dist_pc,
+        inclination_deg,
+        position_angle_deg,
     ) -> Array:
         """Unscaled photon radiance; the hook a concrete disk implements."""

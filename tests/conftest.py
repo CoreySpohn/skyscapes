@@ -21,7 +21,6 @@ import pytest  # noqa: E402
 from optixstuff.grids import PixelGrid, SkyOrientation  # noqa: E402
 
 from skyscapes.datasets import fetch_scene  # noqa: E402
-from skyscapes.disk.composite import orient_disk  # noqa: E402
 from skyscapes.scene import FlatStar  # noqa: E402
 
 # Released hwoutils versions may not include the optional budget plugin yet.
@@ -161,8 +160,13 @@ def radiance(
     Phi_observer = (d_pc*pc2AU)^-2 makes Phi_incident(1 AU)=1.
     Absolute photometry has separate primitive anchors in test_disk.py.
     """
-    disk = orient_disk(disk, inclination_deg, position_angle_deg)
     star = FlatStar(jnp.asarray((dist_pc * pc2AU) ** -2))
     return disk.photon_radiance(
-        jnp.asarray(wavelength_nm), time_d, star=star, dist_pc=dist_pc, grid=grid
+        jnp.asarray(wavelength_nm),
+        time_d,
+        star=star,
+        dist_pc=dist_pc,
+        inclination_deg=inclination_deg,
+        position_angle_deg=position_angle_deg,
+        grid=grid,
     ).data

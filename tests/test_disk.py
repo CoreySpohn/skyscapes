@@ -15,6 +15,7 @@ from hwoutils.map_coordinates import map_coordinates
 from optixstuff.grids import Measure, PixelGrid, SkyOrientation, resample
 from zodi import DensityDust, SurfaceBrightnessDust
 
+from skyscapes import disk as skyscapes_disk
 from skyscapes.disk import (
     AbstractDisk,
     AYOExozodi,
@@ -28,6 +29,9 @@ from skyscapes.disk import (
 )
 from skyscapes.scene import FlatStar, Star
 from skyscapes.scene.star import AbstractStar
+
+# Face-on, major axis north; a stored cube or the analytic exozodi ignores it.
+FACE_ON = {"inclination_deg": 0.0, "position_angle_deg": 0.0}
 
 
 def solar_star(magnitude=4.83, luminosity=1.0):
@@ -127,7 +131,9 @@ def test_calibration_anchor_and_pixel_area(kind):
         zero_magnitude_photon_flux_density(amplitude.passband), zero, rtol=2e-15
     )
     expected = 3 * 10 ** (-0.4 * 22)
-    image = disk.photon_radiance(550.0, 0.0, star=star, dist_pc=10.0, grid=point_grid())
+    image = disk.photon_radiance(
+        550.0, 0.0, star=star, dist_pc=10.0, grid=point_grid(), **FACE_ON
+    )
     actual = image.data.item() / zero * omega_arcsec2
     np.testing.assert_allclose(actual, expected, rtol=1e-6)
     np.testing.assert_allclose(
@@ -142,14 +148,16 @@ def test_calibration_anchor_and_pixel_area(kind):
     )
     values = [
         profile(kind, density, order)
-        .photon_radiance(550.0, 0.0, star=star, dist_pc=10.0, grid=point_grid())
+        .photon_radiance(
+            550.0, 0.0, star=star, dist_pc=10.0, grid=point_grid(), **FACE_ON
+        )
         .data.item()
         for order in (24, 48, 96)
     ]
     np.testing.assert_allclose(values, image.data.item(), rtol=1e-6)
     print("LOS order 24/48/96:", np.asarray(values) / values[-1] - 1)
     fine = disk.photon_radiance(
-        550.0, 0.0, star=star, dist_pc=10.0, grid=point_grid(0.005)
+        550.0, 0.0, star=star, dist_pc=10.0, grid=point_grid(0.005), **FACE_ON
     )
     np.testing.assert_allclose(fine.data, image.data, rtol=2e-14)
     pixel_contrast = (
@@ -207,13 +215,15 @@ def test_host_scaling_once(kind):
     grid = point_grid(radius=np.sqrt(0.2) / 10)
     values = [
         profile(kind, a)
-        .photon_radiance(550.0, 0.0, star=host, dist_pc=10.0, grid=grid)
+        .photon_radiance(550.0, 0.0, star=host, dist_pc=10.0, grid=grid, **FACE_ON)
         .data
         for a, host in ((band, star), (bolo, smooth))
     ]
     solar = (
         profile(kind, band)
-        .photon_radiance(550.0, 0.0, star=solar_star(), dist_pc=10.0, grid=grid)
+        .photon_radiance(
+            550.0, 0.0, star=solar_star(), dist_pc=10.0, grid=grid, **FACE_ON
+        )
         .data
     )
     # The same physical profile and point cancel, leaving independently stated
@@ -241,23 +251,35 @@ def test_orientation_and_rotated_grid():
     bounds sampling error at the radial slope breaks, far below axis errors.
     """
     disk, star = profile("grater"), solar_star()
-    disk = eqx.tree_at(
-        lambda d: (d.inclination_deg, d.g_HG_grid), disk, (60.0, jnp.array([0.2, 0.2]))
-    )
+    disk = eqx.tree_at(lambda d: d.g_HG_grid, disk, jnp.array([0.2, 0.2]))
+    tilted = {"inclination_deg": 60.0, "position_angle_deg": 0.0}
     grid = PixelGrid.regular((81, 81), 0.003, "arcsec", orientation=SkyOrientation(0.0))
-    north = disk.photon_radiance(550.0, 0.0, star=star, dist_pc=10.0, grid=grid)
+    north = disk.photon_radiance(
+        550.0, 0.0, star=star, dist_pc=10.0, grid=grid, **tilted
+    )
     east, n = grid.orientation.detector_to_sky(*grid.coordinates())
     assert jnp.sum(north.data * n * n) > 2 * jnp.sum(north.data * east * east)
     assert jnp.sum(north.data * (east < 0)) > jnp.sum(north.data * (east > 0))
-    turned = eqx.tree_at(lambda d: d.position_angle_deg, disk, 90.0)
-    data = turned.photon_radiance(550.0, 0.0, star=star, dist_pc=10.0, grid=grid).data
+    data = disk.photon_radiance(
+        550.0,
+        0.0,
+        star=star,
+        dist_pc=10.0,
+        grid=grid,
+        inclination_deg=60.0,
+        position_angle_deg=90.0,
+    ).data
     assert jnp.sum(data * east * east) > 2 * jnp.sum(data * n * n)
     rotated = replace(grid, orientation=SkyOrientation(30.0))
     reference = PixelGrid.regular(
         (241, 241), 0.0015, "arcsec", orientation=SkyOrientation(0.0)
     )
-    ref = disk.photon_radiance(550.0, 0.0, star=star, dist_pc=10.0, grid=reference)
-    direct = disk.photon_radiance(550.0, 0.0, star=star, dist_pc=10.0, grid=rotated)
+    ref = disk.photon_radiance(
+        550.0, 0.0, star=star, dist_pc=10.0, grid=reference, **tilted
+    )
+    direct = disk.photon_radiance(
+        550.0, 0.0, star=star, dist_pc=10.0, grid=rotated, **tilted
+    )
     np.testing.assert_allclose(
         direct.data,
         resample(ref, rotated, reconstruction="cubic").data,
@@ -271,6 +293,7 @@ def test_orientation_and_rotated_grid():
         star=star,
         dist_pc=10.0,
         grid=replace(grid, orientation=SkyOrientation(0.0, parity=1)),
+        **tilted,
     )
     np.testing.assert_allclose(other.data, north.data[:, ::-1], rtol=2e-14, atol=0)
 
@@ -286,7 +309,7 @@ def test_jax_radiance_contract(kind):
     waves = jnp.array([[510.0, 550.0], [580.0, 620.0]])
 
     def render(d, w):
-        return d.photon_radiance(w, 0.0, star=star, dist_pc=10.0, grid=grid)
+        return d.photon_radiance(w, 0.0, star=star, dist_pc=10.0, grid=grid, **FACE_ON)
 
     eager = render(disk, waves)
     np.testing.assert_allclose(
@@ -317,7 +340,9 @@ def test_exovista_disk_flux_shape():
     grid = PixelGrid.regular((4, 6), 0.01, "arcsec", orientation=SkyOrientation(30.0))
     disk = ExovistaDisk(grid, wave, cube)
     star = solar_star()
-    image = disk.photon_radiance(wave, 0.0, star=star, dist_pc=10.0, grid=grid)
+    image = disk.photon_radiance(
+        wave, 0.0, star=star, dist_pc=10.0, grid=grid, **FACE_ON
+    )
     assert image.leading_axes == ("wavelength",)
     expected = cube * star.photon_flux_density(wave, 0.0, dist_pc=10.0)[:, None, None]
     omega = 0.01**2 * (np.pi / (180 * 3600)) ** 2
@@ -340,9 +365,7 @@ def test_system_radiance_owns_midplane_override():
     from skyscapes.disk import CompositeDisk
     from skyscapes.scene import Scene
 
-    disk = eqx.tree_at(
-        lambda d: (d.inclination_deg, d.position_angle_deg), profile(), (75.0, 43.0)
-    )
+    disk = profile()
     empty = jnp.empty(0)
     system = Scene.from_classical(
         solar_star(),
@@ -365,13 +388,85 @@ def test_system_radiance_owns_midplane_override():
     zero = 3636.0 * 1e-26 / (6.62607015e-34 * 550e-9) * 1e-9
     expected = 2 * 3 * 10 ** (-0.4 * 22) * zero / (np.pi / (180 * 3600)) ** 2
     np.testing.assert_allclose(data, expected, rtol=1e-6)
-    assert float(disk.inclination_deg) == 75.0  # override is functional
     no_disk = eqx.tree_at(lambda s: s.disk, system, None)
     np.testing.assert_array_equal(
         no_disk.photon_radiance(550.0, 0.0, grid=grid).data, 0.0
     )
     with pytest.raises(ValueError, match="SkyOrientation"):
         system.photon_radiance(550.0, 0.0, grid=replace(grid, orientation=None))
+
+
+def test_scene_midplane_is_the_one_live_orientation():
+    """Fails if a disk keeps its own orientation, ignores the scene's, or mixes them.
+
+    Truth: the scene's midplane leaves are the only orientation. Basis: the
+    gradient of the summed radiance on a 16 by 16 grid with respect to
+    ``midplane_inc_deg`` matches a central difference at a 1e-4 deg step to
+    1e-5 relative (x64; the second-order step error is about 1e-9 relative);
+    the standalone read with explicit angles and the composite sum are
+    bitwise equal because they run the same operations in the same order.
+    """
+    from skyscapes.disk import AbstractDisk, CompositeDisk
+    from skyscapes.disk._parametric import AbstractParametricDisk
+    from skyscapes.scene import Scene
+
+    parametric = [
+        cls
+        for cls in vars(skyscapes_disk).values()
+        if isinstance(cls, type) and issubclass(cls, AbstractParametricDisk)
+    ]
+    assert len(parametric) >= 2
+    for cls in parametric:
+        names = {f.name for f in dataclasses.fields(cls)}
+        assert not names & {"inclination_deg", "position_angle_deg"}, cls
+
+    ring = profile("grater", order=31)
+    outer = eqx.tree_at(lambda d: d.sma_AU, ring, jnp.asarray(1.4))
+    composite = CompositeDisk((ring, outer))
+    empty = jnp.empty(0)
+    scene = Scene.from_classical(
+        solar_star(),
+        (),
+        star_mass_Msun=1.0,
+        planet_mass_Msun=empty,
+        a_AU=empty,
+        e=empty,
+        W_rad=empty,
+        i_rad=empty,
+        w_rad=empty,
+        M0_rad=empty,
+        dist_pc=10.0,
+        disk=composite,
+        midplane_inc_deg=60.0,
+        midplane_position_angle_deg=35.0,
+    )
+    assert scene.midplane_inc_deg.dtype == scene.midplane_position_angle_deg.dtype
+    assert isinstance(scene.midplane_inc_deg, jax.Array)
+    grid = PixelGrid.regular((16, 16), 0.02, "arcsec", orientation=SkyOrientation(0.0))
+
+    def total(inc):
+        moved = eqx.tree_at(lambda s: s.midplane_inc_deg, scene, inc)
+        return jnp.sum(moved.photon_radiance(550.0, 0.0, grid=grid).data)
+
+    inc = jnp.asarray(60.0)
+    gradient = jax.grad(total)(inc)
+    step = 1e-4
+    central = (total(inc + step) - total(inc - step)) / (2 * step)
+    assert float(central) != 0.0
+    np.testing.assert_allclose(gradient, central, rtol=1e-5, atol=0)
+
+    angles = {
+        "inclination_deg": scene.midplane_inc_deg,
+        "position_angle_deg": scene.midplane_position_angle_deg,
+    }
+    read = dict(star=scene.star, dist_pc=scene.dist_pc, grid=grid, **angles)
+    from_scene = scene.photon_radiance(550.0, 0.0, grid=grid).data
+    np.testing.assert_array_equal(
+        composite.photon_radiance(550.0, 0.0, **read).data, from_scene
+    )
+    parts = [c.photon_radiance(550.0, 0.0, **read).data for c in composite.components]
+    np.testing.assert_array_equal(parts[0] + parts[1], from_scene)
+    assert isinstance(composite, AbstractDisk)
 
 
 @pytest.mark.parametrize("kind", ["exovista", "grater", "cube", "composite", None])
@@ -487,7 +582,7 @@ def test_flux_scale_is_applied_once_in_the_base(name):
     """
     disk, star = _scaled_disks()[name], solar_star()
     args = (jnp.array([550.0]), 0.0, jnp.array([0.05, 0.1]), jnp.array([0.0, 0.02]))
-    kwargs = dict(star=star, dist_pc=10.0)
+    kwargs = dict(star=star, dist_pc=10.0, **FACE_ON)
     hook = disk._photon_radiance_at(*args, **kwargs)
     assert float(disk.flux_scale) == 1.0
     np.testing.assert_array_equal(disk.photon_radiance_at(*args, **kwargs), hook)
@@ -503,7 +598,7 @@ def test_flux_scale_is_applied_once_in_the_base(name):
 
     assert float(jnp.max(jnp.abs(hook))) > 0.0
     brighter = eqx.tree_at(lambda s: s.flux_scale, star, jnp.asarray(2.0))
-    follows = disk.photon_radiance_at(*args, star=brighter, dist_pc=10.0)
+    follows = disk.photon_radiance_at(*args, star=brighter, dist_pc=10.0, **FACE_ON)
     # The analytic exozodi is defined against a magnitude zero point, not the star.
     np.testing.assert_allclose(
         follows, (1.0 if name == "ayo" else 2.0) * hook, rtol=1e-13
@@ -560,7 +655,9 @@ def test_exovista_disk_render_equals_the_stored_spline_render():
     north = jnp.array([0.0, 0.07, -0.04])
     wave = jnp.array([430.0, 450.0, 499.0, 580.0, 640.0, 760.0, 780.0])
     star = FlatStar(2.5e9)
-    actual = disk._photon_radiance_at(wave, 0.0, east, north, star=star, dist_pc=10.0)
+    actual = disk._photon_radiance_at(
+        wave, 0.0, east, north, star=star, dist_pc=10.0, **FACE_ON
+    )
     grid = disk.native_grid
     pixels = grid.unit_to_pixel(*grid.orientation.sky_to_detector(east, north))
     expected = []
@@ -593,6 +690,7 @@ def test_exovista_disk_cube_is_a_live_leaf_with_exact_gradient():
             north,
             star=star,
             dist_pc=10.0,
+            **FACE_ON,
         )
         return jnp.sum(weights * out)
 

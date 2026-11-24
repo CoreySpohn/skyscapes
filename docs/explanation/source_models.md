@@ -43,8 +43,8 @@ class Scene(eqx.Module):
     dynamics: orbix.system.System
     disk: AbstractDisk | None = None  # the only exozodi
     local_zodi: AbstractLocalZodi | None = None
-    midplane_inc_deg: float = 0.0
-    midplane_position_angle_deg: float = 0.0
+    midplane_inc_deg: Array = 0.0
+    midplane_position_angle_deg: Array = 0.0
     ...
 ```
 
@@ -361,17 +361,22 @@ photon-flux method, supplying geometry and observer distance.
 | `GraterDisk` | Two-power-law density × Henyey-Greenstein scattering; parametric / synthetic |
 | `CompositeDisk` | Sum of any other disks (e.g. main disk + a clump) |
 
-Disks return `photon_radiance(wavelength_nm, time_d, *, star, dist_pc, grid)`:
+Disks return `photon_radiance(wavelength_nm, time_d, *, star, dist_pc,
+inclination_deg, position_angle_deg, grid)`:
 an `Image` in ph s^-1 m^-2 nm^-1 sr^-1 on a caller-owned arcsec `PixelGrid`
 with `SkyOrientation`. Call `image.integrated()` for per-pixel photon flux density. Leading image axes match the wavelength array.
 The native ExoVista cube is host contrast per pixel; its radiance divides by
 the native pixel solid angle before resampling as a density. Composites ask
 every component to render on the requested grid before summation.
 
-Parametric disks carry `inclination_deg` (zero face-on),
-`position_angle_deg` (major axis north through east), and a typed `amplitude`.
-A system overrides the parametric angles with its midplane angles. Stored
-cubes retain their native sky geometry. No detector handedness is implicit.
+Parametric disks carry a typed `amplitude` and no orientation. The orientation
+belongs to the scene: `Scene.midplane_inc_deg` (zero face-on) and
+`Scene.midplane_position_angle_deg` (major axis north through east) are array
+leaves, so a fit can free them, and the scene passes them to every disk read.
+A disk read on its own takes the same two angles as required keyword arguments
+(`inclination_deg`, `position_angle_deg`). A composite reads every component at
+the one orientation. Stored cubes retain their native sky geometry and accept
+and ignore the angles. No detector handedness is implicit.
 
 ```python
 import jax.numpy as jnp
@@ -398,7 +403,31 @@ disk = GraterDisk(
     n_slices_los=48,
 )
 grid = PixelGrid.regular((101, 101), 0.01, "arcsec", orientation=SkyOrientation(0.0))
-image = disk.photon_radiance(550.0, 0.0, star=star, dist_pc=10.0, grid=grid)
+image = disk.photon_radiance(
+    550.0,
+    0.0,
+    star=star,
+    dist_pc=10.0,
+    grid=grid,
+    inclination_deg=0.0,
+    position_angle_deg=0.0,
+)
+```
+
+A standalone read tilts the same disk by passing other angles; a scene holds
+the same two angles as `midplane_inc_deg` and `midplane_position_angle_deg`
+and reads the same image:
+
+```python
+tilted = disk.photon_radiance(
+    550.0,
+    0.0,
+    star=star,
+    dist_pc=10.0,
+    grid=grid,
+    inclination_deg=60.0,
+    position_angle_deg=35.0,
+)
 ```
 
 `DensityDust` instead supplies a multiplier of the named profile, with

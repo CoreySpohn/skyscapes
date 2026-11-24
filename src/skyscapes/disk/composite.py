@@ -9,38 +9,6 @@ from optixstuff.spectral import spectral_breaks
 from .base import AbstractDisk
 
 
-def orient_disk(disk, inclination_deg, position_angle_deg):
-    """Return a parametric disk at the system midplane; stored cubes stay fixed.
-
-    Args:
-        disk: Disk to orient; composites are oriented component by component.
-        inclination_deg: Midplane inclination [deg]; zero is face-on.
-        position_angle_deg: Midplane position angle, north through east [deg].
-
-    Returns:
-        The disk with parametric components set to the given orientation. Other
-        disks, such as stored cubes, are returned unchanged.
-    """
-    from ._parametric import AbstractParametricDisk
-
-    if isinstance(disk, CompositeDisk):
-        return eqx.tree_at(
-            lambda d: d.components,
-            disk,
-            tuple(
-                orient_disk(c, inclination_deg, position_angle_deg)
-                for c in disk.components
-            ),
-        )
-    if isinstance(disk, AbstractParametricDisk):
-        return eqx.tree_at(
-            lambda d: (d.inclination_deg, d.position_angle_deg),
-            disk,
-            (inclination_deg, position_angle_deg),
-        )
-    return disk
-
-
 class CompositeDisk(AbstractDisk):
     """Sum radiance from components that may have different native grids.
 
@@ -78,9 +46,21 @@ class CompositeDisk(AbstractDisk):
             raise ValueError("CompositeDisk requires at least one component.")
 
     def _photon_radiance_at(
-        self, wavelength_nm, time_d, east_arcsec, north_arcsec, *, star, dist_pc
+        self,
+        wavelength_nm,
+        time_d,
+        east_arcsec,
+        north_arcsec,
+        *,
+        star,
+        dist_pc,
+        inclination_deg,
+        position_angle_deg,
     ):
-        """Sum component photon radiance in photons/s/m^2/nm/sr."""
+        """Sum component photon radiance in photons/s/m^2/nm/sr.
+
+        Every component is read at the same orientation.
+        """
         return sum(
             c.photon_radiance_at(
                 wavelength_nm,
@@ -89,6 +69,8 @@ class CompositeDisk(AbstractDisk):
                 north_arcsec,
                 star=star,
                 dist_pc=dist_pc,
+                inclination_deg=inclination_deg,
+                position_angle_deg=position_angle_deg,
             )
             for c in self.components
         )

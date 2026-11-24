@@ -17,7 +17,6 @@ from hwoutils.conversions import au_to_arcsec
 from optixstuff.grids import Image, PixelGrid, SkyOrientation, resample
 
 from skyscapes.disk import AbstractDisk
-from skyscapes.disk.composite import orient_disk
 from skyscapes.viz import _geometry
 from skyscapes.viz._draw import (
     DEGREE,
@@ -114,10 +113,12 @@ def plot_disk_radiance(
         wavelength_nm: Wavelength to render at [nm]. Required for a disk.
         time_d: Time to render at, in days from the scene epoch.
         incl_deg: Midplane inclination [deg], in ``[0, 180]``. Defaults to
-            the system's; required for a bare disk; optional for an array
+            the scene's; required for a bare disk (a stored cube ignores it
+            in the render and uses it for the outlines); optional for an array
             (outline only). ``i`` and ``180 - i`` at ``pa + 180`` are the
             same midplane and render the same map.
         position_angle_deg: Major-axis angle north through east [deg].
+            Defaults to the scene's; required for a bare disk.
         pixel_scale_arcsec: Sampling for a bare north-up radiance array.
         dist_pc: Distance [pc], used to place the AU outlines. Read from
             the system; required for a bare parametric disk.
@@ -175,13 +176,17 @@ def plot_disk_radiance(
             star = getattr(system, "star", None)
         if wavelength_nm is None or star is None or grid is None or dist is None:
             raise ValueError("rendering needs wavelength_nm, star, dist_pc and grid")
-        if incl is not None and pa is not None:
-            disk = orient_disk(disk, incl, pa)
+        if incl is None or pa is None:
+            raise ValueError(
+                "rendering a bare disk needs incl_deg and position_angle_deg"
+            )
         image = disk.photon_radiance(
             jnp.asarray(wavelength_nm),
             jnp.asarray(time_d),
             star=star,
             dist_pc=dist,
+            inclination_deg=incl,
+            position_angle_deg=pa,
             grid=grid,
         )
     elif hasattr(disk_or_image, "midplane_inc_deg"):

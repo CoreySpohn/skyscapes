@@ -57,9 +57,22 @@ class AYOExozodi(AbstractDisk):
         return np.empty(0)
 
     def _photon_radiance_at(
-        self, wavelength_nm, time_d, east_arcsec, north_arcsec, *, star, dist_pc
+        self,
+        wavelength_nm,
+        time_d,
+        east_arcsec,
+        north_arcsec,
+        *,
+        star,
+        dist_pc,
+        inclination_deg,
+        position_angle_deg,
     ) -> Array:
-        """Photons/s/m^2/nm/sr, wavelength axes first, then the sky shape."""
+        """Photons/s/m^2/nm/sr, wavelength axes first, then the sky shape.
+
+        The analytic model is azimuthally symmetric: ``inclination_deg`` and
+        ``position_angle_deg`` are accepted and ignored.
+        """
         wave = jnp.asarray(wavelength_nm)
         separation = jnp.hypot(east_arcsec, north_arcsec)
         wave = wave.reshape(wave.shape + (1,) * jnp.ndim(separation))

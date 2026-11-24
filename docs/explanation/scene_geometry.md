@@ -32,7 +32,6 @@ import numpy as np
 from hwoutils.constants import Mearth2kg, Msun2kg
 from optixstuff.grids import PixelGrid, SkyOrientation
 from zodi import SurfaceBrightnessDust
-import equinox as eqx
 
 from skyscapes import Scene, viz
 from skyscapes.disk import GraterDisk
@@ -88,7 +87,7 @@ system = Scene.from_classical(
 |---|---|
 | Sky frame | `(x, y, z)`, star-centered. `x` is the east offset (Delta alpha* = Delta RA cos Dec), `y` the north (Dec) offset, and `+z` points away from the observer. This (east, north, away) frame is right-handed, with dz/dt positive receding. `Scene.ephemeris` holds barycentric states; `Scene.positions` returns star-relative `(x, y)` in arcsec. The phase angle is the standard star-planet-observer angle, 0 at full phase (planet behind the star) and pi at new phase, as orbix returns it, so `cos(beta) = z / r` in this frame. |
 | Sky images | Pixel centers and orientation come from the caller's `PixelGrid`. The standard north-up grid has `SkyOrientation(0, parity=-1)`, east to the left. Other rotations, parity and pixel bases are explicit. |
-| Disk orientation | `Scene.midplane_inc_deg` and `Scene.midplane_position_angle_deg` override parametric disk orientations. Loaded cubes retain their native geometry. |
+| Disk orientation | `Scene.midplane_inc_deg` and `Scene.midplane_position_angle_deg` are the one live orientation; the scene passes them to every disk read, and a parametric disk carries none. A standalone disk read takes `inclination_deg` and `position_angle_deg` as keyword arguments. Loaded cubes retain their native geometry and ignore them. |
 | Inclination | Zero face-on; the projected axis ratio is `abs(cos(i))`. The representations `(i, PA)` and `(180-i, PA+180)` describe the same plane and near half. |
 | Position angle | Astronomical, north through east: PA=0 places the major axis north-south, PA=90 east-west. |
 | Near side | For inclination below 90, the near minor direction is `(-cos(PA), sin(PA))` in east/north; it reverses above 90. Grains toward the observer scatter forward. |
@@ -250,10 +249,10 @@ from IPython.display import HTML
 
 inclinations = jnp.linspace(10.0, 80.0, 12)
 frames = [
-    eqx.tree_at(lambda d: (d.inclination_deg, d.position_angle_deg), disk,
-                (incl, jnp.array(60.0))).photon_radiance(
+    disk.photon_radiance(
         jnp.array(550.0), jnp.array(0.0), star=star,
         dist_pc=system.dist_pc, grid=grid,
+        inclination_deg=incl, position_angle_deg=jnp.array(60.0),
     ).data
     for incl in inclinations
 ]

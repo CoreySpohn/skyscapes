@@ -109,9 +109,22 @@ class ExovistaDisk(AbstractDisk):
             raise ValueError("contrast_cube must match wavelengths and native_grid")
 
     def _photon_radiance_at(
-        self, wavelength_nm, time_d, east_arcsec, north_arcsec, *, star, dist_pc
+        self,
+        wavelength_nm,
+        time_d,
+        east_arcsec,
+        north_arcsec,
+        *,
+        star,
+        dist_pc,
+        inclination_deg,
+        position_angle_deg,
     ):
-        """Photon radiance in photons/s/m^2/nm/sr from the stored contrast cube."""
+        """Photon radiance in photons/s/m^2/nm/sr from the stored contrast cube.
+
+        The cube already carries its geometry: ``inclination_deg`` and
+        ``position_angle_deg`` are accepted and ignored.
+        """
         east, north = jnp.broadcast_arrays(east_arcsec, north_arcsec)
         grid = self.native_grid
         pixels = grid.unit_to_pixel(*grid.orientation.sky_to_detector(east, north))

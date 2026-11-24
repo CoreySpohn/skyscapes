@@ -41,6 +41,8 @@ def test_load_disk_interpolates_without_dtype_warnings(enable_x64, wavelength_dt
                 star=FlatStar(1.0),
                 grid=disk.native_grid,
                 dist_pc=10.0,
+                inclination_deg=0.0,
+                position_angle_deg=0.0,
             ).data
             * disk.native_grid.pixel_area
             * arcsec2rad**2
