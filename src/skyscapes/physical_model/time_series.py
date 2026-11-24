@@ -55,7 +55,13 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
     @property
     def knots(self) -> Knots:
         """The wavelength grid as ``Knots``; refused for a single wavelength."""
-        return knots_of(self.wavelengths_nm)
+        try:
+            return knots_of(self.wavelengths_nm)
+        except ValueError as error:
+            raise ValueError(
+                f"{type(self).__name__} with {len(self.wavelengths_nm)} "
+                f"wavelength(s): {error}"
+            ) from None
 
     @property
     def _tabulated(self) -> bool:

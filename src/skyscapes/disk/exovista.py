@@ -58,8 +58,10 @@ class ExovistaDisk(AbstractDisk):
         knots: Wavelength grid of the cube [nm], a static ``Knots``.
         contrast_cube: Host-relative contrast of each pixel (pixel flux over host
             flux, dimensionless), shape ``(n_wave, ny, nx)``. A declared bulk
-            field: ExoVista disk cubes are float32 on disk, and a float32 cube
-            is kept under x64.
+            field: a float32 array given to the constructor stays float32
+            under x64 and is promoted where it is read, and any other input
+            becomes the active dtype. The ExoVista loader reads the float32
+            cube from disk and casts it to the active dtype.
         flux_scale: Dimensionless scalar factor on the radiance, default one.
     """
 

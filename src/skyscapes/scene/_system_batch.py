@@ -95,38 +95,59 @@ def _planet_group(system, model_template):
     )
 
 
+def _knots(source):
+    """The knots of a source, or None when it is smooth or cannot give any."""
+    try:
+        return getattr(source, "knots", None)
+    except ValueError:
+        return None
+
+
+def _check_grids(label, index, first, knots):
+    """Refuse one source's grids that differ, naming twins that differ by rounding."""
+    if knots == first:
+        return
+    if (
+        first is not None
+        and knots is not None
+        and len(knots) == len(first)
+        and bool(np.all(same_wavelength(knots.values, first.values)))
+    ):
+        raise ValueError(
+            f"the {label} of scene 0 and scene {index} have knots that agree "
+            "within the wavelength tolerance but differ in digest "
+            f"({first.digest} and {knots.digest}), so they cannot share one "
+            f"batch; build both {label} on one shared Knots"
+        )
+    raise ValueError(
+        f"the {label} of scene 0 and scene {index} have different knots; a batch "
+        f"holds one grid of the {label}"
+    )
+
+
 def _check_star_knots(scenes):
-    """Refuse star grids that differ, naming twins that differ only by rounding.
+    """Refuse star and planet grids that differ, naming twins that differ by rounding.
 
     Args:
         scenes: The scenes to pack.
 
     Raises:
-        ValueError: If two stars hold different knots. When the grids agree
+        ValueError: If two scenes hold different knots for their star or for
+            the physical model of the same planet group. When the grids agree
             within the wavelength tolerance (a float32 copy of a float64
             file grid, say), the message names both scenes and the fix.
+            Scenes with a local zodi never reach this check: a batch refuses
+            them.
     """
-    first = getattr(scenes[0].star, "knots", None)
+    first = _knots(scenes[0].star)
     for index, scene in enumerate(scenes[1:], start=1):
-        knots = getattr(scene.star, "knots", None)
-        if knots == first:
-            continue
-        if (
-            first is not None
-            and knots is not None
-            and len(knots) == len(first)
-            and bool(np.all(same_wavelength(knots.nm, first.nm)))
-        ):
-            raise ValueError(
-                f"the stars of scene 0 and scene {index} have knots that agree "
-                "within the wavelength tolerance but differ in digest "
-                f"({first.digest} and {knots.digest}), so they cannot share one "
-                "batch; build both stars on one shared Knots"
-            )
-        raise ValueError(
-            f"the stars of scene 0 and scene {index} have different knots; a batch "
-            "holds one star grid"
-        )
+        _check_grids("stars", index, first, _knots(scene.star))
+    for group, planet in enumerate(scenes[0].planets):
+        first = _knots(planet.physical_model)
+        for index, scene in enumerate(scenes[1:], start=1):
+            if len(scene.planets) == len(scenes[0].planets):
+                other = _knots(scene.planets[group].physical_model)
+                _check_grids(f"planet models of group {group}", index, first, other)
 
 
 def from_scenes(cls, scenes, *, capacity=None, batch_shape=None):

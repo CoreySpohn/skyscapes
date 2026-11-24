@@ -787,7 +787,7 @@ class Scene(eqx.Module):
 
         Pass them to ``optixstuff.spectral.Resolution.build`` with the rule:
         the star when it is a table, one product per planet group whose model
-        declares knots (its table times the star's, on the merged knots), and
+        declares knots (its table times the star's, on the union of their knots), and
         the local zodi when it is a table. Each digest is checked against its
         concrete knots, so a knot grid replaced after construction is refused
         here with the remedy.

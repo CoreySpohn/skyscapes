@@ -647,7 +647,7 @@ Each source then has its own node method:
 |---|---|---|
 | `Star` | `node_flux_density` | The table reduced by its operator. A smooth star (`BlackbodyStar`, `FlatStar`) is sampled at the nodes, which is exact Gauss on a smooth spectrum. |
 | Planet model without knots | `node_photon_flux_density` | Reflected light: its contrast at the nodes times the node-effective star. Thermal light (`BlackbodyPhysicalModel`): its own flux at the nodes; the star does not enter. |
-| Planet model with knots | `node_photon_flux_density` | Its flux evaluated on a fine grid between the merged knots of its table and the star's, and reduced: exact in both tables. A `SumPhysicalModel` holding a tabulated component is reduced as one table on the union of its components' knots. |
+| Planet model with knots | `node_photon_flux_density` | Its flux evaluated on a fine grid between the union of the knots of its table and the star's (knots closer than the wavelength tolerance stay distinct edges), and reduced: exact in both tables. A `SumPhysicalModel` holding a tabulated component is reduced as one table on the union of its components' knots. |
 | Local zodi | `node_radiance` | `PrecomputedZodi`: its table reduced. `AYOZodi` and `LeinertZodi`: sampled at the nodes, which is exact when they are declared to `Quadrature.build`, because their knots are then piece edges. |
 
 `Scene.sources` assembles them once into a `Sources` record: `star`

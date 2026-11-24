@@ -5,7 +5,7 @@ A tabulated spectrum holds its knots as a static ``optixstuff.spectral.Knots``
 operator that integrates it on a band rule can be found inside a traced
 program (``optixstuff.spectral.Resolution``) and no fit can move a knot. A
 planet whose spectrum is tabulated is integrated as the product of its own
-table and the host star's, on the merged knots of the two;
+table and the host star's, on the union of the two sets of knots;
 :class:`ProductTable` names that product to ``Resolution.build``, and
 :func:`product_rule` finds its operator again from the two static digests.
 """
@@ -41,7 +41,7 @@ def as_host_grid(values) -> HostGrid:
     return values if isinstance(values, HostGrid) else HostGrid(values)
 
 
-@functools.lru_cache(maxsize=64)
+@functools.lru_cache(maxsize=8)
 def knots_of(grid: HostGrid) -> Knots:
     """Knots of a static host grid in nm, cached on its digest.
 
@@ -54,7 +54,7 @@ def knots_of(grid: HostGrid) -> Knots:
     return Knots(grid.values)
 
 
-@functools.lru_cache(maxsize=64)
+@functools.lru_cache(maxsize=8)
 def wavenumber_knots(nu_grid: HostGrid) -> Knots:
     """Knots [nm] of a static wavenumber grid [cm^-1], sorted, cached.
 
@@ -95,7 +95,7 @@ def _star_part(star) -> tuple[str, int]:
 def product_method(model_digest: str, star_digest: str, degree: int) -> str:
     """Name a planet table times its host star as an interpolation method.
 
-    The name holds both static digests, so it fixes the merged knots without
+    The name holds both static digests, so it fixes the cell edges without
     them, and a rule built for the product can be found under a trace.
 
     Args:
@@ -112,61 +112,66 @@ def product_method(model_digest: str, star_digest: str, degree: int) -> str:
 
 
 class ProductTable:
-    """A tabulated planet spectrum times its host star, on the merged knots.
+    """A tabulated planet spectrum times its host star, on the union of knots.
 
     Host only: built by ``Scene.spectral_tables`` and read by
-    ``Resolution.build``. Its knots are the union of the planet's and the
-    star's (``Knots.union``: knots within the wavelength tolerance are one, the
-    smallest; a smooth star adds none), restricted to the wavelengths both
-    tables cover, and its degree is the sum of theirs. It holds no
-    interpolant, so the operator is the ``"fine"`` kind: the planet flux is
-    evaluated on the operator's fine grid and reduced, or the ``"identity"``
-    kind when every merged knot is a piece edge.
+    ``Resolution.build``. Its cell edges are the raw union of the planet's and
+    the star's knots, restricted to the wavelengths both tables cover, with no
+    tolerance merge: a star knot within the wavelength tolerance of a planet
+    knot stays a distinct edge, so the product of the two interpolants is
+    integrated exactly on every cell, and the operator applies the
+    ``Reduction.build`` edge rule to it as to a single table. A smooth star
+    adds no knots. The degree is the sum of the two. It holds no interpolant,
+    so the operator is the ``"fine"`` kind: the planet flux is evaluated on the
+    operator's fine grid and reduced, or the ``"identity"`` kind when every
+    edge is a piece edge.
 
     Attributes:
-        knots: The merged knots.
-        knot_digest: Digest of the merged knots under :func:`product_method`.
+        knots: The cell edges, a static ``HostGrid`` (not ``Knots``: edges
+            closer than the tolerance are allowed).
+        knot_digest: Digest of the component tables under
+            :func:`product_method`, which names both component digests.
         spectral_degree: Declared degree of the product between knots.
     """
 
-    knots: Knots
+    knots: HostGrid
     knot_digest: str
     spectral_degree: int
 
     def __init__(self, model, star):
-        """Merge the knots of a tabulated physical model and its host star.
+        """Take the union of the knots of a tabulated model and its host star.
 
         Args:
             model: A physical model that declares knots.
             star: The host star.
         """
         star_digest, star_degree = _star_part(star)
-        knots = model.knots
+        edges = model.knots.nm
         if is_table(star):
-            low = max(knots.nm[0], star.knots.nm[0])
-            high = min(knots.nm[-1], star.knots.nm[-1])
+            low = max(edges[0], star.knots.nm[0])
+            high = min(edges[-1], star.knots.nm[-1])
             if low >= high or same_wavelength(low, high):
                 raise ValueError(
                     f"the tables of {type(model).__name__} and "
                     f"{type(star).__name__} share no wavelengths"
                 )
-            merged = knots.union(star.knots).nm
+            merged = np.unique(np.concatenate([edges, star.knots.nm]))
             keep = ((merged >= low) | same_wavelength(merged, low)) & (
                 (merged <= high) | same_wavelength(merged, high)
             )
-            knots = Knots(merged[keep])
+            edges = merged[keep]
         self.spectral_degree = model.spectral_degree + star_degree
-        self.knots = knots
+        self.knots = HostGrid(edges)
         method = product_method(model.knot_digest, star_digest, self.spectral_degree)
-        self.knot_digest = digest_knots(knots, method)
+        self.knot_digest = digest_knots(self.knots, method)
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Return the merged knots [nm].
+        """Return the cell edges [nm].
 
         Returns:
-            Strictly increasing knot wavelengths in nm.
+            Strictly increasing wavelengths in nm.
         """
-        return self.knots.nm
+        return self.knots.values
 
 
 def product_rule(resolution, quadrature, model, star):

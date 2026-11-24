@@ -677,3 +677,144 @@ def test_a_batch_refuses_twin_star_grids_by_name():
     assert twin.digest in str(info.value)
     shared = Knots(grid)
     assert Scene.from_scenes([scene(shared), scene(shared)]).batch_shape == (2,)
+
+
+def test_a_batch_refuses_twin_planet_grids_by_name():
+    """Fails if two planet-model grids that differ only by rounding stack with
+    a generic structure error instead of naming the scenes and the fix.
+
+    Exact. Time-series planets on [400, 450.1, 520.3, 700] nm and on its
+    float32 copy agree within the wavelength tolerance but differ in digest;
+    a different grid is named as different; one shared grid stacks. A scene
+    with a local zodi never reaches the check: a batch refuses it.
+    """
+    grid = np.array([400.0, 450.1, 520.3, 700.0])
+    star = Star(
+        wavelengths_nm=grid,
+        times_d=np.zeros(1),
+        flux_density_jy=np.ones((4, 1)),
+        interpolation_method="linear",
+    )
+
+    def scene(planet_grid):
+        model = TimeSeriesPhysicalModel(
+            planet_grid, np.zeros(1), np.full((1, 4, 1), 0.1)
+        )
+        return _scene(star, (model,))
+
+    with pytest.raises(ValueError, match="planet models of group 0") as info:
+        Scene.from_scenes([scene(grid), scene(grid.astype(np.float32))])
+    assert "scene 0 and scene 1" in str(info.value)
+    assert "differ in digest" in str(info.value)
+    with pytest.raises(ValueError, match="have different knots"):
+        Scene.from_scenes([scene(grid), scene(grid + 1.0)])
+    assert Scene.from_scenes([scene(grid), scene(grid)]).batch_shape == (2,)
+
+
+def test_a_one_wavelength_table_names_itself_when_integrated():
+    """Fails if the refusal of a one-wavelength time series omits the table.
+
+    Exact. The time series is valid as a point read; as a table of a scene it
+    is refused by ``spectral_tables`` and by its ``knots``, naming the class
+    and the wavelength count.
+    """
+    star = Star(
+        wavelengths_nm=[400.0, 700.0],
+        times_d=np.zeros(1),
+        flux_density_jy=np.ones((2, 1)),
+        interpolation_method="linear",
+    )
+    model = TimeSeriesPhysicalModel([500.0], np.zeros(1), np.full((1, 1, 1), 0.1))
+    scene = _scene(star, (model,))
+    for build in (lambda: model.knots, scene.spectral_tables):
+        with pytest.raises(
+            ValueError, match=r"TimeSeriesPhysicalModel with 1 wavelength\(s\)"
+        ):
+            build()
+
+
+def _product_band_ratio_and_truth(offsets_tol):
+    """Band contrast of a line-by-line planet over a coarse star, and its truth.
+
+    The planet is a time-series table at R = 1.5e5 over 498 to 552 nm with
+    random ordinates; the star is a linear table of 13 knots, each moved off a
+    planet knot by ``offsets_tol`` wavelength tolerances. Truth is computed
+    from the raw arrays: the ratio of the exact integrals over 500 to 550 nm
+    of (contrast times star) and of the star, taken cell by cell on the union
+    of both raw grids and the band edges with Simpson's rule, which is exact
+    for the quadratic product of two linear interpolants.
+    """
+    from optixstuff.spectral import merge_tolerance_nm
+
+    rng = np.random.default_rng(7)
+    ratio = 1.0 + 1.0 / 1.5e5
+    planet = 498.0 * ratio ** np.arange(int(np.log(552 / 498) / np.log(ratio)) + 1)
+    first, last = np.searchsorted(planet, [499.0, 551.0])
+    pick = planet[np.linspace(first, last, 13).astype(int)]
+    sign = np.where(np.arange(13) % 2, 1.0, -1.0)
+    star_grid = pick + sign * np.asarray(offsets_tol) * merge_tolerance_nm(pick)
+    contrast = rng.uniform(0.05, 1.0, planet.size)
+    flux = rng.uniform(0.5, 2.0, 13)
+    star = Star(
+        wavelengths_nm=star_grid,
+        times_d=np.zeros(1),
+        flux_density_jy=flux[:, None],
+        interpolation_method="linear",
+    )
+    model = TimeSeriesPhysicalModel(planet, np.zeros(1), contrast[None, :, None])
+    system = _scene(star, (model,))
+    rule = Quadrature.build([Band(500.0, 550.0)], order=4)
+    resolution = Resolution.build(rule, *system.spectral_tables())
+    value = system.band_contrasts(rule, jnp.zeros(1), resolution=resolution)[0, 0, 0]
+    photons = np.asarray(
+        star.photon_flux_density(jnp.asarray(star_grid), jnp.zeros(1), dist_pc=DIST_PC)
+    ).reshape(-1)
+    edges = np.union1d(planet, star_grid)
+    edges = np.union1d(edges[(edges > 500.0) & (edges < 550.0)], [500.0, 550.0])
+    lo, hi = edges[:-1], edges[1:]
+    mid = 0.5 * (lo + hi)
+
+    def read(x):
+        return np.interp(x, planet, contrast), np.interp(x, star_grid, photons)
+
+    def simpson(f):
+        return np.sum((hi - lo) / 6 * (f(lo) + 4 * f(mid) + f(hi)))
+
+    num = simpson(lambda x: np.prod(read(x), axis=0))
+    den = simpson(lambda x: read(x)[1])
+    return float(value), num / den, system
+
+
+@pytest.mark.parametrize("aligned", [False, True], ids=["near", "aligned"])
+def test_product_integrates_near_but_distinct_knots_exactly(aligned):
+    """Fails if a planet knot and a star knot within the wavelength tolerance
+    are merged into one, which moves a cell edge and biases the band integral.
+
+    Truth is the independent Simpson integral on the union of both raw grids
+    (see the helper), 1e-12 relative in x64: the integrand is a quadratic per
+    cell and the sums run over about 15,000 cells, so rounding is near 1e-14.
+    The star knots sit 0.1 to 0.9 tolerances from planet knots; merging them
+    moves the edges by up to 1.1e-4 nm and the contrast by about 1e-6. The
+    aligned case, with star knots on planet knots, stays exact.
+    """
+    offsets = np.zeros(13) if aligned else np.linspace(0.1, 0.9, 13)
+    value, truth, system = _product_band_ratio_and_truth(offsets)
+    np.testing.assert_allclose(value, truth, rtol=1e-12, atol=0)
+    edges = system.spectral_tables()[-1].knots.values
+    assert edges.size >= 14000
+
+
+def test_knot_caches_hold_at_most_eight_grids():
+    """Fails if the grid caches are unbounded: after 20 distinct grids each
+    holds at most 8 entries (exact count; a float64 grid at R = 1e6 is 14 MB)."""
+    from hwoutils.leaves import HostGrid
+
+    from skyscapes._tables import knots_of, wavenumber_knots
+
+    knots_of.cache_clear()
+    wavenumber_knots.cache_clear()
+    for i in range(20):
+        knots_of(HostGrid([400.0 + i, 500.0 + i]))
+        wavenumber_knots(HostGrid([1.0e4 + i, 2.0e4 + i]))
+    assert knots_of.cache_info().currsize <= 8
+    assert wavenumber_knots.cache_info().currsize <= 8
