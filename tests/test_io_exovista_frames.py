@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from astropy.io import fits
-from hwoutils.constants import J2000_JD, Mearth2kg, Msun2kg, d2s, yr2s
+from hwoutils.constants import J2000_JD, G, Mearth2kg, Msun2kg, d2s, yr2s
 from orbix.system import FrameOrbit, enclosed_mu
 
 from skyscapes.io import from_exovista
@@ -102,8 +102,20 @@ def test_exovista_sky_positions_round_trip(known_orbit_file):
     np.testing.assert_allclose(positions[:, 0], expected, rtol=0, atol=tolerance)
 
 
+def _stored_a_e(path):
+    """Reference ellipse from the specific energy and momentum of the FITS rows."""
+    with fits.open(path) as hdul:
+        star, planet = hdul[-2:]
+        state = planet.data[0, 9:15].astype(float) - star.data[0, 9:15].astype(float)
+        mu = G * (star.header["MASS"] * Msun2kg + planet.header["M"] * Mearth2kg)
+    r, v = state[:3], state[3:] * (d2s / yr2s)
+    energy = np.dot(v, v) / 2 - mu / np.linalg.norm(r)
+    h = np.cross(r, v)
+    return -mu / (2 * energy), np.sqrt(1 + 2 * energy * np.dot(h, h) / mu**2)
+
+
 def test_exovista_recovers_known_elements(known_orbit_file):
-    """Preserve header a/e and recover i, Omega, omega, M from both states."""
+    """Recover the stored ellipse and the known sky orientation and anomaly."""
     path, expected = known_orbit_file
     orbit = from_exovista(path, load_disk=False).dynamics.orbits.to_classical()
     actual = np.array(
@@ -116,7 +128,7 @@ def test_exovista_recovers_known_elements(known_orbit_file):
             orbit["M0_rad"][0],
         ]
     )
-    np.testing.assert_allclose(actual[:2], expected[:2], rtol=1e-7)
+    np.testing.assert_allclose(actual[:2], _stored_a_e(path), rtol=1e-7)
     # Compare periodic angles modulo a full turn, including negative atan2 output.
     difference = np.angle(np.exp(1j * (actual[2:] - expected[2:])))
     np.testing.assert_allclose(difference, 0.0, atol=2e-6)
@@ -126,7 +138,7 @@ def test_exovista_recovers_known_elements(known_orbit_file):
 def test_exovista_recovers_known_elements_with_stellar_reflex(
     known_orbit_file, version
 ):
-    """Preserve header a/e; recover star-relative i, Omega, omega, M from states.
+    """Recover the stored ellipse and known angles in the presence of stellar reflex.
 
     Both layouts store float32 barycentric positions and velocities.
     """
@@ -165,7 +177,7 @@ def test_exovista_recovers_known_elements_with_stellar_reflex(
             orbit["M0_rad"][0],
         ]
     )
-    np.testing.assert_allclose(actual[:2], expected[:2], rtol=1e-7)
+    np.testing.assert_allclose(actual[:2], _stored_a_e(path), rtol=1e-7)
     # Float32 state storage limits angle recovery; wrap atan2's signed angles.
     difference = np.angle(np.exp(1j * (actual[2:] - expected[2:])))
     np.testing.assert_allclose(difference, 0.0, rtol=0, atol=2e-6)

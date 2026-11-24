@@ -11,6 +11,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+from hwoutils.constants import G, Msun2kg
 from hwoutils.conversions import contrast_to_delta_mag
 from hwoutils.epoch import Epoch
 from hwoutils.leaves import as_float_leaf
@@ -47,10 +48,32 @@ class _SceneEphemeris(Ephemeris):
     scene_planet_indices: Array
 
 
-def _known_planet_mass(mass_Msun):
+def _known_planet_mass(mass_Msun, *, xp=jnp):
     """Use zero mass for a nonfinite or nonpositive catalogue value."""
-    mass = jnp.asarray(mass_Msun)
-    return jnp.where(jnp.isfinite(mass) & (mass > 0), mass, 0.0)
+    mass = xp.asarray(mass_Msun)
+    return xp.where(xp.isfinite(mass) & (mass > 0), mass, 0.0)
+
+
+def _state_a_e(position_AU, velocity_AU_per_d, mu_AU3_per_d2):
+    """Return osculating semimajor axis [AU] and eccentricity in host float64.
+
+    Args:
+        position_AU: Star-relative positions [AU], with Cartesian components last.
+        velocity_AU_per_d: Star-relative velocities [AU/day], same shape.
+        mu_AU3_per_d2: Gravitational parameter G (M_star + m) [AU^3/day^2]
+            for each planet.
+
+    Returns:
+        Semimajor axes from vis-viva and norms of the eccentricity vectors.
+    """
+    r = np.asarray(position_AU, dtype=np.float64)
+    v = np.asarray(velocity_AU_per_d, dtype=np.float64)
+    mu = np.asarray(mu_AU3_per_d2, dtype=np.float64)
+    radius = np.linalg.norm(r, axis=-1)
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        a = 1.0 / (2.0 / radius - np.sum(v * v, axis=-1) / mu)
+        e_vec = np.cross(v, np.cross(r, v)) / mu[..., None] - r / radius[..., None]
+    return a, np.linalg.norm(e_vec, axis=-1)
 
 
 def _batch_method(method):
@@ -497,8 +520,170 @@ class Scene(eqx.Module):
                 )
             sizes = np.broadcast_to(np.asarray(a_AU), (count,))
             order = tuple(int(i) for i in np.argsort(sizes, kind="stable"))
-        else:
-            order = tuple(order)
+
+        def build_dynamics(star_body, planet_bodies, frame, indices):
+            elements = {
+                name: jnp.broadcast_to(jnp.asarray(value), (count,))[indices]
+                for name, value in dict(
+                    a_AU=a_AU,
+                    e=e,
+                    i_rad=i_rad,
+                    W_rad=W_rad,
+                    w_rad=w_rad,
+                    M0_rad=M0_rad,
+                    epoch_d=epoch_d,
+                ).items()
+            }
+            return DynamicsSystem.from_classical(
+                star_body, planet_bodies, frame, **elements
+            )
+
+        return cls._assemble(
+            star,
+            planets,
+            order=order,
+            count=count,
+            star_mass_Msun=star_mass_Msun,
+            planet_mass_Msun=planet_mass_Msun,
+            frame=SkyFrame(dist_pc, epoch, ra_deg, dec_deg),
+            valid=valid,
+            build_dynamics=build_dynamics,
+            disk=disk,
+            local_zodi=local_zodi,
+            midplane_inc_deg=midplane_inc_deg,
+            midplane_position_angle_deg=midplane_position_angle_deg,
+        )
+
+    @classmethod
+    def from_cartesian(
+        cls,
+        star,
+        planets,
+        *,
+        star_mass_Msun,
+        planet_mass_Msun,
+        dist_pc,
+        position_AU,
+        velocity_AU_per_d,
+        epoch_d=0.0,
+        epoch=_DEFAULT_EPOCH,
+        ra_deg=None,
+        dec_deg=None,
+        order=None,
+        valid=None,
+        disk=None,
+        midplane_inc_deg=0.0,
+        midplane_position_angle_deg=0.0,
+        local_zodi=None,
+    ):
+        """Build a Jacobi chain from one snapshot in the (east, north, away) frame.
+
+        Each planet must have a bound, nonradial state relative to the barycenter
+        of the bodies interior to it in chain order.
+
+        Args:
+            star: Host star.
+            planets: One Planet or a sequence in scene order.
+            star_mass_Msun: Stellar mass [solar masses].
+            planet_mass_Msun: Scalar or scene-order planet masses [solar masses].
+                Unknown or nonpositive masses contribute zero.
+            dist_pc: Distance to the system [pc].
+            position_AU: Positions [AU] in any common origin, shape (1 + K, 3).
+                Row zero is the star, followed by the K planets in scene order.
+            velocity_AU_per_d: Velocities [AU/day] in the same frame and row order.
+            epoch_d: Scalar snapshot time in days from the scene epoch.
+            epoch: Scene reference epoch.
+            ra_deg: Optional right ascension [deg, ICRS].
+            dec_deg: Optional declination [deg, ICRS], supplied with ra_deg.
+            order: Scene planet indices in inner-to-outer chain order. The default
+                stably sorts by bound star-relative osculating semimajor axis.
+                Traced states or masses require an explicit order.
+            valid: Boolean mask in scene order. Inactive slots carry zero mass.
+            disk: Optional extended source.
+            midplane_inc_deg: Disk midplane inclination [deg], zero face-on.
+            midplane_position_angle_deg: Disk major-axis angle north through east [deg].
+            local_zodi: Optional local zodiacal light model.
+
+        Returns:
+            The assembled scene with planets in their input order.
+
+        Raises:
+            ValueError: The state shapes or permutation are invalid, or automatic
+                ordering encounters traced inputs or an unbound star-relative state.
+        """
+        planets = (planets,) if isinstance(planets, Planet) else tuple(planets)
+        count = sum(p.n_planets for p in planets)
+        expected = (count + 1, 3)
+        if np.shape(position_AU) != expected or np.shape(velocity_AU_per_d) != expected:
+            raise ValueError(
+                f"Cartesian positions and velocities must have shape {expected}"
+            )
+        if order is None:
+            inputs = (position_AU, velocity_AU_per_d, star_mass_Msun, planet_mass_Msun)
+            if any(isinstance(x, jax.core.Tracer) for x in jax.tree.leaves(inputs)):
+                raise ValueError(
+                    "Traced Cartesian states or masses require an explicit order"
+                )
+            position = np.asarray(position_AU, dtype=np.float64)
+            velocity = np.asarray(velocity_AU_per_d, dtype=np.float64)
+            masses = _known_planet_mass(
+                np.asarray(planet_mass_Msun, dtype=np.float64), xp=np
+            )
+            mu = (G * Msun2kg) * (np.asarray(star_mass_Msun, dtype=np.float64) + masses)
+            a, _ = _state_a_e(
+                position[1:] - position[0], velocity[1:] - velocity[0], mu
+            )
+            if np.any(~np.isfinite(a) | (a <= 0)):
+                raise ValueError(
+                    "Automatic order requires bound star-relative states "
+                    "with finite positive semimajor axes"
+                )
+            order = np.argsort(a, kind="stable")
+
+        def build_dynamics(star_body, planet_bodies, frame, indices):
+            rows = jnp.concatenate((jnp.zeros(1, dtype=int), indices + 1))
+            return DynamicsSystem.from_cartesian(
+                star_body,
+                planet_bodies,
+                frame,
+                position_AU=jnp.asarray(position_AU)[rows],
+                velocity_AU_per_d=jnp.asarray(velocity_AU_per_d)[rows],
+                epoch_d=epoch_d,
+            )
+
+        return cls._assemble(
+            star,
+            planets,
+            order=order,
+            count=count,
+            star_mass_Msun=star_mass_Msun,
+            planet_mass_Msun=planet_mass_Msun,
+            frame=SkyFrame(dist_pc, epoch, ra_deg, dec_deg),
+            valid=valid,
+            build_dynamics=build_dynamics,
+            disk=disk,
+            local_zodi=local_zodi,
+            midplane_inc_deg=midplane_inc_deg,
+            midplane_position_angle_deg=midplane_position_angle_deg,
+        )
+
+    @classmethod
+    def _assemble(
+        cls,
+        star,
+        planets,
+        *,
+        order,
+        count,
+        star_mass_Msun,
+        planet_mass_Msun,
+        frame,
+        valid,
+        build_dynamics,
+        **appearance,
+    ):
+        """Apply a chain permutation and mass mask, retaining scene-order appearance."""
+        order = tuple(order)
         if (
             len(order) != count
             or any(not isinstance(i, Integral) or isinstance(i, bool) for i in order)
@@ -506,18 +691,6 @@ class Scene(eqx.Module):
         ):
             raise ValueError("order must be an integer permutation of the planets")
         indices = jnp.asarray(order, dtype=int)
-        elements = {
-            name: jnp.broadcast_to(jnp.asarray(value), (count,))[indices]
-            for name, value in dict(
-                a_AU=a_AU,
-                e=e,
-                i_rad=i_rad,
-                W_rad=W_rad,
-                w_rad=w_rad,
-                M0_rad=M0_rad,
-                epoch_d=epoch_d,
-            ).items()
-        }
         masses = jnp.broadcast_to(_known_planet_mass(planet_mass_Msun), (count,))
         if valid is not None:
             # Inactive slots carry no mass into the enclosed mass that sets the
@@ -527,23 +700,10 @@ class Scene(eqx.Module):
                 raise ValueError("valid must have shape (K_total,)")
             masses = jnp.where(valid_slots, masses, 0.0)
         masses = masses[indices]
-        dynamics = DynamicsSystem.from_classical(
-            Body(star_mass_Msun),
-            Body(masses),
-            SkyFrame(dist_pc, epoch, ra_deg, dec_deg),
-            **elements,
-        )
+        dynamics = build_dynamics(Body(star_mass_Msun), Body(masses), frame, indices)
         inverse = tuple(order.index(i) for i in range(count))
         return cls(
-            star,
-            planets,
-            dynamics,
-            disk,
-            midplane_inc_deg,
-            midplane_position_angle_deg,
-            local_zodi=local_zodi,
-            body_index=inverse,
-            valid=valid,
+            star, planets, dynamics, valid=valid, body_index=inverse, **appearance
         )
 
     @property

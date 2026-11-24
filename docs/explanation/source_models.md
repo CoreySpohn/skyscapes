@@ -11,8 +11,8 @@ beta satisfies `cos(beta) = z / r` for the star-relative vector
 (zero at full phase).
 `Scene.positions` returns rows 0 and 1 as (Delta alpha*, Delta Dec), where
 Delta alpha* = Delta RA cos Dec. ExoVista positions and velocities are
-converted from (west, north, toward) with `(-x, y, -z)` before deriving
-elements; the header midplane maps to astronomical `(90 + PA) % 360`.
+converted from (west, north, toward) with `(-x, y, -z)` before building
+the Jacobi chain. The header midplane maps to astronomical `(90 + PA) % 360`.
 
 ## The hierarchy
 
@@ -208,38 +208,50 @@ relying on an extension-count header alone.
 
 ### Orbital dynamics of loaded planets
 
-ExoVista writes barycentric states for the star and each planet. The
-importer converts them to the (east, north, away) chart and builds the
-shared `Scene.dynamics` Jacobi chain. Dynamics owns the stellar and
-planetary masses and the observer distance; these are available through
+At the first stored epoch, each selected planet reproduces its FITS position
+and velocity relative to the star, to rounding precision in the (east, north,
+away) frame. The Jacobi chain contains only the star and the selected planets.
+
+In a two-planet v2.6 file, extension 5 holds the star and extensions 6 and 7
+hold the planets. With the default scene epoch, day zero is the first stored
+epoch.
+
+```python notest
+import jax
+import numpy as np
+from astropy.io import fits
+
+from skyscapes.io import from_exovista
+
+jax.config.update("jax_enable_x64", True)
+path = "two_planets_v2.6.fits"
+scene = from_exovista(path, planet_indices=[0, 1], load_disk=False)
+with fits.open(path) as hdul:
+    states = np.stack([hdu.data[0, 9:15].astype(np.float64) for hdu in hdul[5:8]])
+relative = states[1:] - states[0]
+axes = np.array([-1, 1, -1])  # west/north/toward to east/north/away
+ephem = scene.ephemeris(np.array([0.0]))
+bodies = ephem.scene_planet_indices  # scene order on the ephemeris body axis
+r = ephem.position_AU[:, 0]
+v = ephem.velocity_AU_per_d[:, 0]
+np.testing.assert_allclose(r[bodies] - r[0], relative[:, :3] * axes, rtol=0, atol=1e-9)
+np.testing.assert_allclose(
+    v[bodies] - v[0], relative[:, 3:] * axes / 365.25, rtol=0, atol=1e-9
+)
+```
+
+Dynamics stores the stellar and planetary masses and the observer distance.
+These are available through
 `Scene.star_mass_Msun`, `Scene.planet_mass_Msun`, and `Scene.dist_pc`.
 `Scene.ephemeris(time_d)` propagates the shared system with Markley by
 default. Its barycentric states support star-relative planet geometry,
 stellar reflex motion, and radial velocity without separate orbit solves.
 
-Subtracting the star's barycentric motion also changes what phase-mode
-planets look like. With `planet_spectra="phase"` the contrast is a function
-of the star-planet-observer angle $\beta$ and the star-planet distance, both
-computed from the star-relative orbit. In the eight-planet solar-system
-demo scene the star sits 0.0077 AU from the barycenter, which is 0.55 to
-1.07 percent of the inner planets' orbital radii. Loading it with
-star-relative states instead of barycentric ones changes the phase-mode
-planet contrasts at 600 nm over the 367 FITS epochs by a median of 0.4 to
-4.4 percent for the six inner planets, by up to 30 percent at their 99th
-percentile (the innermost planet; 21 percent for the third, 13 percent for
-the fourth and 7 percent for the fifth) and up to 31 percent at the single
-worst epoch of the innermost planet, where the contrast curve is steepest. The two
-outer planets change by about 2e-5 relative. The size is set by the ratio of
-the star's offset to the planet's orbital radius, so it grows toward small
-orbits. The peak depends strongly on which epochs and planets are sampled,
-so the distribution is given. The numbers come from loading the same file twice, once as written and once with
-the star's rows zeroed so that the barycentric states are used as relative
-states, and taking the relative difference of `Scene.contrasts`.
-`tools/star_reflex_contrast.py` reproduces them and prints the median,
-99th-percentile and maximum change for each planet; run
-`python tools/star_reflex_contrast.py [wavelength_nm]` from the repository
-root. Time-mode contrasts are unchanged because they are read from the FITS
-table directly.
+With `planet_spectra="phase"`, the importer evaluates the shared ephemeris
+at each planet's recorded times. It uses the star-relative positions to
+assign a star-planet-observer angle to each spectrum and interpolates the
+contrast onto a regular phase grid. With `planet_spectra="time"`, the
+contrasts retain their FITS timestamps.
 
 The stellar angular diameter is $2 R_\star / d$, computed from the
 header's `RSTAR` (solar radii) and `DIST` (pc). ExoVista's `ANGDIAM`
