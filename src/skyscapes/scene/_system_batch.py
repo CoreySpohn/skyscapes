@@ -159,7 +159,7 @@ def _check_star_knots(scenes):
                 _check_grids(f"planet models of group {group}", index, first, other)
 
 
-def from_scenes(cls, scenes, *, capacity=None, batch_shape=None, device="cpu"):
+def from_scenes(cls, scenes, *, capacity=None, batch_shape=None, device=None):
     """Pack unbatched scenes, sorted by semi-major axis.
 
     Args:
@@ -170,10 +170,10 @@ def from_scenes(cls, scenes, *, capacity=None, batch_shape=None, device="cpu"):
             count among the scenes; extra slots are padding.
         batch_shape: Leading batch axes of the result. None uses
             ``(len(scenes),)``; its product must equal ``len(scenes)``.
-        device: Where the packed leaves live: ``"cpu"`` (the default) keeps
-            the batch on the CPU device until a computation uses it, a JAX
-            device or sharding places it there, and None uses the default
-            device.
+        device: Where the packed leaves live: None (the default) uses the
+            JAX default device and leaves the arrays uncommitted; ``"cpu"``
+            commits the batch to the CPU device; a JAX device or sharding
+            commits it there.
 
     Returns:
         A batched scene whose leaves are ``jax.Array`` and carry
@@ -292,7 +292,7 @@ def from_scenes(cls, scenes, *, capacity=None, batch_shape=None, device="cpu"):
     return canonical(stacked, device=_device(device))
 
 
-def to_scenes(system, *, device="cpu"):
+def to_scenes(system, *, device=None):
     """Unpack scenes, discarding padding and restoring source leaf order.
 
     Args:
@@ -389,6 +389,15 @@ def to_table(system):
     return table
 
 
+def _integral_layout(layout):
+    """Cast a stored source layout to int32; a table written as floats is exact."""
+    layout = np.asarray(layout)
+    if not np.issubdtype(layout.dtype, np.integer):
+        if not np.all(layout == np.round(layout)):
+            raise ValueError("_source_layout must hold integer values")
+    return layout.astype(np.int32)
+
+
 def _table_leaf(table, path, template_leaf):
     """Read one leaf; a table written before ``flux_scale`` existed reads as ones."""
     key = jax.tree_util.keystr(path).lstrip(".")
@@ -396,10 +405,13 @@ def _table_leaf(table, path, template_leaf):
         radius = key.replace("flux_scale", "Rp_Rearth")
         shape = np.shape(table[radius]) if radius in table else np.shape(template_leaf)
         return np.ones(shape)
-    return np.asarray(table[key]).copy()
+    leaf = np.asarray(table[key]).copy()
+    if key == "_source_layout":
+        leaf = _integral_layout(leaf)
+    return leaf
 
 
-def from_table(cls, table, *, template, device="cpu"):
+def from_table(cls, table, *, template, device=None):
     """Restore leaf arrays using a template for model classes and static fields.
 
     Args:
@@ -431,7 +443,7 @@ def from_table(cls, table, *, template, device="cpu"):
     skeleton = eqx.tree_at(
         lambda s: s._source_layout,
         skeleton,
-        np.asarray(table["_source_layout"]).astype(np.int32)
+        _integral_layout(table["_source_layout"])
         if "_source_layout" in table
         else None,
         is_leaf=lambda x: x is None,

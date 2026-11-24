@@ -296,6 +296,41 @@ def _assemble_species(
     return tuple(species)
 
 
+def _check_species_planet_axis(model) -> None:
+    """Refuse a species profile leaf whose leading axis is not the planet axis.
+
+    A shared array (one value per atmospheric layer, say) stored where a
+    per-planet array is required would be sliced as if its layers were
+    planets, so it is refused here, naming the layer count when it matches.
+
+    Args:
+        model: A model with ``log_gravity_cgs``, ``rt_engine`` and ``species``.
+
+    Raises:
+        ValueError: If a profile leaf has a leading length other than the
+            planet count.
+    """
+    shape = jnp.shape(model.log_gravity_cgs)
+    n_planets = shape[0] if shape else None
+    pressure = getattr(model.rt_engine, "pressure", None)
+    n_layers = None if pressure is None else jnp.shape(pressure)[0]
+    profiles = [] if n_planets is None else [s.profile for s in model.species]
+    for species, profile in zip(model.species, profiles, strict=False):
+        for leaf in jax.tree.leaves(profile):
+            leaf_shape = jnp.shape(leaf)
+            if leaf_shape and leaf_shape[0] != n_planets:
+                cause = (
+                    f" (its length is the layer count, {n_layers})"
+                    if leaf_shape[0] == n_layers
+                    else ""
+                )
+                raise ValueError(
+                    f"the {species.name} profile has an array of shape "
+                    f"{leaf_shape}{cause}, but a per-planet array of "
+                    f"length {n_planets} is required"
+                )
+
+
 def _species_at_planet(
     species: tuple[MolecularSpecies, ...], k: int
 ) -> tuple[MolecularSpecies, ...]:
@@ -453,31 +488,8 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
     _knot_method: ClassVar[str] = "linear-in-wavenumber"
 
     def __check_init__(self):
-        """Refuse a species profile leaf whose leading axis is not the planet axis.
-
-        A shared array (one value per atmospheric layer, say) stored where a
-        per-planet array is required would be sliced as if its layers were
-        planets, so it is refused here, naming the layer count when it matches.
-        """
-        shape = jnp.shape(self.log_gravity_cgs)
-        n_planets = shape[0] if shape else None
-        pressure = getattr(self.rt_engine, "pressure", None)
-        n_layers = None if pressure is None else jnp.shape(pressure)[0]
-        profiles = [] if n_planets is None else [s.profile for s in self.species]
-        for species, profile in zip(self.species, profiles, strict=False):
-            for leaf in jax.tree.leaves(profile):
-                leaf_shape = jnp.shape(leaf)
-                if leaf_shape and leaf_shape[0] != n_planets:
-                    cause = (
-                        f" (its length is the layer count, {n_layers})"
-                        if leaf_shape[0] == n_layers
-                        else ""
-                    )
-                    raise ValueError(
-                        f"the {species.name} profile has an array of shape "
-                        f"{leaf_shape}{cause}, but a per-planet array of "
-                        f"length {n_planets} is required"
-                    )
+        """Refuse a species profile leaf whose leading axis is not the planet axis."""
+        _check_species_planet_axis(self)
 
     @property
     def knots(self) -> Knots:

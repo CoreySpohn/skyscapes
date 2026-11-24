@@ -265,3 +265,36 @@ def test_repeated_temperature_only_replaces_covered_frequencies(tmp_path):
         rtol=1e-12,
         atol=0,
     )
+
+
+def test_emission_model_refuses_a_shared_layer_array(constant_engines):
+    """Fails if a layer-length array is accepted where a per-planet one is required.
+
+    Truth: a construction check with no tolerance. With two planets and three
+    layers, a length-3 profile would be sliced as if its layers were planets;
+    scalar-per-planet and (planets, n) profiles are accepted.
+    """
+    kwargs = dict(
+        engines=constant_engines,
+        temperature_coefficients=jnp.array([[250.0], [250.0]]),
+        log_gravity_cgs=jnp.array([3.0, 3.0]),
+        cia_vmr={"N2": 0.78, "O2": 0.0},
+    )
+
+    def species(log_mmr):
+        return (
+            MolecularSpecies(
+                profile=ConstantMmr(log_mmr),
+                name="O2",
+                molmass=32.0,
+                opa=None,
+                rayleigh_xs=jnp.zeros(20),
+            ),
+        )
+
+    for ok in (jnp.array(-1.0), jnp.full((2,), -1.0), jnp.full((2, 5), -1.0)):
+        ExoJaxEmissionModel.from_engines(species=species(ok), **kwargs)
+    with pytest.raises(ValueError, match="layer count"):
+        ExoJaxEmissionModel.from_engines(
+            species=species(jnp.full((3,), -1.0)), **kwargs
+        )

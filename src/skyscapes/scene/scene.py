@@ -325,7 +325,7 @@ class Scene(eqx.Module):
         return self.dynamics.planets.mass_Msun.shape[-1]
 
     @classmethod
-    def from_scenes(cls, scenes, *, capacity=None, batch_shape=None, device="cpu"):
+    def from_scenes(cls, scenes, *, capacity=None, batch_shape=None, device=None):
         """Pack same-class scenes into one batch, sorted inner to outer.
 
         The default batch shape is (len(scenes),); capacity defaults to the
@@ -338,9 +338,9 @@ class Scene(eqx.Module):
             scenes: Unbatched scenes to pack.
             capacity: Planet slots per scene; None uses the largest valid count.
             batch_shape: Leading batch axes; None uses ``(len(scenes),)``.
-            device: ``"cpu"`` (the default) keeps the batch on the CPU device
-                until a computation uses it; a JAX device or sharding places
-                it there; None uses the default device.
+            device: None (the default) uses the JAX default device and leaves
+                the arrays uncommitted; ``"cpu"`` commits the batch to the CPU
+                device; a JAX device or sharding commits it there.
 
         Returns:
             A batched scene whose leaves are ``jax.Array`` in the active dtype.
@@ -349,7 +349,7 @@ class Scene(eqx.Module):
             cls, scenes, capacity=capacity, batch_shape=batch_shape, device=device
         )
 
-    def to_scenes(self, *, device="cpu"):
+    def to_scenes(self, *, device=None):
         """Return unpadded scenes in row-major batch order.
 
         Args:
@@ -372,7 +372,7 @@ class Scene(eqx.Module):
         return _system_batch.to_table(self)
 
     @classmethod
-    def from_table(cls, table, *, template, device="cpu"):
+    def from_table(cls, table, *, template, device=None):
         """Restore a table; template supplies model classes and static metadata.
 
         Args:

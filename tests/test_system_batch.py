@@ -35,6 +35,18 @@ def _equal(a, b):
         np.testing.assert_array_equal(x, y)
 
 
+def _bits(x):
+    """The array as unsigned integers of its width, so -0.0 and NaN payloads count."""
+    x = np.asarray(x)
+    return x.view(f"u{x.dtype.itemsize}") if x.dtype != bool else x
+
+
+def _same_bits(a, b):
+    for x, y in zip(jax.tree.leaves(a), jax.tree.leaves(b), strict=True):
+        assert np.asarray(x).dtype == np.asarray(y).dtype
+        np.testing.assert_array_equal(_bits(x), _bits(y))
+
+
 def test_round_trips():
     """Fails if host packing loses leaves; exact storage has zero rounding budget."""
     scenes = [_scene(k) for k in (0, 1, 3, 6)]
@@ -60,7 +72,7 @@ def test_round_trips():
     scenes.extend((split, empty))
     batch = Scene.from_scenes(scenes)
     for actual, expected in zip(batch.to_scenes(), scenes, strict=True):
-        _equal(actual, expected)
+        _same_bits(actual, canonical(expected))
         assert actual.body_index == expected.body_index
         restored = Scene.from_table(expected.to_table(), template=expected)
         _equal(restored, expected)
@@ -90,13 +102,16 @@ def test_batch_leaves_are_canonical():
 
     Truth: an unpacked scene equals its input leaf for leaf (integers and
     booleans exactly, floats bitwise, dtypes identical, since the packed
-    values are the inputs' own); the leaf rule and the tree structure are
-    properties, so the tolerance is zero. The inputs are canonical, so the
-    trace count compares like with like.
+    values are the inputs' own, compared as bit patterns); the leaf rule and
+    the tree structure are properties, so the tolerance is zero. The inputs
+    are made canonical first because live scenes still hold Python-number
+    leaves (a separate change), so the structure and trace count compare like
+    with like.
     """
     scenes = [canonical(_scene(k)) for k in (0, 1, 3, 6)]
     batch = Scene.from_scenes(scenes)
     assert check_tree(batch) == ()
+    assert not any(x.committed for x in jax.tree.leaves(batch))
     assert jnp.issubdtype(batch._source_layout.dtype, jnp.integer)
     assert batch.valid.dtype == bool
     traces = []
@@ -109,11 +124,7 @@ def test_batch_leaves_are_canonical():
     for actual, expected in zip(batch.to_scenes(), scenes, strict=True):
         assert check_tree(actual) == ()
         assert jax.tree.structure(actual) == jax.tree.structure(expected)
-        for x, y in zip(
-            jax.tree.leaves(actual), jax.tree.leaves(expected), strict=True
-        ):
-            assert x.dtype == y.dtype
-            np.testing.assert_array_equal(x, y)
+        _same_bits(actual, expected)
         total(actual)
         total(expected)
     assert len(traces) == 4
@@ -125,6 +136,36 @@ def test_batch_leaves_are_canonical():
         for scene in placed.to_scenes(device=cpu)
         for x in jax.tree.leaves(scene)
     )
+
+
+def test_x32_round_trip_and_old_float_layout_tables():
+    """Fails if the x32 round trip changes a bit or a layout loses its integer kind.
+
+    Truth: packing and unpacking move the inputs' own values, so the scenes
+    equal the canonical inputs as bit patterns (zero tolerance), with an
+    int32 layout and no leaf-rule violation. A table written before the layout
+    became an integer array holds it as floats; casting is exact for integral
+    values, and a non-integral value is refused, under both precisions. The
+    suite enables x64, so this is the only x32 batch test.
+    """
+    for x64 in (False, True):
+        with jax.enable_x64(x64):
+            scenes = [canonical(_scene(k)) for k in (1, 3)]
+            batch = Scene.from_scenes(scenes)
+            assert batch._source_layout.dtype == np.int32
+            assert check_tree(batch) == ()
+            for actual, expected in zip(batch.to_scenes(), scenes, strict=True):
+                assert check_tree(actual) == ()
+                _same_bits(actual, expected)
+            table = batch.to_table()
+            old = dict(table, _source_layout=table["_source_layout"].astype(float))
+            restored = Scene.from_table(old, template=scenes[1])
+            assert restored._source_layout.dtype == np.int32
+            assert check_tree(restored) == ()
+            _same_bits(restored, batch)
+            bad = dict(old, _source_layout=old["_source_layout"] + 0.5)
+            with pytest.raises(ValueError, match="integer"):
+                Scene.from_table(bad, template=scenes[1])
 
 
 def _read(system, times, ephemeris=None, resolution=None):

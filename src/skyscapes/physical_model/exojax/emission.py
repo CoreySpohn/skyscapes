@@ -75,7 +75,7 @@ from .components import (
     build_species_prebuilt,
 )
 from .components.mmr_profile import AbstractMmrProfile
-from .physical_model import _species_at_planet
+from .physical_model import _check_species_planet_axis, _species_at_planet
 
 # Optical depth of the opaque ground layer; exp(-tau / mu) underflows to
 # exactly zero for every quadrature angle.
@@ -273,6 +273,10 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
 
     # The spectrum is linear in wavenumber between grid points.
     _knot_method: ClassVar[str] = "linear-in-wavenumber"
+
+    def __check_init__(self):
+        """Refuse a species profile leaf whose leading axis is not the planet axis."""
+        _check_species_planet_axis(self)
 
     @property
     def knots(self) -> Knots:
