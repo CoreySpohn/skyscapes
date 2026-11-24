@@ -804,17 +804,45 @@ def test_product_integrates_near_but_distinct_knots_exactly(aligned):
     assert edges.size >= 14000
 
 
-def test_knot_caches_hold_at_most_eight_grids():
-    """Fails if the grid caches are unbounded: after 20 distinct grids each
-    holds at most 8 entries (exact count; a float64 grid at R = 1e6 is 14 MB)."""
+def test_knot_caches_hold_at_most_32_grids():
+    """Fails if the grid caches are unbounded: after 40 distinct grids each
+    holds at most 32 entries (exact count; a float64 grid at R = 1e6 is 14 MB)."""
     from hwoutils.leaves import HostGrid
 
     from skyscapes._tables import knots_of, wavenumber_knots
 
     knots_of.cache_clear()
     wavenumber_knots.cache_clear()
-    for i in range(20):
+    for i in range(40):
         knots_of(HostGrid([400.0 + i, 500.0 + i]))
         wavenumber_knots(HostGrid([1.0e4 + i, 2.0e4 + i]))
-    assert knots_of.cache_info().currsize <= 8
-    assert wavenumber_knots.cache_info().currsize <= 8
+    assert knots_of.cache_info().currsize <= 32
+    assert wavenumber_knots.cache_info().currsize <= 32
+
+
+def test_batch_knots_of_an_invalid_table_raise_naming_it():
+    """Exact basis: the table's own error is kept, not read as 'no knots'.
+
+    A one-wavelength time series and a stand-in table with invalid knots raise
+    ``ValueError`` naming the class; a smooth source with no ``knots`` gives
+    None. Fails if the error is swallowed into None.
+    """
+    from skyscapes.physical_model import TimeSeriesPhysicalModel
+    from skyscapes.scene._system_batch import _knots
+
+    series = TimeSeriesPhysicalModel(
+        wavelengths_nm=jnp.array([500.0]),
+        times_d=jnp.array([0.0, 1.0]),
+        contrast_grid=jnp.ones((1, 1, 2)),
+    )
+    with pytest.raises(ValueError, match="TimeSeriesPhysicalModel"):
+        _knots(series)
+
+    class Broken:
+        @property
+        def knots(self):
+            raise ValueError("knots out of order")
+
+    with pytest.raises(ValueError, match="Broken: knots out of order"):
+        _knots(Broken())
+    assert _knots(object()) is None

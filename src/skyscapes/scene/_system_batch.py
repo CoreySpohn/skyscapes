@@ -96,11 +96,17 @@ def _planet_group(system, model_template):
 
 
 def _knots(source):
-    """The knots of a source, or None when it is smooth or cannot give any."""
+    """The knots of a source, or None when it is smooth.
+
+    A table whose own knots are invalid raises, naming the table.
+    """
     try:
         return getattr(source, "knots", None)
-    except ValueError:
-        return None
+    except ValueError as error:
+        name = type(source).__name__
+        if name in str(error):
+            raise
+        raise ValueError(f"{name}: {error}") from error
 
 
 def _check_grids(label, index, first, knots):

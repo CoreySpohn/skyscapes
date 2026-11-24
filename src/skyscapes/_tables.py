@@ -17,7 +17,13 @@ import functools
 import numpy as np
 from hwoutils.conversions import wavenumber_cm_to_nm
 from hwoutils.leaves import HostGrid
-from optixstuff.spectral import Knots, SpectralTable, digest_knots, same_wavelength
+from optixstuff.spectral import (
+    Knots,
+    ProductEdges,
+    SpectralTable,
+    digest_knots,
+    same_wavelength,
+)
 
 SMOOTH_DEGREE = 3
 """Degree declared for a smooth, non-polynomial factor between two knots.
@@ -41,7 +47,9 @@ def as_host_grid(values) -> HostGrid:
     return values if isinstance(values, HostGrid) else HostGrid(values)
 
 
-@functools.lru_cache(maxsize=8)
+# Keyed by the grid's digest; an entry is one knot array, so 32 entries stay
+# far below a megabyte per thousand knots.
+@functools.lru_cache(maxsize=32)
 def knots_of(grid: HostGrid) -> Knots:
     """Knots of a static host grid in nm, cached on its digest.
 
@@ -54,7 +62,7 @@ def knots_of(grid: HostGrid) -> Knots:
     return Knots(grid.values)
 
 
-@functools.lru_cache(maxsize=8)
+@functools.lru_cache(maxsize=32)
 def wavenumber_knots(nu_grid: HostGrid) -> Knots:
     """Knots [nm] of a static wavenumber grid [cm^-1], sorted, cached.
 
@@ -127,14 +135,14 @@ class ProductTable:
     edge is a piece edge.
 
     Attributes:
-        knots: The cell edges, a static ``HostGrid`` (not ``Knots``: edges
+        knots: The cell edges, static ``ProductEdges`` (not ``Knots``: edges
             closer than the tolerance are allowed).
         knot_digest: Digest of the component tables under
             :func:`product_method`, which names both component digests.
         spectral_degree: Declared degree of the product between knots.
     """
 
-    knots: HostGrid
+    knots: ProductEdges
     knot_digest: str
     spectral_degree: int
 
@@ -161,7 +169,7 @@ class ProductTable:
             )
             edges = merged[keep]
         self.spectral_degree = model.spectral_degree + star_degree
-        self.knots = HostGrid(edges)
+        self.knots = ProductEdges(edges)
         method = product_method(model.knot_digest, star_digest, self.spectral_degree)
         self.knot_digest = digest_knots(self.knots, method)
 
