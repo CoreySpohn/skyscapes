@@ -47,8 +47,8 @@ def as_host_grid(values) -> HostGrid:
     return values if isinstance(values, HostGrid) else HostGrid(values)
 
 
-# Keyed by the grid's digest; an entry is one knot array, so 32 entries stay
-# far below a megabyte per thousand knots.
+# Keyed by the grid's digest; an entry is one knot array, about 14 MB per grid at
+# R = 1e6, so 32 entries hold about 450 MB in the extreme case.
 @functools.lru_cache(maxsize=32)
 def knots_of(grid: HostGrid) -> Knots:
     """Knots of a static host grid in nm, cached on its digest.
