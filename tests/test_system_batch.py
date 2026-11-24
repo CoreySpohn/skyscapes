@@ -36,15 +36,16 @@ def _equal(a, b):
 
 
 def _bits(x):
-    """The array as unsigned integers of its width, so -0.0 and NaN payloads count."""
-    x = np.asarray(x)
-    return x.view(f"u{x.dtype.itemsize}") if x.dtype != bool else x
+    """The array's raw bytes, so -0.0 and NaN payloads count, for any dtype."""
+    x = np.ascontiguousarray(x)
+    return x.dtype.str, x.shape, x.view(np.uint8)
 
 
 def _same_bits(a, b):
     for x, y in zip(jax.tree.leaves(a), jax.tree.leaves(b), strict=True):
-        assert np.asarray(x).dtype == np.asarray(y).dtype
-        np.testing.assert_array_equal(_bits(x), _bits(y))
+        (xd, xs, xb), (yd, ys, yb) = _bits(x), _bits(y)
+        assert (xd, xs) == (yd, ys)
+        np.testing.assert_array_equal(xb, yb)
 
 
 def test_round_trips():
@@ -145,7 +146,8 @@ def test_x32_round_trip_and_old_float_layout_tables():
     equal the canonical inputs as bit patterns (zero tolerance), with an
     int32 layout and no leaf-rule violation. A table written before the layout
     became an integer array holds it as floats; casting is exact for integral
-    values, and a non-integral value is refused, under both precisions. The
+    values; a non-integral, non-finite or out-of-range value (below the -1
+    sentinel or beyond int32) is refused, under both precisions. The
     suite enables x64, so this is the only x32 batch test.
     """
     for x64 in (False, True):
@@ -163,9 +165,17 @@ def test_x32_round_trip_and_old_float_layout_tables():
             assert restored._source_layout.dtype == np.int32
             assert check_tree(restored) == ()
             _same_bits(restored, batch)
-            bad = dict(old, _source_layout=old["_source_layout"] + 0.5)
-            with pytest.raises(ValueError, match="integer"):
-                Scene.from_table(bad, template=scenes[1])
+            layout = old["_source_layout"]
+            for value, match in (
+                (layout + 0.5, "integer"),
+                (np.where(layout < 0, np.inf, layout), "integer"),
+                (np.where(layout < 0, np.nan, layout), "integer"),
+                (np.where(layout < 0, 2.0**31, layout), r"\[-1"),
+                (np.where(layout < 0, -2, layout).astype(np.int64), r"\[-1"),
+            ):
+                bad = dict(old, _source_layout=value)
+                with pytest.raises(ValueError, match=match):
+                    Scene.from_table(bad, template=scenes[1])
 
 
 def _read(system, times, ephemeris=None, resolution=None):

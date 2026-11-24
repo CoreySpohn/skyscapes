@@ -390,11 +390,23 @@ def to_table(system):
 
 
 def _integral_layout(layout):
-    """Cast a stored source layout to int32; a table written as floats is exact."""
+    """Cast a stored source layout to int32; a table written as floats is exact.
+
+    Entries are source indices (0 or more) or the -1 sentinel; anything else,
+    including non-finite or non-integral values, is refused rather than cast.
+    """
     layout = np.asarray(layout)
-    if not np.issubdtype(layout.dtype, np.integer):
-        if not np.all(layout == np.round(layout)):
-            raise ValueError("_source_layout must hold integer values")
+    if layout.dtype == bool or not (
+        np.issubdtype(layout.dtype, np.integer)
+        or np.issubdtype(layout.dtype, np.floating)
+    ):
+        raise ValueError("_source_layout must hold integer values")
+    if np.issubdtype(layout.dtype, np.floating) and not np.all(
+        np.isfinite(layout) & (layout == np.round(layout))
+    ):
+        raise ValueError("_source_layout must hold integer values")
+    if layout.size and (layout.min() < -1 or layout.max() > np.iinfo(np.int32).max):
+        raise ValueError("_source_layout values must lie in [-1, 2**31 - 1]")
     return layout.astype(np.int32)
 
 
