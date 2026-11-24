@@ -1,5 +1,6 @@
 """Imported midplane angles agree with the independently rendered FITS image."""
 
+import equinox as eqx
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,6 +22,33 @@ def _major_axis_deg(x, y, weights):
     yy = np.average(y * y, weights=weights)
     xy = np.average(x * y, weights=weights)
     return np.degrees(0.5 * np.arctan2(2 * xy, xx - yy)) % 180
+
+
+def _ring(system, wavelength_nm):
+    """The suite's two-power-law Grater ring sized to the demo cube's field."""
+    loaded = system.disk
+    ny, nx = loaded.native_grid.shape
+    # The suite's two-power-law Grater ring, sized to fit this field so
+    # clipping does not set its moments. Only orientation is compared;
+    # this is not a fit to ExoVista's density or scattering function.
+    radius_AU = 0.25 * min(nx, ny) * loaded.native_grid.step * system.dist_pc
+    return GraterDisk(
+        sma_AU=jnp.asarray(radius_AU),
+        alpha_in=jnp.array(5.0),
+        alpha_out=jnp.array(-5.0),
+        ksi0_AU=jnp.asarray(0.02 * radius_AU),
+        gamma=jnp.array(2.0),
+        beta=jnp.array(1.0),
+        rmin_AU=jnp.asarray(0.1 * radius_AU),
+        rmax_AU=jnp.asarray(1.8 * radius_AU),
+        wavelengths_nm=jnp.array([wavelength_nm, loaded.wavelengths_nm[-1]]),
+        g_HG_grid=jnp.array([0.3, 0.3]),
+        Ag_grid=jnp.array([0.5, 0.5]),
+        amplitude=DensityDust(
+            level=1.0, profile_id="grater-1999", calibration_id="unit-profile"
+        ),
+        n_slices_los=31,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -47,27 +75,7 @@ def midplane_measurements(fits_fixture):
         dtype=float,
     )
     ny, nx = reference.shape
-    # The suite's two-power-law Grater ring, sized to fit this field so
-    # clipping does not set its moments. Only orientation is compared;
-    # this is not a fit to ExoVista's density or scattering function.
-    radius_AU = 0.25 * min(nx, ny) * loaded.native_grid.step * system.dist_pc
-    parametric = GraterDisk(
-        sma_AU=jnp.asarray(radius_AU),
-        alpha_in=jnp.array(5.0),
-        alpha_out=jnp.array(-5.0),
-        ksi0_AU=jnp.asarray(0.02 * radius_AU),
-        gamma=jnp.array(2.0),
-        beta=jnp.array(1.0),
-        rmin_AU=jnp.asarray(0.1 * radius_AU),
-        rmax_AU=jnp.asarray(1.8 * radius_AU),
-        wavelengths_nm=jnp.array([wavelength_nm, loaded.wavelengths_nm[-1]]),
-        g_HG_grid=jnp.array([0.3, 0.3]),
-        Ag_grid=jnp.array([0.5, 0.5]),
-        amplitude=DensityDust(
-            level=1.0, profile_id="grater-1999", calibration_id="unit-profile"
-        ),
-        n_slices_los=31,
-    )
+    parametric = _ring(system, wavelength_nm)
     rendered = np.asarray(
         parametric.photon_radiance(
             *args,
@@ -144,6 +152,36 @@ def test_exovista_midplane_matches_image(midplane_measurements, measurement):
             f"{measurement}: FITS={reference:.3f} deg, actual={actual:.3f} deg, "
             f"difference={difference:.3f} deg"
         )
+
+
+def test_the_loaded_scene_carries_the_header_angles_into_a_disk_read(fits_fixture):
+    """The FITS (I, PA) = (60, 30) loads as scene (60, 120) and orients a disk read.
+
+    Fails if the loader drops the header angles: the stored cube already holds
+    the projected geometry, so only a parametric disk read through the loaded
+    scene sees them. The expected image is the same disk read directly with the
+    angles typed here.
+    """
+    system = from_exovista(fits_fixture)
+    assert float(system.midplane_inc_deg) == pytest.approx(60.0, abs=1e-9)
+    assert float(system.midplane_position_angle_deg) == pytest.approx(120.0, abs=1e-9)
+    wavelength_nm = jnp.asarray(550.0)
+    ring = _ring(system, wavelength_nm)
+    grid = system.disk.native_grid
+    time_d = system.epoch.days(jd=2451545.0)
+    scene_image = eqx.tree_at(lambda s: s.disk, system, ring).photon_radiance(
+        wavelength_nm, time_d, grid=grid
+    )
+    direct = ring.photon_radiance(
+        wavelength_nm,
+        time_d,
+        star=system.star,
+        grid=grid,
+        dist_pc=system.dist_pc,
+        inclination_deg=60.0,
+        position_angle_deg=120.0,
+    )
+    np.testing.assert_array_equal(scene_image.data, direct.data)
 
 
 @pytest.mark.parametrize("inc_deg", [30.0, 60.0, 120.0, 150.0])
