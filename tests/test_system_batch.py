@@ -37,8 +37,8 @@ def _equal(a, b):
 
 def _bits(x):
     """The array's raw bytes, so -0.0 and NaN payloads count, for any dtype."""
-    x = np.ascontiguousarray(x)
-    return x.dtype.str, x.shape, x.view(np.uint8)
+    x = np.asarray(x)
+    return x.dtype.str, x.shape, np.ascontiguousarray(x).view(np.uint8)
 
 
 def _same_bits(a, b):
@@ -172,6 +172,7 @@ def test_x32_round_trip_and_old_float_layout_tables():
                 (np.where(layout < 0, np.nan, layout), "integer"),
                 (np.where(layout < 0, 2.0**31, layout), r"\[-1"),
                 (np.where(layout < 0, -2, layout).astype(np.int64), r"\[-1"),
+                (layout >= 0, "integer"),
             ):
                 bad = dict(old, _source_layout=value)
                 with pytest.raises(ValueError, match=match):

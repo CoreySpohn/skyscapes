@@ -295,8 +295,9 @@ unpacks it. Every leaf of the result is a `jax.Array` in the active dtype
 (integers and booleans keep their kind). The `device` argument of both
 (and of `from_table`) says where those leaves live. The default, `None`,
 uses the JAX default device and leaves the arrays uncommitted, so a
-computation places them as it needs (an unbatched scene passed through
-`to_scenes` keeps whatever placement its arrays already had). `device="cpu"` commits the batch to the
+computation places them as it needs (a scene that was never packed comes
+back from `to_scenes` unchanged, with its arrays' own placement).
+`device="cpu"` commits the batch to the
 CPU device: a jitted computation follows its committed arguments, so it runs
 on the CPU, or raises when it also receives arrays committed to an
 accelerator. Pass a JAX device or sharding to commit the batch there.
