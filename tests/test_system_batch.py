@@ -1,15 +1,20 @@
 """Fixed-capacity scene batches, including inert padding and traced readers."""
 
+import dataclasses
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from hwoutils.constants import GM_SUN_AU3_PER_D2
 from hwoutils.epoch import Epoch
 from hwoutils.leaves import canonical, check_tree
 from optixstuff.grids import PixelGrid, SkyOrientation
 from optixstuff.spectral import Band, Quadrature, Resolution
 
+from skyscapes import AYOZodi
+from skyscapes.disk import AYOExozodi
 from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.scene import FlatStar, Planet, Scene
 
@@ -510,3 +515,114 @@ def test_flux_scale_survives_packing_and_tables_without_it_read_as_ones():
     assert float(back.star.flux_scale) == 1.0
     np.testing.assert_array_equal(back.planets[0].flux_scale, [1.0])
     np.testing.assert_array_equal(back.planets[1].flux_scale, [1.0, 1.0])
+
+
+def _full_scene(valid=None):
+    """Two planets with a disk, a local zodi and a tilted disk midplane."""
+    return Scene.from_classical(
+        FlatStar(1e9),
+        (Planet(jnp.ones(2), LambertianPhysicalModel(jnp.array([0.3, 0.4]))),),
+        star_mass_Msun=1.0,
+        planet_mass_Msun=jnp.array([0.001, 0.002]),
+        dist_pc=10.0,
+        a_AU=jnp.array([1.0, 2.0]),
+        e=0.08,
+        i_rad=0.4,
+        W_rad=0.3,
+        w_rad=0.2,
+        M0_rad=0.7,
+        valid=valid,
+        disk=AYOExozodi(level_zodis=3.0),
+        midplane_inc_deg=35.0,
+        midplane_position_angle_deg=110.0,
+        local_zodi=AYOZodi(surface_brightness_mag_arcsec2=21.5),
+    )
+
+
+def _source_reads(scene, times):
+    east, north = jnp.array([0.03, -0.05]), jnp.array([0.04, 0.02])
+    return dict(
+        disk=scene.photon_radiance_at(jnp.array([550.0, 700.0]), 0.0, east, north),
+        zodi=scene.sources(_RULE, Resolution(), times).local_zodi,
+    )
+
+
+def _fields_equal(actual, expected, skip=()):
+    """Every dataclass field of the scene matches in structure and bits."""
+    for field in dataclasses.fields(expected):
+        if field.name in skip:
+            continue
+        a, b = getattr(actual, field.name), getattr(expected, field.name)
+        assert jax.tree.structure(a) == jax.tree.structure(b), field.name
+        _same_bits(a, b)
+
+
+def test_rebuilds_keep_every_source_model():
+    """Fails if a table restore or an unpacking drops a field of the scene.
+
+    Truth: the original scene, compared leaf by leaf as bit patterns (the
+    stored values are the inputs' own, so the tolerance is zero) over every
+    dataclass field of ``Scene``, so a field added later and forgotten at one
+    rebuild site fails here, plus the disk radiance and the local-zodi node
+    radiance read from the original. The second case unpacks an unbatched
+    scene with one inactive slot, which leaves the star, disk, local zodi and
+    midplane angles untouched.
+    """
+    times = jnp.array([0.0, 40.0])
+    original = canonical(_full_scene())
+    restored = Scene.from_table(original.to_table(), template=original)
+    _fields_equal(restored, original)
+    truth = _source_reads(original, times)
+    for name, value in _source_reads(restored, times).items():
+        np.testing.assert_array_equal(value, truth[name])
+
+    masked = canonical(_full_scene(valid=jnp.array([True, False])))
+    (unpacked,) = masked.to_scenes()
+    assert unpacked.n_planets == 1
+    _fields_equal(
+        unpacked,
+        masked,
+        skip=("planets", "dynamics", "valid", "body_index", "_source_layout"),
+    )
+    reads = _source_reads(unpacked, times)
+    np.testing.assert_array_equal(reads["disk"], truth["disk"])
+    np.testing.assert_array_equal(reads["zodi"], truth["zodi"])
+
+
+@pytest.mark.parametrize("inactive_mass", [0.0, 1.0])
+def test_inactive_slot_mass_does_not_set_orbit_rates(inactive_mass):
+    """Fails if an inactive planet's mass joins the enclosed mass of an outer planet.
+
+    Truth: Kepler's third law, n^2 a^3 = GM_sun (M_star + m) with the star and
+    the outer planet alone, from the Gaussian gravitational constant squared
+    typed here (parity-checked against hwoutils), at 1e-12 relative, the
+    double-precision floor for a square root of products. The inactive inner
+    slot holds zero or one solar mass; the outer mean motion is bitwise the
+    same for both, and a mask applied after the enclosed mass gives 0.02432744
+    rad/day instead of 0.0172021.
+    """
+    gauss_k2 = 0.01720209895**2
+    assert GM_SUN_AU3_PER_D2 == pytest.approx(gauss_k2, rel=1e-9)
+
+    def outer_rate(mass):
+        scene = Scene.from_classical(
+            FlatStar(1.0),
+            Planet(jnp.ones(2), LambertianPhysicalModel(jnp.array([0.3, 0.3]))),
+            star_mass_Msun=1.0,
+            planet_mass_Msun=jnp.array([mass, 3e-6]),
+            dist_pc=10.0,
+            a_AU=jnp.array([0.5, 1.0]),
+            e=0.0,
+            i_rad=0.0,
+            W_rad=0.0,
+            w_rad=0.0,
+            M0_rad=0.0,
+            valid=jnp.array([False, True]),
+        )
+        return scene.dynamics.orbits.n_rad_per_d[1]
+
+    rate = outer_rate(inactive_mass)
+    np.testing.assert_array_equal(rate, outer_rate(0.0))
+    np.testing.assert_allclose(
+        rate, np.sqrt(GM_SUN_AU3_PER_D2 * (1.0 + 3e-6)), rtol=1e-12, atol=0
+    )

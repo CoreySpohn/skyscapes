@@ -474,7 +474,9 @@ class Scene(eqx.Module):
             dec_deg: Declination [deg, ICRS], or None for an unplaced scene.
             order: Scene planet indices in inner-to-outer chain order; None
                 sorts by semi-major axis.
-            valid: Boolean mask of real planet slots; None marks all valid.
+            valid: Boolean mask of real planet slots, shape ``(K_total,)`` in
+                scene order; None marks all valid. Inactive slots enter the
+                chain with zero mass, whatever ``planet_mass_Msun`` holds.
             disk: Optional extended source, or None.
             midplane_inc_deg: Disk midplane inclination [deg], 0 face-on.
             midplane_position_angle_deg: Disk major-axis position angle north
@@ -514,9 +516,15 @@ class Scene(eqx.Module):
                 epoch_d=epoch_d,
             ).items()
         }
-        masses = jnp.broadcast_to(_known_planet_mass(planet_mass_Msun), (count,))[
-            indices
-        ]
+        masses = jnp.broadcast_to(_known_planet_mass(planet_mass_Msun), (count,))
+        if valid is not None:
+            # Inactive slots carry no mass into the enclosed mass that sets the
+            # orbit rates; masking before the sort keeps scene order.
+            valid_slots = jnp.asarray(valid, dtype=bool)
+            if valid_slots.shape != (count,):
+                raise ValueError("valid must have shape (K_total,)")
+            masses = jnp.where(valid_slots, masses, 0.0)
+        masses = masses[indices]
         dynamics = DynamicsSystem.from_classical(
             Body(star_mass_Msun),
             Body(masses),

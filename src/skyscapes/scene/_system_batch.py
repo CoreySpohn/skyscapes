@@ -292,6 +292,31 @@ def from_scenes(cls, scenes, *, capacity=None, batch_shape=None, device=None):
     return canonical(stacked, device=_device(device))
 
 
+def _rebuild(cls, scene, **replaced):
+    """Build a scene from every dataclass field of ``scene``, some replaced.
+
+    Both rebuild sites go through here, so a field added to ``Scene`` is
+    carried at each of them without a further edit.
+
+    Args:
+        cls: The scene class to construct.
+        scene: The scene (or a host copy of its leaves) supplying the fields.
+        **replaced: Field values that differ from ``scene``.
+
+    Returns:
+        A new scene.
+    """
+    fields = {f.name: getattr(scene, f.name) for f in dataclasses.fields(scene)}
+    fields.update(replaced)
+    layout = fields.pop("_source_layout")
+    result = cls(**fields)
+    if layout is None:
+        return result
+    return eqx.tree_at(
+        lambda s: s._source_layout, result, layout, is_leaf=lambda x: x is None
+    )
+
+
 def to_scenes(system, *, device=None):
     """Unpack scenes, discarding padding and restoring source leaf order.
 
@@ -352,13 +377,14 @@ def to_scenes(system, *, device=None):
         # Packed scene slots and chain slots address the same sorted body array.
         mapping = {slot: i for i, slot in enumerate(chain_slots)}
         body_index = tuple(mapping[slot] for slot in scene_slots)
-        scene = type(system)(
-            row.star,
-            tuple(planets),
-            dynamics,
-            midplane_inc_deg=row.midplane_inc_deg,
-            midplane_position_angle_deg=row.midplane_position_angle_deg,
+        scene = _rebuild(
+            type(system),
+            row,
+            planets=tuple(planets),
+            dynamics=dynamics,
             body_index=body_index,
+            valid=None,
+            _source_layout=None,
         )
         result.append(canonical(scene, device=device))
     return result
@@ -474,20 +500,7 @@ def from_table(cls, table, *, template, device=None):
     # body_index is structural and must describe the stored capacity.
     if restored.capacity != capacity:
         raise ValueError("K must match the stored planet capacity")
-    result = cls(
-        restored.star,
-        restored.planets,
-        restored.dynamics,
-        disk=restored.disk,
-        midplane_inc_deg=restored.midplane_inc_deg,
-        midplane_position_angle_deg=restored.midplane_position_angle_deg,
-        valid=restored.valid,
-        body_index=tuple(int(i) for i in table["body_index"]),
-    )
-    result = eqx.tree_at(
-        lambda s: s._source_layout,
-        result,
-        restored._source_layout,
-        is_leaf=lambda x: x is None,
+    result = _rebuild(
+        cls, restored, body_index=tuple(int(i) for i in table["body_index"])
     )
     return canonical(result, device=_device(device))
