@@ -32,11 +32,12 @@ from hwoutils.conversions import (
     jy_to_photons_per_nm_per_m2,
     photons_per_nm_per_m2_to_jy,
 )
+from hwoutils.leaves import as_float_leaf
 from hwoutils.planck import planck_photon_radiance
 from jaxtyping import Array
+from optixstuff.spectral import Knots, digest_knots
 
 from .._flux_scale import check_flux_scale
-from .._tables import table_digest
 from .spots import StarSpots
 
 # Digest names of the interpolations a Star offers; a linear interpolant is
@@ -318,35 +319,33 @@ class Star(AbstractStar):
     ``flux_scale`` is a dimensionless factor on the tabulated flux, default one;
     see :class:`AbstractStar`.
 
-    The star is an ``optixstuff.spectral.SpectralTable``: ``knot_digest`` names
-    its wavelength grid and interpolation, computed once at construction from
-    the stored knots, and :meth:`node_flux_density` reads the operator a
-    ``Resolution`` holds for that digest. A star constructed under a trace has
-    no digest. Replacing the wavelength leaf afterwards (``eqx.tree_at``) leaves
-    the digest stale; the next ``Resolution.build`` refuses it.
+    The star is an ``optixstuff.spectral.SpectralTable``: its wavelength grid
+    is a static ``Knots`` (float64 host data, never a leaf), ``knot_digest``
+    names that grid and the interpolation, and :meth:`node_flux_density` reads
+    the operator a ``Resolution`` holds for that digest. The knots must be
+    concrete; the flux table may be traced. ``eqx.tree_at`` cannot reach the
+    knots: build a new star (or ``dataclasses.replace``) for another grid.
 
     Attributes:
+        knots: Static wavelength grid of the table [nm].
         flux_scale: Dimensionless factor on the tabulated flux, default one.
         fixed_diameter_arcsec: Apparent stellar diameter [arcsec]; zero is a
             point star.
         luminosity_Lsun: Stellar luminosity [solar luminosities].
         spots: Imported spot history, or None.
         metadata: Free-form source metadata, held as a static field.
-        knot_digest: Static digest of the wavelength knots and the interpolation
-            method, or None for a star constructed under a trace.
     """
 
-    flux_scale: Array
-    fixed_diameter_arcsec: float
-    luminosity_Lsun: float
+    knots: Knots = eqx.field(static=True)
+    flux_scale: Array = eqx.field(converter=as_float_leaf)
+    fixed_diameter_arcsec: Array = eqx.field(converter=as_float_leaf)
+    luminosity_Lsun: Array = eqx.field(converter=as_float_leaf)
     spots: StarSpots | None
     metadata: dict = eqx.field(static=True)
-    knot_digest: str | None = eqx.field(static=True)
 
     _interpolation_method: str = eqx.field(static=True)
-    _wavelengths_nm: Array
-    _times_d: Array
-    _flux_density_phot: Array
+    _times_d: Array = eqx.field(converter=as_float_leaf)
+    _flux_density_phot: Array = eqx.field(converter=as_float_leaf)
 
     def __init__(
         self,
@@ -372,7 +371,8 @@ class Star(AbstractStar):
         Linear interpolation of photon density avoids overshoot.
 
         Args:
-            wavelengths_nm: Wavelength grid [nm], shape ``(n_wavelengths,)``.
+            wavelengths_nm: Wavelength grid [nm], shape ``(n_wavelengths,)``,
+                concrete: a ``Knots`` or a host array, kept in float64.
             times_d: Epochs, days from the scene epoch, shape ``(n_times,)``.
             flux_density_jy: Flux density F_nu [Jy], shape
                 ``(n_wavelengths, n_times)``.
@@ -388,40 +388,43 @@ class Star(AbstractStar):
         if interpolation_method not in ("linear", "cubic"):
             raise ValueError("interpolation_method must be linear or cubic.")
         self._interpolation_method = interpolation_method
-        self.flux_scale = jnp.asarray(flux_scale)
+        self.flux_scale = flux_scale
         self.fixed_diameter_arcsec = fixed_diameter_arcsec
         self.luminosity_Lsun = luminosity_Lsun
         self.spots = spots
         self.metadata = {} if metadata is None else dict(metadata)
-        self._wavelengths_nm = wavelengths_nm
-        self._times_d = times_d
-        self.knot_digest = table_digest(
-            wavelengths_nm, _TABLE_METHODS[interpolation_method]
+        self.knots = (
+            wavelengths_nm
+            if isinstance(wavelengths_nm, Knots)
+            else Knots(wavelengths_nm)
         )
-
+        self._times_d = times_d
+        # Derived under a trace too, so from the converted local.
         self._flux_density_phot = jax.vmap(
             jy_to_photons_per_nm_per_m2, in_axes=(1, None), out_axes=1
-        )(flux_density_jy, wavelengths_nm)
+        )(as_float_leaf(flux_density_jy), self.knots.array())
+
+    @property
+    def knot_digest(self) -> str:
+        """Digest of the static knots and the interpolation method."""
+        return digest_knots(self.knots, _TABLE_METHODS[self._interpolation_method])
 
     @property
     def flux_density_jy(self) -> Array:
         """Tabulated F_nu [Jy], recovered from the stored photon table."""
         return jax.vmap(photons_per_nm_per_m2_to_jy, in_axes=(1, None), out_axes=1)(
-            self._flux_density_phot, self._wavelengths_nm
+            self._flux_density_phot, self.knots.array()
         )
 
     @property
-    def wavelengths_nm(self) -> Array:
-        """Tabulated wavelength grid in nm, returned without copying."""
-        return self._wavelengths_nm
+    def wavelengths_nm(self) -> np.ndarray:
+        """Tabulated wavelength grid in nm, float64 host data (read-only)."""
+        return self.knots.nm
 
     @property
     def wavelength_range_nm(self) -> tuple[float, float]:
         """Minimum and maximum tabulated wavelengths in nm as Python floats."""
-        return (
-            float(jnp.min(self._wavelengths_nm)),
-            float(jnp.max(self._wavelengths_nm)),
-        )
+        return float(self.knots.nm[0]), float(self.knots.nm[-1])
 
     def angular_diameter_arcsec(self, dist_pc: Array) -> Array:
         """Return the stored apparent diameter in arcseconds, ignoring dist_pc.
@@ -451,12 +454,12 @@ class Star(AbstractStar):
             # A single-epoch source is a static spectrum, not a degenerate spline.
             wavelength_nm, _ = jnp.broadcast_arrays(wavelength_nm, time_d)
             interp = interpax.Interpolator1D(
-                self._wavelengths_nm, self._flux_density_phot[:, 0], method=method
+                self.knots.array(), self._flux_density_phot[:, 0], method=method
             )
             return interp(wavelength_nm.reshape(-1)).reshape(wavelength_nm.shape)
         wave, time = jnp.broadcast_arrays(wavelength_nm, time_d)
         interp = interpax.Interpolator2D(
-            self._wavelengths_nm,
+            self.knots.array(),
             self._times_d,
             self._flux_density_phot,
             method=method,
@@ -549,9 +552,9 @@ class Star(AbstractStar):
         Methods of Numerical Integration).
 
         Returns:
-            Unique tabulated wavelengths [nm], sorted ascending.
+            The static knots [nm], float64, sorted ascending.
         """
-        return np.unique(self.wavelengths_nm)
+        return self.knots.nm
 
     def __repr__(self) -> str:
         """One-line summary of metadata + wavelength/time grid extent.
@@ -559,13 +562,12 @@ class Star(AbstractStar):
         Returns:
             A one-line text summary.
         """
-        wl_min = float(jnp.min(self._wavelengths_nm))
-        wl_max = float(jnp.max(self._wavelengths_nm))
+        wl_min, wl_max = self.wavelength_range_nm
         n_t = int(self._times_d.shape[0])
         return (
             f"Star("
-            f"L={self.luminosity_Lsun:.3g} Lsun, "
-            f"diam={self.fixed_diameter_arcsec:.3g} arcsec, "
+            f"L={float(self.luminosity_Lsun):.3g} Lsun, "
+            f"diam={float(self.fixed_diameter_arcsec):.3g} arcsec, "
             f"wl={wl_min:.0f}-{wl_max:.0f} nm, n_times={n_t})"
         )
 

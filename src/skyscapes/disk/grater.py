@@ -31,6 +31,7 @@ import interpax
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array
+from optixstuff.spectral import Knots, as_knots
 from zodi import AbstractDustAmplitude
 
 from ._los import (
@@ -175,7 +176,7 @@ class GraterDisk(AbstractParametricDisk):
     beta: Array
     rmin_AU: Array
     rmax_AU: Array
-    wavelengths_nm: Array
+    wavelengths_nm: Knots = eqx.field(static=True, converter=as_knots)
     g_HG_grid: Array
     Ag_grid: Array
 
@@ -216,14 +217,14 @@ class GraterDisk(AbstractParametricDisk):
         # Wavelength-dependent scattering coefficients.
         g_HG = interpax.interp1d(
             wavelength_nm,
-            self.wavelengths_nm,
+            self.wavelengths_nm.array(),
             self.g_HG_grid,
             method="cubic",
             extrap=False,
         )
         Ag = interpax.interp1d(
             wavelength_nm,
-            self.wavelengths_nm,
+            self.wavelengths_nm.array(),
             self.Ag_grid,
             method="cubic",
             extrap=False,

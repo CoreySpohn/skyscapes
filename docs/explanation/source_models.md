@@ -665,10 +665,10 @@ star's node-effective value instead of its point sample.
 planets the same way; the resolution is required, and a scene with no table
 takes an empty `Resolution()`.
 
-A fit, or a build held across reads, must not move a knot grid the operators
-were built on. `Scene.knot_leaves()` lists the dotted paths, relative to the
-scene, of every leaf that sets a table's knots, for a build to declare as its
-reads.
+A fit cannot move a knot grid the operators were built on: every table holds
+its knots as a static `optixstuff.spectral.Knots` (immutable float64 host data,
+compared by its digest), never as a leaf, so a fit request that names a knot
+grid is refused and a gradient has no knot entry.
 
 `Scene.contrasts`, `Scene.planet_flux_densities` and `photon_flux_density` remain
 point reads: right for a monochromatic question and for a smooth contrast,
@@ -679,13 +679,13 @@ Three rules keep an operator from being applied to the wrong table:
 - Every piece of every band must lie inside every source table, from its first
   knot to its last. `Resolution.build` refuses a band that leaves a table,
   naming the table's end; end the band there, or load the table over the band.
-- Each table carries a static digest of its knots, computed once at
-  construction, and the operator is found by that digest inside a traced
-  program. A tabulated source on a rule built without it raises at trace time.
-- A table constructed under a trace has no digest and is refused, as is a
-  knot grid replaced with `eqx.tree_at` after construction: the digest no longer
-  matches the knots, and `Scene.spectral_tables` and `Resolution.build` ask for
-  the table to be rebuilt.
+- Each table's operator is found inside a traced program by the digest of its
+  static knots. A tabulated source on a rule built without it raises at trace
+  time.
+- Knots must be concrete: a table is built on the host, though its values may
+  be traced. A table rebuilt on other knots has another digest, so a
+  `Resolution` built for the old knots has no rule for it and refuses; build
+  the resolution again.
 
 An operator belongs to the full rule: `Quadrature.band(i)` has no operator of
 its own, so a route that works band by band reads `Scene.sources` once on the

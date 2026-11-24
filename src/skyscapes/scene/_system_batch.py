@@ -7,6 +7,7 @@ import jax
 import numpy as np
 from hwoutils.constants import GM_SUN_AU3_PER_D2
 from hwoutils.epoch import Epoch
+from optixstuff.spectral import same_wavelength
 
 from .planet import Planet
 
@@ -21,7 +22,6 @@ _PAD_ORBIT = dict(
 )
 _SHARED_GRIDS = frozenset(
     (
-        "nu_grid",
         "wavelengths_nm",
         "phase_angle_deg",
         "times_d",
@@ -95,6 +95,40 @@ def _planet_group(system, model_template):
     )
 
 
+def _check_star_knots(scenes):
+    """Refuse star grids that differ, naming twins that differ only by rounding.
+
+    Args:
+        scenes: The scenes to pack.
+
+    Raises:
+        ValueError: If two stars hold different knots. When the grids agree
+            within the wavelength tolerance (a float32 copy of a float64
+            file grid, say), the message names both scenes and the fix.
+    """
+    first = getattr(scenes[0].star, "knots", None)
+    for index, scene in enumerate(scenes[1:], start=1):
+        knots = getattr(scene.star, "knots", None)
+        if knots == first:
+            continue
+        if (
+            first is not None
+            and knots is not None
+            and len(knots) == len(first)
+            and bool(np.all(same_wavelength(knots.nm, first.nm)))
+        ):
+            raise ValueError(
+                f"the stars of scene 0 and scene {index} have knots that agree "
+                "within the wavelength tolerance but differ in digest "
+                f"({first.digest} and {knots.digest}), so they cannot share one "
+                "batch; build both stars on one shared Knots"
+            )
+        raise ValueError(
+            f"the stars of scene 0 and scene {index} have different knots; a batch "
+            "holds one star grid"
+        )
+
+
 def from_scenes(cls, scenes, *, capacity=None, batch_shape=None):
     """Pack unbatched scenes, sorted by semi-major axis, on the host.
 
@@ -128,6 +162,7 @@ def from_scenes(cls, scenes, *, capacity=None, batch_shape=None):
     model_classes = {type(p.physical_model) for s in scenes for p in s.planets}
     if len(star_classes) != 1 or len(model_classes) != 1:
         raise ValueError("Scenes must share one star class and physical-model class")
+    _check_star_knots(scenes)
     model_template = max(
         (p for s in scenes for p in s.planets), key=lambda p: p.n_planets
     )

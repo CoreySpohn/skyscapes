@@ -13,6 +13,7 @@ from pathlib import Path
 
 import equinox as eqx
 import ineedvalidation as vv
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -20,7 +21,7 @@ from astropy import units as u
 from astropy.io import fits
 from hwoutils.constants import Rsun2m, h, k_B, nm2m, pc2m, sigma_SB
 from hwoutils.constants import c as c_si
-from optixstuff.spectral import Band, Quadrature
+from optixstuff.spectral import Band, Knots, Quadrature
 
 from skyscapes.datasets import fetch_castelli_kurucz, fetch_phoenix
 from skyscapes.io import (
@@ -347,3 +348,28 @@ def test_castelli_kurucz_phoenix_overlap_bin_flux():
     ph_flux = evaluate(ph, Quadrature.build(bands, ph))
     print("CK04/PHOENIX bin ratios:", np.asarray(ck_flux / ph_flux))
     np.testing.assert_allclose(ck_flux, ph_flux, rtol=0.05, atol=0)
+
+
+@pytest.mark.parametrize("enable_x64", [False, True], ids=["x32", "x64"])
+def test_loaded_knots_are_the_file_grid(enable_x64):
+    """Fails if the loader rounds the file grid on its way to the knots.
+
+    Exact digest. In x32 and x64 the star's knots are the float64 file
+    wavelengths of the fixture node, read here with the FITS reader and cut
+    to the requested range; passing them through ``jnp`` under x32 would
+    round them to float32 and change the digest.
+    """
+    with jax.enable_x64(enable_x64):
+        star = from_phoenix(
+            5800.0,
+            4.5,
+            dist_pc=10.0,
+            radius_m=Rsun2m,
+            wavelength_range_nm=(400.0, 900.0),
+            fetch=fixture_path,
+        )
+    with fits.open(fixture_path(5800)) as hdul:
+        angstrom = np.asarray(hdul[1].data["WAVELENGTH"], dtype=np.float64)
+    wave = (angstrom * u.AA).to_value(u.nm)
+    wave = wave[(wave >= 400.0) & (wave <= 900.0)]
+    assert star.knots.digest == Knots(wave).digest

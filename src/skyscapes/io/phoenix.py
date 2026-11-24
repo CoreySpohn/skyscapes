@@ -227,7 +227,7 @@ def _from_surface_flux(
     # F_nu = F_lambda lambda^2 / c, with F_lambda converted from per nm to per m.
     flux_jy = surface_flux / nm2m * (wavelength_nm * nm2m) ** 2 / c * dilution / Jy
     return Star(
-        wavelengths_nm=jnp.asarray(wavelength_nm),
+        wavelengths_nm=np.asarray(wavelength_nm, dtype=np.float64),
         times_d=jnp.zeros(1),
         flux_density_jy=jnp.asarray(flux_jy)[:, None],
         fixed_diameter_arcsec=angular_diameter_arcsec(radius_m, dist_pc),

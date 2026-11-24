@@ -127,10 +127,11 @@ Requires a user-supplied contrast grid.
 
 ```python notest
 import jax.numpy as jnp
+import numpy as np
 from skyscapes.physical_model import GridPhysicalModel
 
 model = GridPhysicalModel(
-    wavelengths_nm=jnp.linspace(400, 1000, 60),  # (n_wl,)
+    knots=np.linspace(400, 1000, 60),  # (n_wl,), static host knots
     phase_angle_deg=jnp.linspace(0, 180, 19),  # (n_phase,)
     contrast_grid=...,  # (K, n_wl, n_phase)
 )

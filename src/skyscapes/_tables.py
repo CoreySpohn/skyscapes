@@ -1,19 +1,23 @@
-"""Knot digests and band-rule lookups for tabulated source spectra.
+"""Static knots and band-rule lookups for tabulated source spectra.
 
-A tabulated spectrum keeps a static digest of its knots, computed once on the
-host, so the operator that integrates it on a band rule can be found inside a
-traced program (``optixstuff.spectral.Resolution``). A planet whose spectrum is
-tabulated is integrated as the product of its own table and the host star's,
-on the merged knots of the two; :class:`ProductTable` names that product to
-``Resolution.build``, and :func:`product_rule` finds its operator again from
-the two static digests.
+A tabulated spectrum holds its knots as a static ``optixstuff.spectral.Knots``
+(immutable float64 host data, hashed by its digest), never as a leaf, so the
+operator that integrates it on a band rule can be found inside a traced
+program (``optixstuff.spectral.Resolution``) and no fit can move a knot. A
+planet whose spectrum is tabulated is integrated as the product of its own
+table and the host star's, on the merged knots of the two;
+:class:`ProductTable` names that product to ``Resolution.build``, and
+:func:`product_rule` finds its operator again from the two static digests.
 """
 
 from __future__ import annotations
 
-import jax
+import functools
+
 import numpy as np
-from optixstuff.spectral import SpectralTable, digest_knots
+from hwoutils.conversions import wavenumber_cm_to_nm
+from hwoutils.leaves import HostGrid
+from optixstuff.spectral import Knots, SpectralTable, digest_knots, same_wavelength
 
 SMOOTH_DEGREE = 3
 """Degree declared for a smooth, non-polynomial factor between two knots.
@@ -24,79 +28,67 @@ not a polynomial; counting it as a cubic puts enough points on cells as narrow
 as a tabulated grid's for its error to sit at round-off.
 """
 
-_TRACED = (jax.errors.TracerArrayConversionError, jax.errors.ConcretizationTypeError)
 
-
-def table_digest(knots, method: str) -> str | None:
-    """Return the knot digest of concrete knots, or None.
-
-    None marks a table that cannot be digested: knots that are traced (the
-    table was constructed under a trace) or that do not form a strictly
-    increasing grid of at least two wavelengths (no operator can be built on
-    them). ``knots`` is an array or a callable that returns one, so a model
-    whose knots are read through a method can be digested under a trace.
+def as_host_grid(values) -> HostGrid:
+    """Return a ``HostGrid`` unchanged, or build one from concrete values.
 
     Args:
-        knots: Knot wavelengths [nm], or a callable returning them.
-        method: Name of the interpolation between the knots.
+        values: A ``HostGrid`` or a concrete 1-D array-like.
 
     Returns:
-        The ``"method:hash"`` digest, or None.
+        The ``HostGrid``.
     """
-    try:
-        knots = knots() if callable(knots) else knots
-        if isinstance(knots, jax.core.Tracer):
-            return None
-        return digest_knots(knots, method)
-    except _TRACED:
-        return None
-    except ValueError:
-        return None
+    return values if isinstance(values, HostGrid) else HostGrid(values)
+
+
+@functools.lru_cache(maxsize=64)
+def knots_of(grid: HostGrid) -> Knots:
+    """Knots of a static host grid in nm, cached on its digest.
+
+    Args:
+        grid: A wavelength grid [nm].
+
+    Returns:
+        The grid as ``Knots``; raises when it is not a valid knot grid.
+    """
+    return Knots(grid.values)
+
+
+@functools.lru_cache(maxsize=64)
+def wavenumber_knots(nu_grid: HostGrid) -> Knots:
+    """Knots [nm] of a static wavenumber grid [cm^-1], sorted, cached.
+
+    The wavenumber grid stays the exact float64 values the opacity engine was
+    built on; the knots are its float64 conversion to nm, never the other way
+    round (a round trip through nm is not bitwise ``nu``).
+
+    Args:
+        nu_grid: Wavenumber grid [cm^-1].
+
+    Returns:
+        The grid wavelengths [nm] as ``Knots``.
+    """
+    return Knots(np.sort(np.asarray(wavenumber_cm_to_nm(nu_grid.values))))
 
 
 def is_table(source) -> bool:
-    """Whether ``source`` is a tabulated spectrum with a knot digest attribute.
+    """Whether ``source`` is a tabulated spectrum with static knots.
 
     Args:
         source: A star, a local-zodi model or a physical model.
 
     Returns:
-        True when ``source`` implements ``SpectralTable``.
+        True when ``source`` implements ``SpectralTable`` and has knots.
     """
-    return isinstance(source, SpectralTable)
-
-
-def check_digest(table) -> None:
-    """Refuse a table whose digest is missing or no longer matches its knots.
-
-    Args:
-        table: A ``SpectralTable``.
-    """
-    name = type(table).__name__
-    digest = table.knot_digest
-    if digest is None:
-        raise ValueError(
-            f"{name} has no knot digest: it was constructed under a trace or on "
-            "knots that are not a strictly increasing grid of at least two "
-            "wavelengths; construct the table on the host"
-        )
-    method = digest.rpartition(":")[0]
-    if digest_knots(table.spectral_breaks_nm(), method) != digest:
-        raise ValueError(
-            f"the knot digest of {name} does not match its knots: a knot grid "
-            "was replaced after construction; rebuild the table"
-        )
+    return (
+        isinstance(source, SpectralTable) and getattr(source, "knots", None) is not None
+    )
 
 
 def _star_part(star) -> tuple[str, int]:
     """Digest and degree that name the star's factor in a product."""
     if not is_table(star):
         return "smooth", SMOOTH_DEGREE
-    if star.knot_digest is None:
-        raise LookupError(
-            f"{type(star).__name__} has no knot digest (it was constructed under "
-            "a trace); construct the star on the host"
-        )
     return star.knot_digest, star.spectral_degree
 
 
@@ -123,17 +115,21 @@ class ProductTable:
     """A tabulated planet spectrum times its host star, on the merged knots.
 
     Host only: built by ``Scene.spectral_tables`` and read by
-    ``Resolution.build``. Its knots are the planet's and the star's (a smooth
-    star adds none), restricted to the wavelengths both tables cover, and its
-    degree is the sum of theirs. It holds no interpolant, so the operator is the
-    ``"fine"`` kind: the planet flux is evaluated on the operator's fine grid and
-    reduced, or the ``"identity"`` kind when every merged knot is a piece edge.
+    ``Resolution.build``. Its knots are the union of the planet's and the
+    star's (``Knots.union``: knots within the wavelength tolerance are one, the
+    smallest; a smooth star adds none), restricted to the wavelengths both
+    tables cover, and its degree is the sum of theirs. It holds no
+    interpolant, so the operator is the ``"fine"`` kind: the planet flux is
+    evaluated on the operator's fine grid and reduced, or the ``"identity"``
+    kind when every merged knot is a piece edge.
 
     Attributes:
+        knots: The merged knots.
         knot_digest: Digest of the merged knots under :func:`product_method`.
         spectral_degree: Declared degree of the product between knots.
     """
 
+    knots: Knots
     knot_digest: str
     spectral_degree: int
 
@@ -144,23 +140,23 @@ class ProductTable:
             model: A physical model that declares knots.
             star: The host star.
         """
-        check_digest(model)
         star_digest, star_degree = _star_part(star)
-        knots = np.asarray(model.spectral_breaks_nm(), dtype=float)
+        knots = model.knots
         if is_table(star):
-            check_digest(star)
-            star_knots = np.asarray(star.spectral_breaks_nm(), dtype=float)
-            low = max(knots[0], star_knots[0])
-            high = min(knots[-1], star_knots[-1])
-            if low >= high:
+            low = max(knots.nm[0], star.knots.nm[0])
+            high = min(knots.nm[-1], star.knots.nm[-1])
+            if low >= high or same_wavelength(low, high):
                 raise ValueError(
                     f"the tables of {type(model).__name__} and "
                     f"{type(star).__name__} share no wavelengths"
                 )
-            knots = np.union1d(knots, star_knots)
-            knots = knots[(knots >= low) & (knots <= high)]
+            merged = knots.union(star.knots).nm
+            keep = ((merged >= low) | same_wavelength(merged, low)) & (
+                (merged <= high) | same_wavelength(merged, high)
+            )
+            knots = Knots(merged[keep])
         self.spectral_degree = model.spectral_degree + star_degree
-        self._knots = knots
+        self.knots = knots
         method = product_method(model.knot_digest, star_digest, self.spectral_degree)
         self.knot_digest = digest_knots(knots, method)
 
@@ -170,7 +166,7 @@ class ProductTable:
         Returns:
             Strictly increasing knot wavelengths in nm.
         """
-        return self._knots
+        return self.knots.nm
 
 
 def product_rule(resolution, quadrature, model, star):
@@ -189,11 +185,6 @@ def product_rule(resolution, quadrature, model, star):
         The ``Reduction`` built for the product on this quadrature.
     """
     name = type(model).__name__
-    if model.knot_digest is None:
-        raise LookupError(
-            f"{name} has no knot digest: it was constructed under a trace or on "
-            "fewer than two increasing knots; construct the model on the host"
-        )
     layout = quadrature.layout_digest
     if layout is None:
         raise LookupError(

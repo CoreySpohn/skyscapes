@@ -518,7 +518,9 @@ def test_band_contrast_tophat_and_narrow_limits(tabulated):
     """Fails if a band loses stellar knots, photon weighting, or its point limit.
 
     Truth is the existing top-hat quadrature (rtol 3e-14 for float64), and
-    monochromatic contrast for a 1e-4 nm band (rtol 1e-10 for curvature).
+    monochromatic contrast for a 0.01 nm band (rtol 1e-10 for curvature; a
+    band narrower than four float32 ULPs of its wavelength, 0.002 nm at
+    5000 nm, is one wavelength and is refused by the build).
     """
     wave = jnp.array([4000.0, 4700.0, 4900.0, 6000.0])
     star = BlackbodyStar(5772.0, 6.957e8)
@@ -567,7 +569,7 @@ def test_band_contrast_tophat_and_narrow_limits(tabulated):
         rtol=3e-14,
         atol=0,
     )
-    narrow = Quadrature.build([Band(4999.99995, 5000.00005)], system)
+    narrow = Quadrature.build([Band(4999.995, 5000.005)], system)
     np.testing.assert_allclose(
         system.band_contrasts(narrow, times, resolution=_resolved(system, narrow))[0],
         system.contrasts(jnp.asarray(5000.0), times),

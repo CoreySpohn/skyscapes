@@ -7,42 +7,17 @@ import interpax
 import jax
 import jax.numpy as jnp
 import numpy as np
+from hwoutils.leaves import as_bulk_leaf, as_float_leaf
 from hwoutils.map_coordinates import map_coordinates
 from jaxtyping import Array
 from optixstuff.grids import PixelGrid
+from optixstuff.spectral import Knots, as_knots
 
 from .base import AbstractDisk, check_sky_grid
 
 
-class _Knots:
-    """Hashable, immutable wavelength knots, so they can be a static field.
-
-    Args:
-        values: Wavelength knot values [nm]; stored as a read-only 1-D float array.
-    """
-
-    __slots__ = ("_hash", "values")
-
-    def __init__(self, values):
-        values = np.array(values)
-        if values.ndim != 1 or not np.issubdtype(values.dtype, np.floating):
-            values = np.array(values, dtype=float).reshape(-1)
-        values.flags.writeable = False
-        self.values = values
-        self._hash = hash((values.dtype.str, values.tobytes()))
-
-    def __hash__(self):
-        return self._hash
-
-    def __eq__(self, other):
-        return isinstance(other, _Knots) and (
-            self.values.dtype == other.values.dtype
-            and np.array_equal(self.values, other.values)
-        )
-
-
 @functools.lru_cache(maxsize=16)
-def _spline_operator(knots: _Knots) -> np.ndarray:
+def _spline_operator(knots: Knots) -> np.ndarray:
     """Cubic-spline coefficients as a linear operator of the knot values.
 
     Returns shape (4, n - 1, n): the polynomial coefficients of each segment
@@ -80,15 +55,18 @@ class ExovistaDisk(AbstractDisk):
     Attributes:
         native_grid: Sky grid of the stored cube, in arcsec with a
             ``SkyOrientation``. Static.
+        knots: Wavelength grid of the cube [nm], a static ``Knots``.
         contrast_cube: Host-relative contrast of each pixel (pixel flux over host
-            flux, dimensionless), shape ``(n_wave, ny, nx)``.
+            flux, dimensionless), shape ``(n_wave, ny, nx)``. A declared bulk
+            field: ExoVista disk cubes are float32 on disk, and a float32 cube
+            is kept under x64.
         flux_scale: Dimensionless scalar factor on the radiance, default one.
     """
 
     native_grid: PixelGrid = eqx.field(static=True)
-    _knots_nm: _Knots = eqx.field(static=True)
-    contrast_cube: Array
-    flux_scale: Array
+    knots: Knots = eqx.field(static=True, converter=as_knots)
+    contrast_cube: Array = eqx.field(converter=as_bulk_leaf)
+    flux_scale: Array = eqx.field(converter=as_float_leaf)
 
     def __init__(self, native_grid, wavelengths_nm, contrast_cube, flux_scale=1.0):
         """Store the native geometry, the static knots and the cube.
@@ -101,15 +79,15 @@ class ExovistaDisk(AbstractDisk):
                 ``(len(wavelengths_nm), ny, nx)``.
             flux_scale: Dimensionless scalar factor on the radiance; default one.
         """
-        self.flux_scale = jnp.asarray(flux_scale)
+        self.flux_scale = flux_scale
         self.native_grid = native_grid
-        self._knots_nm = _Knots(wavelengths_nm)
+        self.knots = wavelengths_nm
         self.contrast_cube = contrast_cube
 
     @property
     def wavelengths_nm(self) -> np.ndarray:
         """Static wavelength knots of the cube [nm]."""
-        return self._knots_nm.values
+        return self.knots.nm
 
     def spectral_breaks_nm(self) -> np.ndarray:
         """Wavelength breaks of the stored contrast cube [nm].
@@ -136,8 +114,8 @@ class ExovistaDisk(AbstractDisk):
         grid = self.native_grid
         pixels = grid.unit_to_pixel(*grid.orientation.sky_to_detector(east, north))
         cube = self.contrast_cube
-        knots = jnp.asarray(self.wavelengths_nm)
-        operator = jnp.asarray(_spline_operator(self._knots_nm))
+        knots = self.knots.array()
+        operator = jnp.asarray(_spline_operator(self.knots))
 
         def at_wavelength(wave):
             # A wavelength needs only the four planes from its spline segment.

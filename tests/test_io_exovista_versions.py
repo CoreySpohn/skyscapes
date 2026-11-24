@@ -19,9 +19,11 @@ from hwoutils.constants import (
     h,
     k_B,
     pc2m,
+    um2nm,
     yr2s,
 )
 from hwoutils.conversions import flux_jy_to_mag
+from optixstuff.spectral import Knots
 
 from skyscapes.io import exovista, from_exovista, get_earth_like_planet_indices
 
@@ -30,8 +32,8 @@ from skyscapes.io import exovista, from_exovista, get_earth_like_planet_indices
 def scene_file(tmp_path):
     """Write small scenes with distinct planet spectra at identical phases."""
 
-    def write(*, version=2.6, n_times=3, n_spots=2):
-        wave = np.array([0.5, 0.6, 0.7])
+    def write(*, version=2.6, n_times=3, n_spots=2, wave_dtype=np.float64):
+        wave = np.array([0.5, 0.6, 0.7], dtype=wave_dtype)
         times = np.arange(n_times) * 0.001
         primary = fits.PrimaryHDU(wave)
         primary.header["VERSION"] = version
@@ -86,6 +88,22 @@ def scene_file(tmp_path):
         return str(path)
 
     return write
+
+
+@pytest.mark.parametrize("wave_dtype", [np.float32, np.float64])
+def test_loaded_knots_are_the_file_grid(scene_file, wave_dtype):
+    """Fails if the loader rounds the stored micron grid on its way to the knots.
+
+    Exact digest. The star's and every planet's knots are the stored micron
+    grid (float32 or float64 on disk), widened to float64 and then scaled to
+    nm, computed here from the file. The ExoVista import requires x64 for
+    its orbital states; the disk loader's x32 case is in the disk dtype test.
+    """
+    path = scene_file(wave_dtype=wave_dtype)
+    truth = Knots(np.asarray(fits.getdata(path, 0), dtype=np.float64) * um2nm)
+    scene = from_exovista(path, load_disk=False)
+    assert scene.star.knots.digest == truth.digest
+    assert [p.physical_model.knots.digest for p in scene.planets] == [truth.digest] * 2
 
 
 @pytest.mark.parametrize("version", [2.33, 2.5, 2.6])

@@ -5,9 +5,20 @@ import interpax
 import jax
 import jax.numpy as jnp
 import numpy as np
+from hwoutils.leaves import HostGrid, as_bulk_leaf, as_float_leaf
 from jaxtyping import Array
+from optixstuff.spectral import Knots
 
+from .._tables import as_host_grid, knots_of
 from .base import AbstractPhysicalModel
+
+
+def _wavelength_grid(values) -> HostGrid:
+    """The static wavelength grid, refusals naming the field."""
+    try:
+        return as_host_grid(values)
+    except ValueError as error:
+        raise ValueError(f"wavelengths_nm: {error}") from None
 
 
 class TimeSeriesPhysicalModel(AbstractPhysicalModel):
@@ -23,17 +34,33 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
     already included in the tabulated ratios. Equal orbital phases do not
     imply equal contrasts at different epochs.
 
+    The wavelength grid is static host data (a ``HostGrid``, float64), and
+    the table's ``knots`` are that grid; a table of one wavelength has no
+    knots and cannot be integrated over a band.
+
     Attributes:
-        wavelengths_nm: Finite, strictly increasing grid [nm], shape ``(W,)``.
+        wavelengths_nm: Finite, strictly increasing grid [nm], shape ``(W,)``,
+            static.
         times_d: Finite, strictly increasing days from the scene epoch,
             shape ``(T,)``. The owning scene supplies the epoch metadata.
         contrast_grid: Finite, nonnegative flux ratios, shape ``(K, W, T)``.
-            Storage dtype is retained, including float32 contrast cubes.
+            A declared bulk field: ExoVista planet contrast cubes are float32
+            on disk, and a float32 cube is retained under x64.
     """
 
-    wavelengths_nm: Array = eqx.field(converter=jnp.asarray)
-    times_d: Array = eqx.field(converter=jnp.asarray)
-    contrast_grid: Array = eqx.field(converter=jnp.asarray)
+    wavelengths_nm: HostGrid = eqx.field(static=True, converter=_wavelength_grid)
+    times_d: Array = eqx.field(converter=as_float_leaf)
+    contrast_grid: Array = eqx.field(converter=as_bulk_leaf)
+
+    @property
+    def knots(self) -> Knots:
+        """The wavelength grid as ``Knots``; refused for a single wavelength."""
+        return knots_of(self.wavelengths_nm)
+
+    @property
+    def _tabulated(self) -> bool:
+        """A time series is always a table, even one it cannot integrate."""
+        return True
 
     def __check_init__(self):
         """Reject invalid table coordinates and contrasts before evaluation."""
@@ -50,7 +77,7 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
 
         contrast = np.asarray(self.contrast_grid)
         if contrast.ndim != 3 or contrast.shape[1:] != (
-            self.wavelengths_nm.size,
+            len(self.wavelengths_nm),
             self.times_d.size,
         ):
             raise ValueError(
@@ -67,9 +94,9 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
         """Wavelength breaks of the time-dependent contrast table [nm].
 
         Returns:
-            1-D array of the unique table wavelengths [nm].
+            1-D array of the table wavelengths [nm], float64 host data.
         """
-        return np.unique(self.wavelengths_nm)
+        return self.wavelengths_nm.values
 
     def contrast(
         self,
@@ -119,10 +146,11 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
         Returns:
             Contrast, shape ``(K, T_query)``, with NaN outside table support.
         """
+        grid = self.wavelengths_nm.array()
         dtype = jnp.result_type(
             wavelength_nm,
             time_d,
-            self.wavelengths_nm,
+            grid,
             self.times_d,
             self.contrast_grid,
             jnp.float32,
@@ -132,7 +160,7 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
             jnp.asarray(wavelength_nm, dtype=dtype), times.shape
         )
         time_grid = self.times_d.astype(dtype)
-        wavelength_grid = self.wavelengths_nm.astype(dtype)
+        wavelength_grid = grid.astype(dtype)
         contrast_grid = self.contrast_grid.astype(dtype)
 
         def per_planet(grid):

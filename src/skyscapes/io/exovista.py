@@ -239,7 +239,8 @@ def _load_star(hdul: fits.HDUList, epoch: Epoch, fits_ext: int = 4) -> Star:
     if spectral_unit is not None and spectral_unit.strip().lower() != "jy":
         raise ValueError("ExoVista stellar SPECUNIT must be Jy.")
 
-    wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
+    # File knots stay host float64: widened from the stored microns first.
+    wavelengths_nm = np.asarray(wavelengths_um, dtype=np.float64) * um2nm
     times_d = jnp.asarray(_simulation_times_d(obj_data[:, 0], epoch))
     spectra = obj_data[:, 16:]
     if fits_ext == 5 and spectral_unit is None:
@@ -395,7 +396,7 @@ def _load_single_planet(
     contrast_grid = jnp.clip(contrast_grid, 0.0, None)
 
     physical_model = GridPhysicalModel(
-        wavelengths_nm=wavelengths_nm,
+        knots=wavelengths_nm,
         phase_angle_deg=regular_grid,
         contrast_grid=contrast_grid[None, ...],
     )
@@ -446,7 +447,7 @@ def _load_disk(hdul: fits.HDUList, fits_ext: int) -> ExovistaDisk:
     # active float dtype, so wavelength interpolation never casts float64
     # values into a float32 buffer when x64 is enabled.
     active = jnp.result_type(float)
-    wavelengths_nm = jnp.asarray(wavelengths_um * um2nm, dtype=active)
+    wavelengths_nm = np.asarray(wavelengths_um, dtype=np.float64) * um2nm
     contrast_cube = jnp.asarray(obj_data[:-1].astype(np.float32), dtype=active)
     pixel_scale_arcsec = header["PXSCLMAS"] * mas2arcsec
 
@@ -577,7 +578,7 @@ def from_exovista(
             raise ValueError("planet_indices must address existing planets (0-based).")
 
         wavelengths_um = hdul[0].data
-        wavelengths_nm = jnp.asarray(wavelengths_um * um2nm)
+        wavelengths_nm = np.asarray(wavelengths_um, dtype=np.float64) * um2nm
         star_header = hdul[star_ext].header
         midplane_inc_deg, midplane_position_angle_deg = _midplane_to_east_north(
             float(star_header.get("I", 0.0)), float(star_header.get("PA", 0.0))

@@ -31,8 +31,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array
+from optixstuff.spectral import digest_knots
 
-from .._tables import product_rule, table_digest
+from .._tables import product_rule
 
 
 class AbstractPhysicalModel(eqx.Module):
@@ -42,45 +43,40 @@ class AbstractPhysicalModel(eqx.Module):
     grid contrast cube, ExoJax composition, etc.). The host planet's
     radius is supplied at call time via ``contrast(..., Rp_Rearth=...)``.
 
-    A model that overrides :meth:`spectral_breaks_nm` declares knots: it is a
-    tabulated spectrum. Its ``knot_digest`` is computed once at construction
-    from those knots and the class's interpolation (``spectral_degree``
-    between knots), so the operator that integrates it can be found inside a
-    traced program; it is None for a model constructed under a trace and for
-    a model without knots. A composite reports the union of its parts.
+    A model with a ``knots`` attribute (an ``optixstuff.spectral.Knots`` on a
+    static field, or a property over static data) is a tabulated spectrum. Its
+    ``knot_digest`` is computed from those knots and the class's interpolation
+    (``spectral_degree`` between knots) whenever it is read, so the operator
+    that integrates it can be found inside a traced program and the digest can
+    never go stale; it is None for a model without knots. A composite reports
+    the union of its parts.
 
     Attributes:
-        knot_digest: Static digest of the declared knots and the interpolation
-            method, or None.
         spectral_degree: Polynomial degree of the spectrum between knots.
     """
 
-    knot_digest: str | None = eqx.field(
-        static=True, init=False, default=None, repr=False
-    )
     spectral_degree: ClassVar[int] = 1
     _knot_method: ClassVar[str] = "linear"
 
-    def __post_init__(self):
-        """Digest the declared knots on the host; None under a trace."""
-        if self._tabulated:
-            self.knot_digest = table_digest(self.spectral_breaks_nm, self._knot_method)
+    @property
+    def knot_digest(self) -> str | None:
+        """Digest of the static knots and the interpolation, or None."""
+        if not self._tabulated:
+            return None
+        return digest_knots(self.knots, self._knot_method)
 
     @property
     def _tabulated(self) -> bool:
-        """Whether the model declares knots (overrides ``spectral_breaks_nm``)."""
-        return (
-            type(self).spectral_breaks_nm
-            is not AbstractPhysicalModel.spectral_breaks_nm
-        )
+        """Whether the model declares static knots."""
+        return getattr(self, "knots", None) is not None
 
     def spectral_breaks_nm(self) -> np.ndarray:
-        """Analytic spectra declare no integration breaks; tabulated ones override.
+        """The knots of a tabulated model [nm]; an analytic one declares none.
 
         Returns:
-            Empty 1-D array of wavelength breaks [nm]; tabulated models override it.
+            1-D array of wavelength breaks [nm], read from static data only.
         """
-        return np.empty(0)
+        return self.knots.nm if self._tabulated else np.empty(0)
 
     def photon_flux_density(
         self,

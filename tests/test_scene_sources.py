@@ -21,9 +21,11 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from hwoutils.constants import Rearth2m, c, h, k_B, pc2m
+from hwoutils.leaves import is_param
+from hwoutils.model_paths import assign
 from numpy.polynomial.legendre import leggauss
 from optixstuff.grids import PixelGrid, SkyOrientation
-from optixstuff.spectral import Band, Quadrature, Resolution
+from optixstuff.spectral import Band, Knots, Quadrature, Resolution
 from scipy.integrate import quad
 from zodi import DensityDust
 
@@ -33,10 +35,12 @@ from skyscapes.physical_model import (
     BlackbodyPhysicalModel,
     GridPhysicalModel,
     LambertianPhysicalModel,
+    PrecomputedPhysicalModel,
     SumPhysicalModel,
     TimeSeriesPhysicalModel,
 )
 from skyscapes.scene import BlackbodyStar, Planet, PrecomputedZodi, Scene, Star
+from tests.test_physical_model_exojax import make_physical_model
 
 DATA = Path(__file__).parent / "data"
 BANDS = ((500.0, 555.0), (735.0, 785.0))
@@ -319,52 +323,48 @@ def test_tabulated_source_without_a_rule_is_refused(rule):
         np.testing.assert_allclose(_band_sum(rule, radiance, band), truth, rtol=1e-12)
 
 
-def test_knot_digest_refuses_traced_and_replaced_grids(rule):
-    """Fails if a table built under a trace or a replaced knot grid is integrated.
+def test_knots_are_static_and_a_new_grid_has_no_rule(rule):
+    """Fails if traced knots are accepted, a knot is a leaf, or an old rule is reused.
 
-    A star constructed inside ``jax.jit`` has no digest: ``Resolution.build``
-    refuses it and its scene's ``sources`` raises, each naming the remedy
-    (construct on the host). A star or planet knot grid replaced with
-    ``eqx.tree_at`` after construction leaves a stale digest, which
-    ``spectral_tables`` and ``Resolution.build`` refuse (rebuild the table).
+    Exact. A star built inside ``jax.jit`` from traced knots is refused (the
+    knots must be concrete). The knots are static, so a fit request that
+    names them (``hwoutils.model_paths.assign``, which a fit uses) is refused
+    as not a leaf, the former knot path no longer exists, and no knot grid is
+    among the scene's leaves. A star rebuilt on a
+    grid moved by 0.01 nm has another digest, so the ``Resolution`` built for
+    the old grid has no rule for it and ``sources`` refuses (truth: the
+    lookup by static digest).
     """
     star = _phoenix()
     scene = _scene(star, (_table_planet(ALBEDO_NM, ALBEDO * 1e-9),))
     resolution = Resolution.build(rule, *scene.spectral_tables())
 
     def traced_star(wavelengths_nm, flux_density_jy):
-        built = Star(
+        return Star(
             wavelengths_nm=wavelengths_nm,
             times_d=jnp.zeros(1),
             flux_density_jy=flux_density_jy,
             interpolation_method="linear",
-        )
-        assert built.knot_digest is None
-        with pytest.raises(ValueError, match="construct the table on the host"):
-            Resolution.build(rule, built)
-        return (
-            eqx.tree_at(lambda s: s.star, scene, built)
-            .sources(rule, resolution, TIMES)
-            .star
-        )
+        ).flux_density_jy
 
-    with pytest.raises(LookupError, match="construct the table on the host"):
-        jax.jit(traced_star)(star.wavelengths_nm, star.flux_density_jy)
-
-    moved_star = eqx.tree_at(
-        lambda s: s.star._wavelengths_nm, scene, scene.star.wavelengths_nm + 0.01
+    with pytest.raises(TypeError, match="concrete"):
+        jax.jit(traced_star)(jnp.asarray(star.wavelengths_nm), star.flux_density_jy)
+    with pytest.raises(TypeError, match="not a leaf"):
+        assign(scene, "star.knots", Knots(star.wavelengths_nm + 0.01))
+    with pytest.raises(AttributeError):
+        assign(scene, "star._wavelengths_nm", star.wavelengths_nm + 0.01)
+    for knots in (star.knots.nm, ALBEDO_NM):
+        assert not any(
+            np.array_equal(np.asarray(leaf), knots) for leaf in jax.tree.leaves(scene)
+        )
+    moved = Star(
+        wavelengths_nm=star.wavelengths_nm + 0.01,
+        times_d=jnp.zeros(1),
+        flux_density_jy=star.flux_density_jy,
+        interpolation_method="linear",
     )
-    with pytest.raises(ValueError, match="rebuild the table"):
-        Resolution.build(rule, moved_star.star)
-    with pytest.raises(ValueError, match="rebuild the table"):
-        moved_star.spectral_tables()
-    moved_planet = eqx.tree_at(
-        lambda s: s.planets[0].physical_model.wavelengths_nm,
-        scene,
-        jnp.asarray(ALBEDO_NM + 0.5),
-    )
-    with pytest.raises(ValueError, match="rebuild the table"):
-        moved_planet.spectral_tables()
+    with pytest.raises(LookupError, match="no rule"):
+        eqx.tree_at(lambda s: s.star, scene, moved).sources(rule, resolution, TIMES)
 
 
 @vv.case("stellar-photometry", "code-verification")
@@ -527,60 +527,153 @@ def test_the_node_star_builds_under_jit_and_a_concrete_nonfinite_scale_still_rai
             jax.jit(lambda bad=bad: check_flux_scale(bad))()
 
 
-@pytest.mark.parametrize("host", [False, True], ids=["jax", "numpy"])
-def test_knot_leaves_name_exactly_the_leaves_that_set_the_knots(host):
-    """Fails if a knot leaf is missed, misnamed, or a value leaf is listed.
-
-    Truth, named by hand: the knot grids of the tabulated star, of the
-    tabulated and gridded planet models and of the tabulated local zodi, in
-    scene order; the Lambertian planet and every value leaf carry none. Each
-    path must read back (through the dotted-path reader a fit uses) exactly the
-    table's knots, compared bit for bit. The tables are built from JAX arrays
-    and from NumPy arrays (a star and a grid model keep NumPy knots as given),
-    and a scene round-tripped through ``Scene.from_scenes`` and
-    ``to_scenes``, whose leaves come back as NumPy, names the same knots. A
-    smooth scene has no knot leaf.
-    """
-    from hwoutils.model_paths import resolve
-
-    array = np.array if host else jnp.array
-    star = Star(
-        wavelengths_nm=array([400.0, 520.0, 700.0]),
-        times_d=array([0.0]),
-        flux_density_jy=array([[1.0], [2.0], [1.5]]),
-    )
-    planet = _table_planet(array([450.0, 600.0, 650.0]), array([0.1, 0.2, 0.3]))
+def _tabulated_sources():
+    """One of each tabulated source and break declarer, built from NumPy input."""
+    exojax = make_physical_model(K=1, n_nu=40, n_layers=6)
+    knots = np.array([450.0, 600.0, 650.0])
     grid = GridPhysicalModel(
-        array([450.0, 600.0, 650.0]),
-        array([0.0, 90.0, 180.0]),
+        knots, np.array([0.0, 90.0, 180.0]), np.full((1, 3, 3), 1e-10)
+    )
+    disk = GraterDisk(
+        sma_AU=jnp.array(3.0),
+        alpha_in=jnp.array(5.0),
+        alpha_out=jnp.array(-3.0),
+        ksi0_AU=jnp.array(0.1),
+        gamma=jnp.array(2.0),
+        beta=jnp.array(1.0),
+        rmin_AU=jnp.array(1.5),
+        rmax_AU=jnp.array(5.0),
+        wavelengths_nm=np.array([400.0, 700.0, 1000.0]),
+        g_HG_grid=jnp.array([0.4, 0.4, 0.4]),
+        Ag_grid=jnp.array([0.3, 0.3, 0.3]),
+        n_slices_los=8,
+        amplitude=DensityDust(
+            level=1.0, profile_id="grater-1999", calibration_id="unit-profile"
+        ),
+    )
+    return {
+        "star": _phoenix(),
+        "time series": _table_planet(knots, np.array([0.1, 0.2, 0.3])),
+        "grid": grid,
+        "sum": SumPhysicalModel((grid, LambertianPhysicalModel(jnp.array([0.3])))),
+        "zodi": PrecomputedZodi(np.array([450.0, 550.0, 650.0]), np.full(3, 1e12)),
+        "exojax": exojax,
+        "cached": PrecomputedPhysicalModel.from_physical_model(exojax),
+        "parametric disk": disk,
+    }
+
+
+def test_no_parameter_leaf_moves_the_knots():
+    """Fails if any parameter leaf of a tabulated source sets its breaks.
+
+    Exact (bitwise). For each tabulated source and break declarer (star, time
+    series, grid, a sum over a grid, the tabulated zodi, the ExoJAX model, the
+    cached model and the parametric disk), every inexact leaf is scaled by
+    1.07 and offset by 0.013 in turn, and ``spectral_breaks_nm()`` must be
+    bitwise unchanged: the knots are static, never a leaf a fit can free.
+    The ExoJAX knots are the native wavenumber grid converted once in
+    float64 (truth: ``1e7 / nu`` sorted, computed here with NumPy), and the
+    grid the opacity engine reads is the input grid bit for bit.
+    """
+    for name, source in _tabulated_sources().items():
+        base = np.array(source.spectral_breaks_nm())
+        assert base.size >= 2, name
+        flat, treedef = jax.tree_util.tree_flatten(source)
+        moved_any = False
+        for i, leaf in enumerate(flat):
+            if not is_param(leaf):
+                continue
+            moved_any = True
+            leaves = list(flat)
+            leaves[i] = leaf * 1.07 + 0.013
+            moved = jax.tree_util.tree_unflatten(treedef, leaves)
+            np.testing.assert_array_equal(
+                moved.spectral_breaks_nm(), base, err_msg=name
+            )
+        assert moved_any, name
+    nu = np.asarray(jnp.linspace(1.0e4, 2.5e4, 40))
+    exojax = make_physical_model(K=1, n_nu=40, n_layers=6)
+    np.testing.assert_array_equal(exojax.nu_grid.values, nu)
+    np.testing.assert_array_equal(exojax.knots.nm, np.sort(1.0e7 / nu))
+
+
+def test_a_composite_derives_its_knots_from_its_components():
+    """Fails if a sum stores its own copy of the knots.
+
+    Exact. Replacing the gridded component of a sum with a model on another
+    grid (``eqx.tree_at`` on the component) changes the sum's knots and digest
+    to the new grid's; a stored copy would keep the old grid.
+    """
+    total = _tabulated_sources()["sum"]
+    other = GridPhysicalModel(
+        np.array([455.0, 610.0, 660.0]),
+        np.array([0.0, 90.0, 180.0]),
         np.full((1, 3, 3), 1e-10),
     )
-    zodi = PrecomputedZodi(array([450.0, 550.0, 650.0]), np.full(3, 1e12))
-    scene = _scene(
-        star,
-        (LambertianPhysicalModel(jnp.array([0.3])), planet, grid),
-        local_zodi=zodi,
-    )
-    leaves = scene.knot_leaves()
-    assert leaves == (
-        "star._wavelengths_nm",
-        "planets[1].physical_model.wavelengths_nm",
-        "planets[2].physical_model.wavelengths_nm",
-        "local_zodi.wavelengths_nm",
-    )
-    for path, table in zip(leaves, (star, planet, grid, zodi), strict=True):
-        np.testing.assert_array_equal(
-            np.asarray(resolve(scene, path)), np.asarray(table.spectral_breaks_nm())
+    swapped = eqx.tree_at(lambda m: m.components[0], total, other)
+    np.testing.assert_array_equal(swapped.knots.nm, [455.0, 610.0, 660.0])
+    assert swapped.knot_digest != total.knot_digest
+
+
+def test_numpy_and_jax_input_build_one_scene(rule):
+    """Fails if a source keeps its input's array type or its knots depend on it.
+
+    Exact (bitwise), x64. The same star, tabulated planet and tabulated zodi
+    built once from NumPy arrays and once from float64 ``jnp`` arrays have
+    equal knots, the same tree, and bitwise equal ``sources`` on one rule.
+    """
+    base = _phoenix()
+
+    def build(array):
+        star = Star(
+            wavelengths_nm=array(base.wavelengths_nm),
+            times_d=array([0.0]),
+            flux_density_jy=array(np.asarray(base.flux_density_jy)),
+            interpolation_method="linear",
         )
-    # A batch holds one star and one model class, so round-trip a one-planet scene.
-    single = _scene(star, (planet,))
-    back = Scene.from_scenes([single]).to_scenes()[0]
-    assert back.knot_leaves() == single.knot_leaves()
-    assert single.knot_leaves() == (
-        "star._wavelengths_nm",
-        "planets[0].physical_model.wavelengths_nm",
+        planet = _table_planet(array(ALBEDO_NM), array(ALBEDO * 1e-9))
+        zodi = PrecomputedZodi(array([450.0, 650.0, 850.0]), array(np.full(3, 1e12)))
+        return _scene(star, (planet,), local_zodi=zodi)
+
+    host, device = build(np.array), build(jnp.array)
+    assert jax.tree.structure(host) == jax.tree.structure(device)
+    resolution = Resolution.build(rule, *host.spectral_tables())
+    pairs = zip(
+        jax.tree.leaves(host.sources(rule, resolution, TIMES)),
+        jax.tree.leaves(device.sources(rule, resolution, TIMES)),
+        strict=True,
     )
-    smooth = _scene(
-        BlackbodyStar(5772.0, 6.957e8), (LambertianPhysicalModel(jnp.array([0.3])),)
-    )
-    assert smooth.knot_leaves() == ()
+    for a, b in pairs:
+        assert a.dtype == b.dtype == np.float64
+        np.testing.assert_array_equal(a, b)
+
+
+def test_a_batch_refuses_twin_star_grids_by_name():
+    """Fails if two star grids that differ only by rounding are stacked silently.
+
+    Exact. A star on [400, 450.1, 520.3, 700] nm and one on its float32 copy
+    agree within the wavelength tolerance but differ in digest, so
+    ``Scene.from_scenes`` refuses them, naming both scenes, both digests and
+    the fix (one shared ``Knots``); the same stars on one shared ``Knots``
+    stack.
+    """
+    grid = np.array([400.0, 450.1, 520.3, 700.0])
+
+    def scene(knots):
+        star = Star(
+            wavelengths_nm=knots,
+            times_d=np.zeros(1),
+            flux_density_jy=np.ones((4, 1)),
+            interpolation_method="linear",
+        )
+        return _scene(star, (LambertianPhysicalModel(jnp.array([0.3])),))
+
+    twin = Knots(grid.astype(np.float32))
+    with pytest.raises(
+        ValueError, match="build both stars on one shared Knots"
+    ) as info:
+        Scene.from_scenes([scene(Knots(grid)), scene(twin)])
+    assert "scene 0 and scene 1" in str(info.value)
+    assert twin.digest in str(info.value)
+    shared = Knots(grid)
+    assert Scene.from_scenes([scene(shared), scene(shared)]).batch_shape == (2,)

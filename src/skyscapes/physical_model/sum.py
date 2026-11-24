@@ -2,7 +2,7 @@
 
 import numpy as np
 from jaxtyping import Array
-from optixstuff.spectral import spectral_breaks
+from optixstuff.spectral import Knots, spectral_breaks
 
 from .._tables import SMOOTH_DEGREE
 from .base import AbstractPhysicalModel
@@ -31,6 +31,18 @@ class SumPhysicalModel(AbstractPhysicalModel):
         return any(component._tabulated for component in self.components)
 
     @property
+    def knots(self) -> Knots | None:
+        """Union of the tabulated components' knots, or None when none is.
+
+        Derived from the components on every read, never stored, so replacing
+        a component's grid cannot leave a stale copy here.
+        """
+        grids = [c.knots for c in self.components if c._tabulated]
+        if not grids:
+            return None
+        return grids[0].union(*grids[1:])
+
+    @property
     def spectral_degree(self) -> int:
         """Largest degree between knots; a smooth component counts as a cubic."""
         return max(
@@ -48,8 +60,11 @@ class SumPhysicalModel(AbstractPhysicalModel):
         """Union of all component spectral breaks [nm].
 
         Returns:
-            1-D array of the union of the component wavelength breaks [nm].
+            1-D array of the union of the component wavelength breaks [nm]:
+            the merged knots when any component is tabulated.
         """
+        if self._tabulated:
+            return self.knots.nm
         return spectral_breaks(*self.components)
 
     def __check_init__(self):

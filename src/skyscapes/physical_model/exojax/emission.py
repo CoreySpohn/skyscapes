@@ -58,9 +58,12 @@ from hwoutils.conversions import (
     w_per_nm_per_m2_to_photons_per_nm_per_m2,
     wavenumber_cm_to_nm,
 )
+from hwoutils.leaves import HostGrid
 from hwoutils.planck import brightness_temperature, planck_photon_radiance
 from jaxtyping import Array
+from optixstuff.spectral import Knots
 
+from ..._tables import as_host_grid, wavenumber_knots
 from ..base import AbstractPhysicalModel
 from .cia import TabulatedCIA, cia_path, load_cia
 from .components import (
@@ -251,7 +254,8 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
             reflected-light model).
         rt_engine: ExoJAX ``ArtEmisPure`` instance. Its bottom pressure
             boundary is the surface pressure; ``pressure`` holds centers.
-        nu_grid: Wavenumber grid [cm^-1].
+        nu_grid: Wavenumber grid [cm^-1]: static float64 host data, the exact
+            values the opacity engine was built on.
         n_nu: Length of ``nu_grid``.
         cia: Optional tabulated collision-induced absorption continua.
         cia_vmr: Constant volume fractions for unmodeled CIA partners.
@@ -264,23 +268,16 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
     surface: EmittingSurface
     absorption: Absorption
     rt_engine: Any = eqx.field(static=True)
-    nu_grid: Array
+    nu_grid: HostGrid = eqx.field(static=True, converter=as_host_grid)
     n_nu: int = eqx.field(static=True)
 
     # The spectrum is linear in wavenumber between grid points.
     _knot_method: ClassVar[str] = "linear-in-wavenumber"
 
-    def spectral_breaks_nm(self) -> np.ndarray:
-        """Declare the native line-by-line grid, in nm, as integration breaks.
-
-        Gauss nodes cannot resolve absorption lines between breaks, so a band
-        integral samples every native grid point. Cost scales with the grid.
-
-        Returns:
-            Ascending wavelengths [nm] of the native grid points, shape
-            ``(n_nu,)``.
-        """
-        return np.sort(np.asarray(wavenumber_cm_to_nm(np.asarray(self.nu_grid))))
+    @property
+    def knots(self) -> Knots:
+        """Knots [nm]: the native wavenumber grid converted in float64, sorted."""
+        return wavenumber_knots(self.nu_grid)
 
     cia: tuple[TabulatedCIA, ...] = ()
     cia_vmr: dict[str, Array] = eqx.field(default_factory=dict)
@@ -552,7 +549,7 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         if self.cia:
             dtau = dtau + self._cia_optical_depth(k)
 
-        wavelength_nm = wavenumber_cm_to_nm(self.nu_grid)
+        wavelength_nm = wavenumber_cm_to_nm(self.nu_grid.array())
         # The ground is an extra optically thick emitting bottom layer.
         temperatures = jnp.concatenate(
             [temperature, jnp.atleast_1d(self.surface.temperature_K[k])]
@@ -587,7 +584,7 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
             Brightness temperature [K] of the emergent flux, shape
             ``(K, n_nu)``.
         """
-        wavelength_nm = wavenumber_cm_to_nm(self.nu_grid)
+        wavelength_nm = wavenumber_cm_to_nm(self.nu_grid.array())
         radiance_w = cgs_per_wavenumber_to_w_per_nm_per_m2(
             self.emergent_flux() / jnp.pi, wavelength_nm
         )
@@ -623,7 +620,7 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         at_wl = jnp.stack(
             [
                 interpax.interp1d(
-                    target_nu, self.nu_grid, f, method="linear", extrap=False
+                    target_nu, self.nu_grid.array(), f, method="linear", extrap=False
                 )
                 for f in flux
             ],

@@ -7,7 +7,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from astropy.io import fits
-from hwoutils.constants import arcsec2rad
+from hwoutils.constants import arcsec2rad, um2nm
+from optixstuff.spectral import Knots
 
 from skyscapes.io.exovista import _load_disk
 from skyscapes.scene import FlatStar
@@ -45,7 +46,10 @@ def test_load_disk_interpolates_without_dtype_warnings(enable_x64, wavelength_dt
             * arcsec2rad**2
         )
         dtype = jnp.float64 if enable_x64 else jnp.float32
-        assert disk.wavelengths_nm.dtype == dtype
+        # The knots are static host float64 in both precisions: the stored
+        # microns widened, then scaled (exact digest).
+        widened = np.asarray(wavelengths_um, dtype=np.float64) * um2nm
+        assert disk.knots.digest == Knots(widened).digest
         assert disk.contrast_cube.dtype == dtype
         assert brightness.dtype == dtype
         np.testing.assert_array_equal(disk.contrast_cube, cube[:-1].astype(np.float32))

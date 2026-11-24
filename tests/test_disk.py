@@ -536,10 +536,10 @@ def test_exovista_disk_spline_operator_is_the_interpax_spline():
     The cube-to-coefficients map is linear for fixed knots; agreement to 1e-15
     of the largest coefficient (float64 rounding of the same recurrence).
     """
-    from skyscapes.disk.exovista import _Knots, _spline_operator
+    from skyscapes.disk.exovista import _spline_operator
 
     disk = _live_disk()
-    operator = _spline_operator(_Knots(disk.wavelengths_nm))
+    operator = _spline_operator(disk.knots)
     assert operator.shape == (4, 4, 5)
     derived = jnp.einsum("kjm,myx->kjyx", operator, disk.contrast_cube)
     stored = interpax.CubicSpline(disk.wavelengths_nm, disk.contrast_cube, axis=0).c

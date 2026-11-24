@@ -27,10 +27,12 @@ from typing import ClassVar
 import equinox as eqx
 import jax.numpy as jnp
 import numpy as np
-from hwoutils.conversions import wavenumber_cm_to_nm
+from hwoutils.leaves import HostGrid
 from jaxtyping import Array
+from optixstuff.spectral import Knots
 
 from .._repr import indent
+from .._tables import as_host_grid, wavenumber_knots
 from .base import AbstractPhysicalModel
 from .lambertian import project_reflected
 
@@ -47,27 +49,22 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
             on the wavenumber grid, shape ``(K, n_nu)``. Already
             includes all the physics of the original physical model
             (absorption, Rayleigh, clouds, surface).
-        nu_grid: Wavenumber grid [cm^-1], shape ``(n_nu,)``.
+        nu_grid: Wavenumber grid [cm^-1], shape ``(n_nu,)``: static float64
+            host data, the exact values the source model was built on.
         n_nu: Length of ``nu_grid`` (static for JIT).
     """
 
     reflectivity: Array
-    nu_grid: Array
+    nu_grid: HostGrid = eqx.field(static=True, converter=as_host_grid)
     n_nu: int = eqx.field(static=True)
 
     # The spectrum is linear in wavenumber between grid points.
     _knot_method: ClassVar[str] = "linear-in-wavenumber"
 
-    def spectral_breaks_nm(self) -> np.ndarray:
-        """Declare the native line-by-line grid, in nm, as integration breaks.
-
-        Gauss nodes cannot resolve absorption lines between breaks, so a band
-        integral samples every native grid point. Cost scales with the grid.
-
-        Returns:
-            1-D array of the native grid wavelengths [nm], sorted ascending.
-        """
-        return np.sort(np.asarray(wavenumber_cm_to_nm(np.asarray(self.nu_grid))))
+    @property
+    def knots(self) -> Knots:
+        """Knots [nm]: the native wavenumber grid converted in float64, sorted."""
+        return wavenumber_knots(self.nu_grid)
 
     @classmethod
     def from_physical_model(
@@ -126,7 +123,7 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
                     f"Delete the file to rebuild."
                 )
             reflectivity = jnp.asarray(data["reflectivity"])
-            nu_grid = jnp.asarray(data["nu_grid"])
+            nu_grid = np.asarray(data["nu_grid"], dtype=np.float64)
         return cls(
             reflectivity=reflectivity,
             nu_grid=nu_grid,
@@ -149,7 +146,7 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
             path,
             cache_format_version=np.asarray(CACHE_FORMAT_VERSION),
             reflectivity=np.asarray(self.reflectivity),
-            nu_grid=np.asarray(self.nu_grid),
+            nu_grid=self.nu_grid.values,
         )
 
     def contrast(
@@ -204,7 +201,7 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
         """
         return project_reflected(
             self.reflectivity,
-            self.nu_grid,
+            self.nu_grid.array(),
             phase_angle_rad=phase_angle_rad,
             star_planet_distance_AU=star_planet_distance_AU,
             wavelength_nm=wavelengths_nm,
@@ -218,8 +215,8 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
             Multi-line summary string.
         """
         K = int(self.reflectivity.shape[0])
-        wl_min = float(1.0e7 / self.nu_grid.max())
-        wl_max = float(1.0e7 / self.nu_grid.min())
+        wl_min = float(self.knots.nm[0])
+        wl_max = float(self.knots.nm[-1])
         peak_mean = float(jnp.mean(self.reflectivity.max(axis=-1)))
         lines = [
             f"PrecomputedPhysicalModel(K={K}, n_nu={self.n_nu})",

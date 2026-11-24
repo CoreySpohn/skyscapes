@@ -15,7 +15,7 @@ from hwoutils.constants import c, h, k_B, pc2m, sigma_SB
 from hwoutils.conversions import (
     jy_to_photons_per_nm_per_m2,
 )
-from optixstuff.spectral import Band, Quadrature
+from optixstuff.spectral import Band, Knots, Quadrature
 
 from skyscapes.scene import AbstractStar, BlackbodyStar, FlatStar, Star
 
@@ -192,7 +192,7 @@ def test_spectrum_star_wavelength_coverage(n_epochs):
         times_d=t,
         flux_density_jy=jnp.ones((wl.size, t.size)),
     )
-    assert s.wavelengths_nm is wl
+    assert s.knots == Knots(np.asarray(wl))
     assert jnp.array_equal(s.wavelengths_nm, wl)
     bounds = s.wavelength_range_nm
     assert bounds == (500.0, 1000.0)

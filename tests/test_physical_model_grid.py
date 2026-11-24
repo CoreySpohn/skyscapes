@@ -23,7 +23,7 @@ def test_grid_is_abstract_physical_model():
     """GridPhysicalModel subclasses AbstractPhysicalModel."""
     wl, phase_deg, contrast = _flat_grid()
     model = GridPhysicalModel(
-        wavelengths_nm=wl,
+        knots=wl,
         phase_angle_deg=phase_deg,
         contrast_grid=contrast[None, ...],  # (K=1, n_wl, n_phase)
     )
@@ -34,7 +34,7 @@ def test_grid_returns_grid_value_on_nodes():
     """Querying inside a constant-0.1 grid returns 0.1 to interp precision."""
     wl, phase_deg, contrast = _flat_grid()
     model = GridPhysicalModel(
-        wavelengths_nm=wl,
+        knots=wl,
         phase_angle_deg=phase_deg,
         contrast_grid=contrast[None, ...],
     )
@@ -61,7 +61,7 @@ def test_grid_multiple_planets_independent():
         axis=0,
     )
     model = GridPhysicalModel(
-        wavelengths_nm=wl,
+        knots=wl,
         phase_angle_deg=phase_deg,
         contrast_grid=grids,
     )
@@ -89,7 +89,7 @@ def test_grid_handles_x64_query_against_float32_cube():
     # Force the cube and grids to float32 (matches what the ExoVista
     # loader produces on disk).
     model = GridPhysicalModel(
-        wavelengths_nm=wl.astype(jnp.float32),
+        knots=wl.astype(jnp.float32),
         phase_angle_deg=phase_deg.astype(jnp.float32),
         contrast_grid=contrast[None, ...].astype(jnp.float32),
     )

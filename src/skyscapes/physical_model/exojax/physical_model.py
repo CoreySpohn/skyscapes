@@ -55,11 +55,13 @@ from exojax.rt import ArtReflectPure
 from exojax.utils.grids import wavenumber_grid
 from hwoutils.conversions import (
     nm_to_wavenumber_cm,
-    wavenumber_cm_to_nm,
 )
+from hwoutils.leaves import HostGrid
 from jaxtyping import Array
+from optixstuff.spectral import Knots
 
 from ..._repr import indent
+from ..._tables import as_host_grid, wavenumber_knots
 from ..base import AbstractPhysicalModel
 from ..cached import PrecomputedPhysicalModel
 from ..lambertian import project_reflected
@@ -423,7 +425,8 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
         surface: Surface component (e.g. ``WavelengthDependentSurface``).
 
         rt_engine: ExoJAX ``ArtReflectPure`` instance.
-        nu_grid: Wavenumber grid [cm^-1].
+        nu_grid: Wavenumber grid [cm^-1]: static float64 host data, the exact
+            values the opacity engine was built on.
         n_nu: Length of ``nu_grid`` (static for JIT).
     """
 
@@ -443,23 +446,16 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
 
     # Static / shared
     rt_engine: Any = eqx.field(static=True)
-    nu_grid: Array
+    nu_grid: HostGrid = eqx.field(static=True, converter=as_host_grid)
     n_nu: int = eqx.field(static=True)
 
     # The spectrum is linear in wavenumber between grid points.
     _knot_method: ClassVar[str] = "linear-in-wavenumber"
 
-    def spectral_breaks_nm(self) -> np.ndarray:
-        """Declare the native line-by-line grid, in nm, as integration breaks.
-
-        Gauss nodes cannot resolve absorption lines between breaks, so a band
-        integral samples every native grid point. Cost scales with the grid.
-
-        Returns:
-            Ascending wavelengths [nm] of the native grid points, shape
-            ``(n_nu,)``.
-        """
-        return np.sort(np.asarray(wavenumber_cm_to_nm(np.asarray(self.nu_grid))))
+    @property
+    def knots(self) -> Knots:
+        """Knots [nm]: the native wavenumber grid converted in float64, sorted."""
+        return wavenumber_knots(self.nu_grid)
 
     @classmethod
     def from_default_setup(
@@ -807,7 +803,7 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
         """
         return project_reflected(
             self.reflectivity(),
-            self.nu_grid,
+            self.nu_grid.array(),
             phase_angle_rad=phase_angle_rad,
             star_planet_distance_AU=star_planet_distance_AU,
             wavelength_nm=wavelengths_nm,
@@ -822,8 +818,8 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
         """
         K = int(self.log_gravity_cgs.shape[0])
         n_layers = int(self.rt_engine.pressure.shape[0])
-        wl_min_nm = float(1.0e7 / self.nu_grid.max())
-        wl_max_nm = float(1.0e7 / self.nu_grid.min())
+        wl_min_nm = float(self.knots.nm[0])
+        wl_max_nm = float(self.knots.nm[-1])
         bulk_label = self.bulk.name if self.bulk is not None else "None"
         species_label = ", ".join(s.name for s in self.species)
 

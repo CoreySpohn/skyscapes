@@ -10,14 +10,15 @@ import jax.numpy as jnp
 import numpy as np
 import zodi
 from hwoutils.conversions import um_to_nm
+from hwoutils.leaves import as_float_leaf
 from jax import Array
+from optixstuff.spectral import Knots, as_knots, digest_knots
 from orbix.observatory import ecliptic_pointing
 from orbix.system import SkyFrame
 from zodi.tables import TABLE19_WAVELENGTH_UM
 from zodi.units import intensity_from_ab_mag_arcsec2, power_to_photon_intensity
 
 from .._flux_scale import check_flux_scale
-from .._tables import table_digest
 
 
 class AbstractLocalZodi(eqx.Module):
@@ -201,24 +202,21 @@ class PrecomputedZodi(AbstractLocalZodi):
     The sky frame and time are accepted and ignored. Values outside the
     supplied wavelength support are NaN.
 
-    The table is an ``optixstuff.spectral.SpectralTable``: its knot digest is
-    computed at construction, and :meth:`node_radiance` reduces the table on a
-    band rule with the operator a ``Resolution`` holds for it.
+    The table is an ``optixstuff.spectral.SpectralTable``: its wavelengths are
+    a static ``Knots``, and :meth:`node_radiance` reduces the table on a band
+    rule with the operator a ``Resolution`` holds for it.
 
     Attributes:
-        wavelengths_nm: Wavelengths of the table [nm], increasing, shape ``(N,)``.
+        knots: Wavelengths of the table [nm], increasing, shape ``(N,)``, static.
         radiance_phot_per_s_m2_nm_sr: Photon radiance at those wavelengths
             [ph s^-1 m^-2 nm^-1 sr^-1], shape ``(N,)``.
         flux_scale: Dimensionless factor on the local zodi alone.
-        knot_digest: Static digest of the wavelength knots, or None for a table
-            constructed under a trace.
         spectral_degree: Polynomial degree between knots: one, linear.
     """
 
-    wavelengths_nm: Array = eqx.field(converter=jnp.asarray)
-    radiance_phot_per_s_m2_nm_sr: Array = eqx.field(converter=jnp.asarray)
-    flux_scale: Array = eqx.field(converter=jnp.asarray)
-    knot_digest: str | None = eqx.field(static=True)
+    knots: Knots = eqx.field(static=True, converter=as_knots)
+    radiance_phot_per_s_m2_nm_sr: Array = eqx.field(converter=as_float_leaf)
+    flux_scale: Array = eqx.field(converter=as_float_leaf)
     spectral_degree: ClassVar[int] = 1
 
     def __init__(
@@ -230,15 +228,25 @@ class PrecomputedZodi(AbstractLocalZodi):
         """Store a photon radiance table in ph s^-1 m^-2 nm^-1 sr^-1.
 
         Args:
-            wavelengths_nm: Wavelengths of the table [nm], increasing, shape ``(N,)``.
+            wavelengths_nm: Wavelengths of the table [nm], increasing, shape
+                ``(N,)``: a ``Knots`` or a concrete host array, kept in float64.
             radiance_phot_per_s_m2_nm_sr: Photon radiance at those wavelengths
                 [ph s^-1 m^-2 nm^-1 sr^-1], shape ``(N,)``.
             flux_scale: Dimensionless factor on the local zodi alone, default one.
         """
-        self.flux_scale = jnp.asarray(flux_scale)
-        self.wavelengths_nm = jnp.asarray(wavelengths_nm)
-        self.knot_digest = table_digest(self.wavelengths_nm, "linear")
-        self.radiance_phot_per_s_m2_nm_sr = jnp.asarray(radiance_phot_per_s_m2_nm_sr)
+        self.flux_scale = flux_scale
+        self.knots = wavelengths_nm
+        self.radiance_phot_per_s_m2_nm_sr = radiance_phot_per_s_m2_nm_sr
+
+    @property
+    def knot_digest(self) -> str:
+        """Digest of the static knots under linear interpolation."""
+        return digest_knots(self.knots, "linear")
+
+    @property
+    def wavelengths_nm(self) -> np.ndarray:
+        """The table wavelengths [nm], float64 host data (read-only)."""
+        return self.knots.nm
 
     def spectral_breaks_nm(self) -> np.ndarray:
         """Return the tabulated radiance wavelengths in nm on the host.
@@ -246,7 +254,7 @@ class PrecomputedZodi(AbstractLocalZodi):
         Returns:
             The table wavelengths [nm], a NumPy array of shape ``(N,)``.
         """
-        return np.asarray(self.wavelengths_nm)
+        return self.knots.nm
 
     def _photon_radiance(
         self, wavelength_nm: Array, sky_frame: SkyFrame, time_d: Array
@@ -255,7 +263,7 @@ class PrecomputedZodi(AbstractLocalZodi):
         wave = jnp.asarray(wavelength_nm)
         return jnp.interp(
             wave,
-            self.wavelengths_nm,
+            self.knots.array(),
             self.radiance_phot_per_s_m2_nm_sr,
             left=jnp.nan,
             right=jnp.nan,

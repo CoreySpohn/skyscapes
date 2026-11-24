@@ -53,6 +53,7 @@ import equinox as eqx
 import interpax
 import jax.numpy as jnp
 from jaxtyping import Array
+from optixstuff.spectral import Knots, as_knots
 from zodi import AbstractDustAmplitude
 
 from ._los import (
@@ -229,7 +230,7 @@ class ExovistaParametricDisk(AbstractParametricDisk):
     w2: Array
     rmin_AU: Array
     rmax_AU: Array
-    wavelengths_nm: Array
+    wavelengths_nm: Knots = eqx.field(static=True, converter=as_knots)
     Ag_grid: Array
 
     profile_id: ClassVar[str] = "exovista-parametric"
@@ -250,7 +251,7 @@ class ExovistaParametricDisk(AbstractParametricDisk):
         """Unit-density LOS integral times the spectral scattering coefficient."""
         Ag = interpax.interp1d(
             wavelength_nm,
-            self.wavelengths_nm,
+            self.wavelengths_nm.array(),
             self.Ag_grid,
             method="cubic",
             extrap=False,

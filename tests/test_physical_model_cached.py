@@ -37,7 +37,7 @@ def test_precomputed_spectrum_matches_source_at_grid_wavelengths():
     cached = PrecomputedPhysicalModel.from_physical_model(model)
 
     # Sample a wavelength on the grid (no interp error).
-    nu_mid = model.nu_grid[model.n_nu // 2]
+    nu_mid = model.nu_grid.values[model.n_nu // 2]
     wl_nm = jnp.array(1.0e7 / float(nu_mid))
 
     phase = jnp.full((K, 1), 0.5)

@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 from hwoutils.constants import pc2AU
 from hwoutils.conversions import arcsec_to_au
-from optixstuff.spectral import Band
+from optixstuff.spectral import Band, Knots
 from zodi import AbstractDustAmplitude, SurfaceBrightnessDust
 
 from .amplitude import calibration_band, check_amplitude, density_level
@@ -27,8 +27,8 @@ class AbstractParametricDisk(AbstractDisk):
     Attributes:
         profile_id: Class-level identifier of the profile family; a
             ``DensityDust`` amplitude must carry the same identifier.
-        wavelengths_nm: 1-D wavelength grid of the tabulated scattering
-            parameters [nm].
+        wavelengths_nm: Static wavelength grid of the tabulated scattering
+            parameters [nm], a ``Knots``.
         amplitude: Typed density or calibrated surface-brightness amplitude.
         inclination_deg: Inclination of the disk plane [deg]; zero is face-on.
         position_angle_deg: Position angle of the major axis, north through east
@@ -43,7 +43,7 @@ class AbstractParametricDisk(AbstractDisk):
     """
 
     profile_id: eqx.AbstractClassVar[str]
-    wavelengths_nm: eqx.AbstractVar[jax.Array]
+    wavelengths_nm: eqx.AbstractVar[Knots]
     amplitude: eqx.AbstractVar[AbstractDustAmplitude]
     inclination_deg: eqx.AbstractVar[jax.Array]
     position_angle_deg: eqx.AbstractVar[jax.Array]
@@ -71,7 +71,7 @@ class AbstractParametricDisk(AbstractDisk):
         Returns:
             1-D array of the wavelengths of the tabulated scattering parameters [nm].
         """
-        return np.asarray(self.wavelengths_nm)
+        return self.wavelengths_nm.nm
 
     def __check_init__(self):
         """Validate the declared disk inputs."""
