@@ -569,14 +569,15 @@ def test_rebuilds_keep_every_source_model():
     midplane angles untouched.
     """
     times = jnp.array([0.0, 40.0])
-    original = canonical(_full_scene())
+    masked = canonical(_full_scene(valid=jnp.array([True, False])))
+    original = canonical(_full_scene(valid=jnp.array([False, True])))
     restored = Scene.from_table(original.to_table(), template=original)
     _fields_equal(restored, original)
+    assert not np.all(np.asarray(restored.valid))
     truth = _source_reads(original, times)
     for name, value in _source_reads(restored, times).items():
         np.testing.assert_array_equal(value, truth[name])
 
-    masked = canonical(_full_scene(valid=jnp.array([True, False])))
     (unpacked,) = masked.to_scenes()
     assert unpacked.n_planets == 1
     _fields_equal(
@@ -587,6 +588,32 @@ def test_rebuilds_keep_every_source_model():
     reads = _source_reads(unpacked, times)
     np.testing.assert_array_equal(reads["disk"], truth["disk"])
     np.testing.assert_array_equal(reads["zodi"], truth["zodi"])
+
+
+def test_rebuilt_scene_reads_the_same_planets():
+    """Fails if a table restore or an unpacking changes a planet read or element.
+
+    Truth: the original scene, bitwise (the stored values are the inputs' own,
+    so the tolerance is zero): planet flux densities and the orbital elements
+    and mean motions of the dynamics, for a table round trip with a non-trivial
+    ``valid`` mask and for the unpacked scene, whose one valid planet is the
+    original's slot 1 read through the original's mask.
+    """
+    times = jnp.array([0.0, 40.0])
+    original = canonical(_full_scene(valid=jnp.array([False, True])))
+    restored = Scene.from_table(original.to_table(), template=original)
+    flux = original.planet_flux_densities(jnp.asarray(600.0), times)
+    np.testing.assert_array_equal(
+        restored.planet_flux_densities(jnp.asarray(600.0), times), flux
+    )
+    _same_bits(restored.dynamics.orbits, original.dynamics.orbits)
+    (unpacked,) = original.to_scenes()
+    np.testing.assert_array_equal(
+        unpacked.planet_flux_densities(jnp.asarray(600.0), times), flux[1:]
+    )
+    np.testing.assert_array_equal(
+        unpacked.dynamics.orbits.n_rad_per_d, original.dynamics.orbits.n_rad_per_d[1:]
+    )
 
 
 @pytest.mark.parametrize("inactive_mass", [0.0, 1.0])

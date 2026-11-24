@@ -31,35 +31,51 @@ def test_submodules_importable():
 
 
 def test_no_module_holds_a_static_dict():
-    """Fails if a public Module stores a dict as a static field.
+    """Fails if a public Module stores a dict, or untyped host data, as a static field.
 
     A static dict is part of the tree structure, so two scenes whose dicts
     differ cannot batch, and a dict of host data does not belong in a Module.
-    Truth: the field annotations of every Module exported by the scene, disk,
-    physical_model, population and io packages; an annotation naming ``dict``
-    or a mapping type fails. The check is exact.
+    Truth: the field annotations of every public ``eqx.Module`` class defined
+    in any skyscapes submodule (walked, so nested classes such as the ExoJAX
+    components count). An annotation naming ``dict`` or a mapping type fails,
+    and so does a static ``Any`` field other than the three named ExoJAX
+    engine handles. The check is exact.
     """
     import dataclasses
     import importlib
     import inspect
+    import pkgutil
     import re
 
     import equinox as eqx
 
-    seen = 0
+    engine_handles = {
+        ("MolecularSpecies", "opa"),
+        ("ExoJaxEmissionModel", "rt_engine"),
+        ("ExoJaxPhysicalModel", "rt_engine"),
+    }
+    classes = {}
+    for info in pkgutil.walk_packages(skyscapes.__path__, "skyscapes."):
+        module = importlib.import_module(info.name)
+        for cls in vars(module).values():
+            if (
+                inspect.isclass(cls)
+                and issubclass(cls, eqx.Module)
+                and cls.__module__.startswith("skyscapes")
+                and not cls.__name__.startswith("_")
+            ):
+                classes[cls] = None
     offenders = []
-    for package in ("scene", "disk", "physical_model", "population", "io"):
-        module = importlib.import_module(f"skyscapes.{package}")
-        for name in module.__all__:
-            cls = getattr(module, name)
-            if not (inspect.isclass(cls) and issubclass(cls, eqx.Module)):
+    for cls in classes:
+        for f in dataclasses.fields(cls):
+            if not f.metadata.get("static"):
                 continue
-            seen += 1
-            offenders += [
-                f"{name}.{f.name}"
-                for f in dataclasses.fields(cls)
-                if f.metadata.get("static")
-                and re.search(r"\b(dict|Dict|Mapping)\b", str(f.type))
-            ]
-    assert seen > 20
+            kind = str(f.type)
+            if re.search(r"\b(dict|Dict|Mapping)\b", kind) or (
+                re.search(r"\b(Any|object)\b", kind)
+                and (cls.__name__, f.name) not in engine_handles
+            ):
+                offenders.append(f"{cls.__name__}.{f.name}: {kind}")
+    assert len(classes) > 50
+    assert any(cls.__name__ == "GrayCloud" for cls in classes)
     assert offenders == []

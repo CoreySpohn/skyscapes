@@ -155,21 +155,28 @@ arrays with shape `(n_times, n_spots)`:
 | `umbra_temperature_K`, `penumbra_temperature_K` | Component temperatures from the stellar header, or `None` when absent |
 
 A `Star` carries no free-form header. Host data a scene does not model
-(`TEFF`, `RA`, `DEC`, a target name, the original west-based `PA`) stays in the
-file. `skyscapes.io.exovista_header(path)` returns the star extension's cards
-as a plain dictionary under uppercase keys, excluding blank, `COMMENT`, and
-`HISTORY` cards:
+(`TEFF`, a target name, the original west-based `PA`) stays in the file; `RA`
+and `DEC` are read onto the scene's sky frame. `skyscapes.io.exovista_header(path)`
+returns the star extension's cards as a plain dictionary under uppercase keys,
+excluding blank, `COMMENT`, and `HISTORY` cards:
 
-```python
+Needs an ExoVista file on disk, so the block is not executed.
+
+```python notest
+import jax
+
 from skyscapes.io import exovista_header, from_exovista
 
-scene = from_exovista("path/to/exovista_system.fits")
-header = exovista_header("path/to/exovista_system.fits")
-teff_K = header["TEFF"]
+jax.config.update("jax_enable_x64", True)
+path = "path/to/exovista_system.fits"
+scene = from_exovista(path, load_disk=False, local_zodi=None)
+teff_K = exovista_header(path)["TEFF"]
 ```
 
 Because the dictionary lives beside the scene, scenes loaded from files whose
-headers differ still share one structure and batch with `Scene.from_scenes`.
+headers differ still share one structure and batch with `Scene.from_scenes`,
+provided each is loaded with `load_disk=False, local_zodi=None` (batches carry
+no disk and no local zodi).
 The system's disk orientation uses `Scene.midplane_inc_deg = I`
 and `Scene.midplane_position_angle_deg = (90 + PA) % 360` in the east/north chart, for
 parametric disks and visualization outlines. The header does not supply
