@@ -164,8 +164,10 @@ def test_system_spec_flux_density_per_planet():
 def test_bin_planet_flux_narrow_limit():
     """Narrow-bin flux equals contrast times star flux to rtol 1e-10, atol 0.
 
-    A blackbody varies smoothly over 1e-4 nm at 500-700 nm, so the symmetric
-    bin's second-order correction is below this float64 relative tolerance.
+    A blackbody varies smoothly over 1e-3 nm at 500-700 nm, so the symmetric
+    bin's second-order correction (about 1e-11) is below this float64 relative
+    tolerance. The bins are wider than the wavelength tolerance (1.2e-4 nm at
+    500 nm, 2.4e-4 nm at 700 nm), below which a rule is refused.
     Include multiple planets, dates and narrow channels to check axes.
     """
     from skyscapes.scene import BlackbodyStar
@@ -175,7 +177,7 @@ def test_bin_planet_flux_narrow_limit():
     system = _system(star, (planet, planet))
     centers = jnp.array([500.0, 700.0])
     rule = Quadrature.build(
-        [Band(499.99995, 500.00005), Band(699.99995, 700.00005)], system
+        [Band(499.9995, 500.0005), Band(699.9995, 700.0005)], system
     )
     times = jnp.array([0.0, 100.0])
     actual, expected = eqx.filter_jit(
