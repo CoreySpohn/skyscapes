@@ -258,12 +258,30 @@ def _load_star(hdul: fits.HDUList, epoch: Epoch, fits_ext: int = 4) -> Star:
         flux_density_jy=flux_density_jy,
         interpolation_method="linear",
         spots=_load_spots(hdul, fits_ext, times_d),
-        metadata={
-            key.upper(): value
-            for key, value in obj_header.items()
-            if key and key not in ("COMMENT", "HISTORY", "MASS", "DIST")
-        },
     )
+
+
+def exovista_header(fits_file: str) -> dict:
+    """Read the star extension header of an ExoVista file as a plain dictionary.
+
+    The header holds host data a scene does not carry (``TEFF``, ``RA``,
+    ``DEC``, target names and so on). It is returned beside the scene, never
+    stored on a Module, so scenes with different headers still batch.
+
+    Args:
+        fits_file: Path to the ExoVista FITS file.
+
+    Returns:
+        Dictionary of the star extension cards under uppercase keys, excluding
+        blank, ``COMMENT`` and ``HISTORY`` cards.
+    """
+    with fits.open(fits_file, memmap=False) as hdul:
+        header = hdul[_star_extension(hdul)].header
+        return {
+            key.upper(): value
+            for key, value in header.items()
+            if key and key not in ("COMMENT", "HISTORY")
+        }
 
 
 def _exovista_to_orbix(vector: jnp.ndarray) -> jnp.ndarray:

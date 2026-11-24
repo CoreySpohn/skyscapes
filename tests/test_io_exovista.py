@@ -23,12 +23,10 @@ def test_from_exovista_returns_scene_system(fits_fixture):
 
 
 def test_from_exovista_star_is_spectrum_star(fits_fixture):
-    """Fails if stellar mass or distance is duplicated in appearance metadata."""
+    """Fails if the star loses its type or the scene loses the stellar mass."""
     sys_obj = from_exovista(fits_fixture)
     assert isinstance(sys_obj.star, Star)
     assert sys_obj.star_mass_Msun > 0.0
-    assert "MASS" not in sys_obj.star.metadata
-    assert "DIST" not in sys_obj.star.metadata
 
 
 def test_from_exovista_planets_are_tuple(fits_fixture):

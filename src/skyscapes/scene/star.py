@@ -310,7 +310,7 @@ class BlackbodyStar(AbstractStar):
 
 
 class Star(AbstractStar):
-    """Tabulated stellar flux with optional imported surface metadata.
+    """Tabulated stellar flux with optional imported spot records.
 
     ``times_d`` stores days from the scene epoch, whose metadata belongs to
     the owning scene. A single epoch represents a static spectrum. Spot
@@ -333,7 +333,6 @@ class Star(AbstractStar):
             point star.
         luminosity_Lsun: Stellar luminosity [solar luminosities].
         spots: Imported spot history, or None.
-        metadata: Free-form source metadata, held as a static field.
     """
 
     knots: Knots = eqx.field(static=True)
@@ -341,7 +340,6 @@ class Star(AbstractStar):
     fixed_diameter_arcsec: Array = eqx.field(converter=as_float_leaf)
     luminosity_Lsun: Array = eqx.field(converter=as_float_leaf)
     spots: StarSpots | None
-    metadata: dict = eqx.field(static=True)
 
     _interpolation_method: str = eqx.field(static=True)
     _times_d: Array = eqx.field(converter=as_float_leaf)
@@ -356,7 +354,6 @@ class Star(AbstractStar):
         fixed_diameter_arcsec: float = 0.0,
         luminosity_Lsun: float = 1.0,
         spots: StarSpots | None = None,
-        metadata: dict | None = None,
         interpolation_method: Literal["linear", "cubic"] = "cubic",
         flux_scale: Array | float = 1.0,
     ):
@@ -380,7 +377,6 @@ class Star(AbstractStar):
                 a point star.
             luminosity_Lsun: Stellar luminosity [solar luminosities].
             spots: Imported spot history, or None.
-            metadata: Free-form source metadata; None stores an empty dict.
             interpolation_method: ``"linear"`` or ``"cubic"`` interpolation of
                 the photon table.
             flux_scale: Dimensionless factor on the tabulated flux, default one.
@@ -392,7 +388,6 @@ class Star(AbstractStar):
         self.fixed_diameter_arcsec = fixed_diameter_arcsec
         self.luminosity_Lsun = luminosity_Lsun
         self.spots = spots
-        self.metadata = {} if metadata is None else dict(metadata)
         self.knots = (
             wavelengths_nm
             if isinstance(wavelengths_nm, Knots)
@@ -557,7 +552,7 @@ class Star(AbstractStar):
         return self.knots.nm
 
     def __repr__(self) -> str:
-        """One-line summary of metadata + wavelength/time grid extent.
+        """One-line summary of luminosity, diameter and wavelength/time extent.
 
         Returns:
             A one-line text summary.

@@ -89,5 +89,4 @@ def from_castelli_kurucz(
         dist_pc=dist_pc,
         radius_m=radius_m,
         wavelength_range_nm=wavelength_range_nm,
-        source="Castelli and Kurucz (2004) ATLAS9 (STScI cdbs ckp00)",
     )

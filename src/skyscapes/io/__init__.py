@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .castelli_kurucz import castelli_kurucz_surface_flux, from_castelli_kurucz
 from .exovista import (
+    exovista_header,
     from_exovista,
     get_earth_like_planet_indices,
 )
@@ -12,6 +13,7 @@ from .transmission import transmission_from_table
 
 __all__ = [
     "castelli_kurucz_surface_flux",
+    "exovista_header",
     "from_castelli_kurucz",
     "from_exovista",
     "from_phoenix",

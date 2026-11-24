@@ -151,7 +151,8 @@ a static snapshot. Spectral queries remain bounded by the supplied
 wavelength grid. Directly constructed `Star` objects retain cubic
 interpolation by default.
 
-`Star.spots` and `Star.metadata` preserve source records. Loading spot
+`Star.spots` preserves the source spot records; `skyscapes.io.exovista_header(path)`
+returns the stellar FITS header as a plain dictionary. Loading spot
 geometry does not yet provide resolved stellar-surface propagation or
 asymmetric stellar leakage through a coronagraph. Scene contrast methods call
 `contrast_at_time(..., time_d=..., star=..., dist_pc=...)`; phase-dependent models inherit

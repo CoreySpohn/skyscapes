@@ -141,7 +141,7 @@ time, while the wavelength range remains bounded.
 copying it. `Star.wavelength_range_nm` returns its minimum and maximum
 as a tuple of Python floats. Both properties are read-only.
 
-### Imported starspots and metadata
+### Imported starspots and the stellar header
 
 `Star.spots` is either `None` or a `StarSpots` object imported from the
 optional ExoVista spot extension. It stores `times_d` and geometry
@@ -154,12 +154,25 @@ arrays with shape `(n_times, n_spots)`:
 | `area_ratio` | Total spot area divided by umbra area |
 | `umbra_temperature_K`, `penumbra_temperature_K` | Component temperatures from the stellar header, or `None` when absent |
 
-`Star.metadata` retains the stellar FITS header values under uppercase
-keys, excluding blank, `COMMENT`, and `HISTORY` cards. These records
-preserve the source information, including the original west-based `PA`.
-The system's disk orientation instead uses `Scene.midplane_inc_deg = I`
+A `Star` carries no free-form header. Host data a scene does not model
+(`TEFF`, `RA`, `DEC`, a target name, the original west-based `PA`) stays in the
+file. `skyscapes.io.exovista_header(path)` returns the star extension's cards
+as a plain dictionary under uppercase keys, excluding blank, `COMMENT`, and
+`HISTORY` cards:
+
+```python
+from skyscapes.io import exovista_header, from_exovista
+
+scene = from_exovista("path/to/exovista_system.fits")
+header = exovista_header("path/to/exovista_system.fits")
+teff_K = header["TEFF"]
+```
+
+Because the dictionary lives beside the scene, scenes loaded from files whose
+headers differ still share one structure and batch with `Scene.from_scenes`.
+The system's disk orientation uses `Scene.midplane_inc_deg = I`
 and `Scene.midplane_position_angle_deg = (90 + PA) % 360` in the east/north chart, for
-parametric disks and visualization outlines. The metadata do not supply
+parametric disks and visualization outlines. The header does not supply
 spot evolution or an evaluator for spatially resolved stellar intensity. A downstream
 diameter-only coronagraph response does not acquire asymmetric
 starspot leakage merely by loading `Star.spots`. That calculation

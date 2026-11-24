@@ -25,14 +25,20 @@ from hwoutils.constants import (
 from hwoutils.conversions import flux_jy_to_mag
 from optixstuff.spectral import Knots
 
-from skyscapes.io import exovista, from_exovista, get_earth_like_planet_indices
+from skyscapes.io import (
+    exovista,
+    exovista_header,
+    from_exovista,
+    get_earth_like_planet_indices,
+)
+from skyscapes.scene import Scene
 
 
 @pytest.fixture
 def scene_file(tmp_path):
     """Write small scenes with distinct planet spectra at identical phases."""
 
-    def write(*, version=2.6, n_times=3, n_spots=2, wave_dtype=np.float64):
+    def write(*, version=2.6, n_times=3, n_spots=2, wave_dtype=np.float64, header=None):
         wave = np.array([0.5, 0.6, 0.7], dtype=wave_dtype)
         times = np.arange(n_times) * 0.001
         primary = fits.PrimaryHDU(wave)
@@ -66,6 +72,8 @@ def scene_file(tmp_path):
             "HIERARCH TeffPenumbra": 2700.0,
         }.items():
             star_hdu.header[key] = value
+        for key, value in (header or {}).items():
+            star_hdu.header[key] = value
         hdus.append(star_hdu)
         for index, (radius, mass, axis) in enumerate(
             ((1.0, 1.0, 1.0), (11.0, 318.0, 5.0))
@@ -83,7 +91,8 @@ def scene_file(tmp_path):
             for key, value in {"R": radius, "M": mass, "A": axis, "E": 0.0}.items():
                 body.header[key] = value
             hdus.append(body)
-        path = tmp_path / f"scene-{version}-{n_times}-{n_spots}.fits"
+        tag = "-".join(str(v) for v in (header or {}).values())
+        path = tmp_path / f"scene-{version}-{n_times}-{n_spots}-{tag}.fits"
         fits.HDUList(hdus).writeto(path)
         return str(path)
 
@@ -121,7 +130,7 @@ def test_layout_selects_actual_bodies_and_earths(scene_file, version):
     np.testing.assert_array_equal([p.Rp_Rearth[0] for p in selected.planets], [11, 1])
 
 
-def test_new_layout_preserves_spot_history_and_stellar_metadata(scene_file):
+def test_new_layout_preserves_spot_history_and_stellar_temperatures(scene_file):
     """Spot areas convert from cm^2 to m^2; temperatures survive import."""
     scene = from_exovista(scene_file(), load_disk=False)
     spots = scene.star.spots
@@ -131,7 +140,32 @@ def test_new_layout_preserves_spot_history_and_stellar_metadata(scene_file):
     np.testing.assert_array_equal(spots.area_ratio, 5.0)
     assert spots.umbra_temperature_K == 2500
     assert spots.penumbra_temperature_K == 2700
-    assert scene.star.metadata["TEFF"] == 5778
+
+
+def test_header_is_host_data_beside_a_batchable_scene(scene_file):
+    """Fails if header values ride on the scene and block batching.
+
+    Truth: the values written into the fixture's star extension, read back
+    through ``exovista_header`` as plain Python data; two scenes loaded from
+    files that differ only in header values (RA, DEC, TEFF, a target id) have
+    equal structure, so they batch, and the batch keeps each file's sky
+    position. The tolerance is exact equality.
+    """
+    a = scene_file(header={"RA": 10.0, "DEC": -5.0, "TEFF": 5000.0, "STARID": 1})
+    b = scene_file(header={"RA": 200.0, "DEC": 40.0, "TEFF": 6000.0, "STARID": 2})
+    header = exovista_header(a)
+    assert type(header) is dict
+    assert header["TEFF"] == 5000.0
+    assert header["STARID"] == 1
+    assert header["RA"] == 10.0
+    assert header["MASS"] == 1.0
+    assert not {"COMMENT", "HISTORY", ""} & header.keys()
+    scenes = [from_exovista(p, load_disk=False, local_zodi=None) for p in (a, b)]
+    assert not hasattr(scenes[0].star, "metadata")
+    batch = Scene.from_scenes(scenes)
+    assert batch.batch_shape == (2,)
+    np.testing.assert_array_equal(batch.ra_deg, [10.0, 200.0])
+    np.testing.assert_array_equal(batch.dec_deg, [-5.0, 40.0])
 
 
 def test_new_layout_keeps_time_dependent_contrast_at_equal_phase(scene_file):

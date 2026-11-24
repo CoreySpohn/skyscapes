@@ -200,7 +200,6 @@ def from_phoenix(
         dist_pc=dist_pc,
         radius_m=radius_m,
         wavelength_range_nm=wavelength_range_nm,
-        source="PHOENIX BT-Settl (STScI cdbs phoenixm00)",
     )
 
 
@@ -214,7 +213,6 @@ def _from_surface_flux(
     dist_pc,
     radius_m,
     wavelength_range_nm,
-    source,
 ):
     """Dilute an atmosphere surface spectrum and construct its linear Star."""
     if wavelength_range_nm is not None:
@@ -232,11 +230,5 @@ def _from_surface_flux(
         flux_density_jy=jnp.asarray(flux_jy)[:, None],
         fixed_diameter_arcsec=angular_diameter_arcsec(radius_m, dist_pc),
         luminosity_Lsun=(radius_m / Rsun2m) ** 2 * (teff_K / _TEFF_SUN_K) ** 4,
-        metadata={
-            "source": source,
-            "teff_K": float(teff_K),
-            "logg": float(logg),
-            "mh": float(mh),
-        },
         interpolation_method="linear",
     )
