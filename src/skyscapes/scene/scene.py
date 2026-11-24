@@ -325,37 +325,45 @@ class Scene(eqx.Module):
         return self.dynamics.planets.mass_Msun.shape[-1]
 
     @classmethod
-    def from_scenes(cls, scenes, *, capacity=None, batch_shape=None):
-        """Pack same-class scenes into NumPy float64 leaves, sorted inner to outer.
+    def from_scenes(cls, scenes, *, capacity=None, batch_shape=None, device="cpu"):
+        """Pack same-class scenes into one batch, sorted inner to outer.
 
         The default batch shape is (len(scenes),); capacity defaults to the
         largest valid count. Disks, mixed epochs and mixed model classes raise.
         At least one Planet group must supply the physical-model class; an
-        empty group is sufficient. Host layout data restores source group
+        empty group is sufficient. Layout data restores source group
         boundaries and scene order when unpacking.
 
         Args:
             scenes: Unbatched scenes to pack.
             capacity: Planet slots per scene; None uses the largest valid count.
             batch_shape: Leading batch axes; None uses ``(len(scenes),)``.
+            device: ``"cpu"`` (the default) keeps the batch on the CPU device
+                until a computation uses it; a JAX device or sharding places
+                it there; None uses the default device.
 
         Returns:
-            A batched scene on the host with NumPy float64 leaves.
+            A batched scene whose leaves are ``jax.Array`` in the active dtype.
         """
         return _system_batch.from_scenes(
-            cls, scenes, capacity=capacity, batch_shape=batch_shape
+            cls, scenes, capacity=capacity, batch_shape=batch_shape, device=device
         )
 
-    def to_scenes(self):
-        """Return unpadded host scenes in row-major batch order.
+    def to_scenes(self, *, device="cpu"):
+        """Return unpadded scenes in row-major batch order.
+
+        Args:
+            device: Where the scenes live; see :meth:`from_scenes`.
 
         Returns:
-            A list of unbatched host scenes.
+            A list of unbatched scenes with ``jax.Array`` leaves.
         """
-        return _system_batch.to_scenes(self)
+        return _system_batch.to_scenes(self, device=device)
 
     def to_table(self) -> dict[str, np.ndarray]:
         """Return all leaves by JAX key path, plus scalar K and epoch parts.
+
+        Static fields, such as knots, are not leaves and are not in the table.
 
         Returns:
             A dict of host arrays keyed by leaf path, plus ``body_index``,
@@ -364,17 +372,19 @@ class Scene(eqx.Module):
         return _system_batch.to_table(self)
 
     @classmethod
-    def from_table(cls, table, *, template):
+    def from_table(cls, table, *, template, device="cpu"):
         """Restore a table; template supplies model classes and static metadata.
 
         Args:
             table: A table written by :meth:`to_table`.
-            template: A scene supplying model classes and static metadata.
+            template: A scene supplying model classes and static metadata,
+                including knots.
+            device: Where the leaves live; see :meth:`from_scenes`.
 
         Returns:
-            The restored scene on the host.
+            The restored scene with ``jax.Array`` leaves.
         """
-        return _system_batch.from_table(cls, table, template=template)
+        return _system_batch.from_table(cls, table, template=template, device=device)
 
     def take(self, index):
         """Gather a scalar index along the last batch axis, under jit or vmap.

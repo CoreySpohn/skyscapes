@@ -290,6 +290,16 @@ is an array of length `K`. This is the "per-Planet-type batching"
 convention; heterogeneous planets (different physical-model classes)
 go into `Scene.planets` as a tuple of `Planet` instances.
 
+`Scene.from_scenes` packs unbatched scenes into one batch, and `to_scenes`
+unpacks it. Every leaf of the result is a `jax.Array` in the active dtype
+(integers and booleans keep their kind). The `device` argument of both
+(and of `from_table`) says where those leaves live. The default, `"cpu"`,
+keeps the batch on the CPU device until a computation uses it, so a large
+batch does not occupy accelerator memory while it is being assembled; on a
+CPU-only machine the arrays share memory with the host buffers they were
+packed from, so the batch costs one copy of its data. Pass a JAX device or
+sharding to place it elsewhere, or None for the default device.
+
 `Scene.from_classical` takes masses in solar masses and orbital-element
 arrays in flattened scene order. It sorts the Jacobi chain by `a_AU` on
 the host by default; supply an explicit `order` permutation when building

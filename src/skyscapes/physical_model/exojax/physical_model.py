@@ -307,7 +307,7 @@ def _species_at_planet(
 
     def _index_at_k(tree):
         return jax.tree.map(
-            lambda x: x[k] if isinstance(x, jnp.ndarray) and x.ndim > 0 else x,
+            lambda x: x[k] if eqx.is_array(x) and x.ndim > 0 else x,
             tree,
         )
 
@@ -451,6 +451,33 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
 
     # The spectrum is linear in wavenumber between grid points.
     _knot_method: ClassVar[str] = "linear-in-wavenumber"
+
+    def __check_init__(self):
+        """Refuse a species profile leaf whose leading axis is not the planet axis.
+
+        A shared array (one value per atmospheric layer, say) stored where a
+        per-planet array is required would be sliced as if its layers were
+        planets, so it is refused here, naming the layer count when it matches.
+        """
+        shape = jnp.shape(self.log_gravity_cgs)
+        n_planets = shape[0] if shape else None
+        pressure = getattr(self.rt_engine, "pressure", None)
+        n_layers = None if pressure is None else jnp.shape(pressure)[0]
+        profiles = [] if n_planets is None else [s.profile for s in self.species]
+        for species, profile in zip(self.species, profiles, strict=False):
+            for leaf in jax.tree.leaves(profile):
+                leaf_shape = jnp.shape(leaf)
+                if leaf_shape and leaf_shape[0] != n_planets:
+                    cause = (
+                        f" (its length is the layer count, {n_layers})"
+                        if leaf_shape[0] == n_layers
+                        else ""
+                    )
+                    raise ValueError(
+                        f"the {species.name} profile has an array of shape "
+                        f"{leaf_shape}{cause}, but a per-planet array of "
+                        f"length {n_planets} is required"
+                    )
 
     @property
     def knots(self) -> Knots:
@@ -857,7 +884,7 @@ class ExoJaxPhysicalModel(AbstractPhysicalModel):
             profile_labels = []
 
             def _index_k(x, k=k):
-                return x[k] if isinstance(x, jnp.ndarray) and x.ndim > 0 else x
+                return x[k] if eqx.is_array(x) and x.ndim > 0 else x
 
             for s in self.species:
                 profile_k = jax.tree.map(_index_k, s.profile)

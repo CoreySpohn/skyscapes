@@ -1,4 +1,4 @@
-"""Host packing and fixed padding for Scene pytrees."""
+"""Packing and fixed padding for Scene pytrees; NumPy is only a transient here."""
 
 import dataclasses
 
@@ -7,6 +7,7 @@ import jax
 import numpy as np
 from hwoutils.constants import GM_SUN_AU3_PER_D2
 from hwoutils.epoch import Epoch
+from hwoutils.leaves import as_float_leaf, canonical
 from optixstuff.spectral import same_wavelength
 
 from .planet import Planet
@@ -44,21 +45,23 @@ def _per_planet(path, value, count):
     )
 
 
-def _host(tree):
-    return jax.tree.map(
-        lambda x: np.asarray(
-            x, dtype=bool if np.asarray(x).dtype == bool else np.float64
-        ),
-        tree,
-    )
+def _device(device):
+    """Resolve ``"cpu"`` to the CPU device; any other value passes through."""
+    if isinstance(device, str):
+        if device != "cpu":
+            raise ValueError(
+                f"device must be 'cpu', a jax device or None, not {device!r}"
+            )
+        return jax.devices("cpu")[0]
+    return device
 
 
 def _planet(radius, scale, model):
-    """Construct without transferring host radius data through JAX."""
+    """Construct a planet group whose radius and scale arrays are replaced."""
     return eqx.tree_at(
         lambda p: (p.Rp_Rearth, p.flux_scale),
         Planet(np.empty(0), model),
-        (radius, scale),
+        (as_float_leaf(radius), as_float_leaf(scale)),
     )
 
 
@@ -156,8 +159,8 @@ def _check_star_knots(scenes):
                 _check_grids(f"planet models of group {group}", index, first, other)
 
 
-def from_scenes(cls, scenes, *, capacity=None, batch_shape=None):
-    """Pack unbatched scenes, sorted by semi-major axis, on the host.
+def from_scenes(cls, scenes, *, capacity=None, batch_shape=None, device="cpu"):
+    """Pack unbatched scenes, sorted by semi-major axis.
 
     Args:
         cls: The scene class to construct for each packed row.
@@ -167,10 +170,14 @@ def from_scenes(cls, scenes, *, capacity=None, batch_shape=None):
             count among the scenes; extra slots are padding.
         batch_shape: Leading batch axes of the result. None uses
             ``(len(scenes),)``; its product must equal ``len(scenes)``.
+        device: Where the packed leaves live: ``"cpu"`` (the default) keeps
+            the batch on the CPU device until a computation uses it, a JAX
+            device or sharding places it there, and None uses the default
+            device.
 
     Returns:
-        A batched scene on the host whose leaves carry ``batch_shape`` as
-        leading axes.
+        A batched scene whose leaves are ``jax.Array`` and carry
+        ``batch_shape`` as leading axes.
     """
     scenes = list(scenes)
     if not scenes:
@@ -266,7 +273,7 @@ def from_scenes(cls, scenes, *, capacity=None, batch_shape=None):
             valid=np.arange(capacity) < count,
         )
         # Fixed-size host layout data preserves source order and group boundaries.
-        layout = np.full((3, capacity + 1), -1.0)
+        layout = np.full((3, capacity + 1), -1, dtype=np.int32)
         layout[0, :count], layout[1, :count] = scene, chain
         group_ids = np.repeat(
             np.arange(len(system.planets)), [p.n_planets for p in system.planets]
@@ -276,32 +283,37 @@ def from_scenes(cls, scenes, *, capacity=None, batch_shape=None):
         packed = eqx.tree_at(
             lambda s: s._source_layout, packed, layout, is_leaf=lambda x: x is None
         )
-        rows.append(_host(packed))
+        rows.append(packed)
     if any(jax.tree.structure(row) != jax.tree.structure(rows[0]) for row in rows):
         raise ValueError("Scenes must share model classes and static structure")
-    return jax.tree.map(
+    stacked = jax.tree.map(
         lambda *xs: np.stack(xs).reshape((*batch_shape, *np.shape(xs[0]))), *rows
     )
+    return canonical(stacked, device=_device(device))
 
 
-def to_scenes(system):
-    """Unpack host scenes, discarding padding and restoring source leaf order.
+def to_scenes(system, *, device="cpu"):
+    """Unpack scenes, discarding padding and restoring source leaf order.
 
     Args:
         system: A scene, batched or not.
+        device: Where each unpacked scene lives; see :func:`from_scenes`.
 
     Returns:
-        A list of unbatched host scenes, one per batch row in C order.
+        A list of unbatched scenes with ``jax.Array`` leaves, one per batch
+        row in C order.
     """
+    device = _device(device)
     if (
         not system.batch_shape
         and system._source_layout is None
         and np.all(system.valid)
     ):
-        return [_host(system)]
+        return [canonical(system, device=device)]
+    host = jax.tree.map(np.asarray, system)
     result = []
     for index in np.ndindex(system.batch_shape):
-        row = jax.tree.map(lambda x, index=index: np.asarray(x)[index], system)
+        row = jax.tree.map(lambda x, index=index: x[index], host)
         selected = np.flatnonzero(row.valid)
         layout = row._source_layout
         group = row.planets[0]
@@ -340,18 +352,15 @@ def to_scenes(system):
         # Packed scene slots and chain slots address the same sorted body array.
         mapping = {slot: i for i, slot in enumerate(chain_slots)}
         body_index = tuple(mapping[slot] for slot in scene_slots)
-        result.append(
-            _host(
-                type(system)(
-                    row.star,
-                    tuple(planets),
-                    dynamics,
-                    midplane_inc_deg=row.midplane_inc_deg,
-                    midplane_position_angle_deg=row.midplane_position_angle_deg,
-                    body_index=body_index,
-                )
-            )
+        scene = type(system)(
+            row.star,
+            tuple(planets),
+            dynamics,
+            midplane_inc_deg=row.midplane_inc_deg,
+            midplane_position_angle_deg=row.midplane_position_angle_deg,
+            body_index=body_index,
         )
+        result.append(canonical(scene, device=device))
     return result
 
 
@@ -368,7 +377,7 @@ def to_table(system):
     """
     table = {
         jax.tree_util.keystr(path).lstrip("."): np.asarray(x).copy()
-        for path, x in jax.tree_util.tree_flatten_with_path(_host(system))[0]
+        for path, x in jax.tree_util.tree_flatten_with_path(system)[0]
     }
     table.update(
         body_index=np.asarray(system.body_index, dtype=int),
@@ -390,17 +399,19 @@ def _table_leaf(table, path, template_leaf):
     return np.asarray(table[key]).copy()
 
 
-def from_table(cls, table, *, template):
+def from_table(cls, table, *, template, device="cpu"):
     """Restore leaf arrays using a template for model classes and static fields.
 
     Args:
         cls: The scene class to construct.
         table: A table written by :func:`to_table`.
         template: A scene supplying the model classes, static fields and
-            structure; its leaf values are replaced by the table.
+            structure (static knots included); its leaf values are replaced
+            by the table.
+        device: Where the leaves live; see :func:`from_scenes`.
 
     Returns:
-        The restored scene on the host.
+        The restored scene with ``jax.Array`` leaves.
     """
     capacity = int(table["K"])
     indices = {
@@ -420,7 +431,9 @@ def from_table(cls, table, *, template):
     skeleton = eqx.tree_at(
         lambda s: s._source_layout,
         skeleton,
-        np.asarray(table["_source_layout"]) if "_source_layout" in table else None,
+        np.asarray(table["_source_layout"]).astype(np.int32)
+        if "_source_layout" in table
+        else None,
         is_leaf=lambda x: x is None,
     )
     epoch = Epoch(
@@ -453,4 +466,4 @@ def from_table(cls, table, *, template):
         restored._source_layout,
         is_leaf=lambda x: x is None,
     )
-    return _host(result)
+    return canonical(result, device=_device(device))

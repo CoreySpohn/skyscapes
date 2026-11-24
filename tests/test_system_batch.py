@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from hwoutils.epoch import Epoch
+from hwoutils.leaves import canonical, check_tree
 from optixstuff.grids import PixelGrid, SkyOrientation
 from optixstuff.spectral import Band, Quadrature, Resolution
 
@@ -81,7 +82,49 @@ def test_round_trips():
     assert restored.body_index == single.body_index
     table = batch.to_table()
     _equal(Scene.from_table(table, template=scenes[3]), batch)
-    assert all(isinstance(x, np.ndarray) for x in jax.tree.leaves(batch))
+    assert all(isinstance(x, jax.Array) for x in jax.tree.leaves(batch))
+
+
+def test_batch_leaves_are_canonical():
+    """Fails if a batch result keeps host leaves or the layout loses its integer kind.
+
+    Truth: an unpacked scene equals its input leaf for leaf (integers and
+    booleans exactly, floats bitwise, dtypes identical, since the packed
+    values are the inputs' own); the leaf rule and the tree structure are
+    properties, so the tolerance is zero. The inputs are canonical, so the
+    trace count compares like with like.
+    """
+    scenes = [canonical(_scene(k)) for k in (0, 1, 3, 6)]
+    batch = Scene.from_scenes(scenes)
+    assert check_tree(batch) == ()
+    assert jnp.issubdtype(batch._source_layout.dtype, jnp.integer)
+    assert batch.valid.dtype == bool
+    traces = []
+
+    @eqx.filter_jit
+    def total(scene):
+        traces.append(1)
+        return scene.dynamics.planets.mass_Msun.sum()
+
+    for actual, expected in zip(batch.to_scenes(), scenes, strict=True):
+        assert check_tree(actual) == ()
+        assert jax.tree.structure(actual) == jax.tree.structure(expected)
+        for x, y in zip(
+            jax.tree.leaves(actual), jax.tree.leaves(expected), strict=True
+        ):
+            assert x.dtype == y.dtype
+            np.testing.assert_array_equal(x, y)
+        total(actual)
+        total(expected)
+    assert len(traces) == 4
+    cpu = jax.devices("cpu")[0]
+    placed = Scene.from_scenes(scenes, device=cpu)
+    assert all(x.devices() == {cpu} for x in jax.tree.leaves(placed))
+    assert all(
+        x.devices() == {cpu}
+        for scene in placed.to_scenes(device=cpu)
+        for x in jax.tree.leaves(scene)
+    )
 
 
 def _read(system, times, ephemeris=None, resolution=None):
@@ -230,7 +273,8 @@ def test_precision():
     """Fails if packing truncates float64 or float32 cannot trace over five years.
 
     Float32 uses 1e-5 relative tolerance for accumulated orbital-phase roundoff;
-    float64 output dtype and host packing preservation are exact requirements.
+    float64 output dtype and packing preservation (a round trip under x64) are
+    exact requirements.
     """
     batch = Scene.from_scenes([_scene(3)], capacity=6)
     times = jnp.array([123.0, 777.0, 1500.0, 1826.25])
@@ -241,7 +285,7 @@ def test_precision():
             lambda x: x.astype(np.float32) if x.dtype != bool else x, batch
         )
         actual = _read_jit(single, times.astype(jnp.float32))
-        rebuilt = Scene.from_scenes(batch.to_scenes(), capacity=6)
+    rebuilt = Scene.from_scenes(batch.to_scenes(), capacity=6)
     _equal(rebuilt, batch)
     # A sky coordinate crosses zero; compare relative vector error there.
     delta = np.linalg.norm(actual["positions"] - truth["positions"], axis=-3)

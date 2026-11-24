@@ -882,6 +882,43 @@ def test_custom_molecule_set_works_end_to_end():
     assert "bulk=H2" in s
 
 
+def test_numpy_profiles_slice_per_planet_and_shared_arrays_are_refused():
+    """Fails if NumPy per-planet leaves are not sliced, or a layer array is accepted.
+
+    Truth: the same model built from NumPy and from JAX leaves is the same
+    program on the same float32 values, so the contrasts agree bitwise. The
+    refusal is a construction check with no tolerance.
+    """
+    K, n_layers = 2, 20
+    reference = make_physical_model(K=K, n_layers=n_layers)
+    host = jax.tree.map(
+        lambda x: np.asarray(x) if eqx.is_array(x) else x, reference.species
+    )
+    model = eqx.tree_at(lambda m: m.species, reference, host)
+    assert all(isinstance(x, np.ndarray) for x in jax.tree.leaves(host))
+    args = (jnp.full((K, 1), 0.5), jnp.full((K, 1), 1.0), jnp.array(550.0), jnp.ones(K))
+    np.testing.assert_array_equal(model.contrast(*args), reference.contrast(*args))
+    shared = ConstantMmr(log_mmr=jnp.full((n_layers,), -3.0))
+    species = (eqx.tree_at(lambda s: s.profile, reference.species[0], shared),)
+    fields = {
+        f: getattr(reference, f)
+        for f in (
+            "log_gravity_cgs",
+            "bulk",
+            "tp_profile",
+            "absorption",
+            "scattering",
+            "clouds",
+            "surface",
+            "rt_engine",
+            "nu_grid",
+            "n_nu",
+        )
+    }
+    with pytest.raises(ValueError, match="layer count"):
+        ExoJaxPhysicalModel(species=species, **fields)
+
+
 def test_repr_summarizes_physical_model_state():
     """``__repr__`` is human-readable and includes MMR + VMR side-by-side.
 
