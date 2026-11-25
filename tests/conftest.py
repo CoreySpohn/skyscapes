@@ -6,22 +6,15 @@ import importlib.util
 import os
 from types import SimpleNamespace
 
+import jax.numpy as jnp
 import numpy as np
+import pytest
 from hwoutils.constants import AU2m, G, d2s, pc2AU, rad2arcsec
 from hypothesis import settings
-from jax import config
+from optixstuff.grids import PixelGrid, SkyOrientation
 
-# ExoJAX refuses to initialize in JAX's default 32-bit mode (raises on
-# import of MdbHitran / Art* engines). Flip x64 before any test imports
-# touch JAX state so the slow integration test can run on CI.
-config.update("jax_enable_x64", True)
-
-import jax.numpy as jnp  # noqa: E402
-import pytest  # noqa: E402
-from optixstuff.grids import PixelGrid, SkyOrientation  # noqa: E402
-
-from skyscapes.datasets import fetch_scene  # noqa: E402
-from skyscapes.scene import FlatStar  # noqa: E402
+from skyscapes.datasets import fetch_scene
+from skyscapes.scene import FlatStar
 
 # Released hwoutils versions may not include the optional budget plugin yet.
 pytest_plugins = []

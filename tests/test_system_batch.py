@@ -144,44 +144,41 @@ def test_batch_leaves_are_canonical():
     )
 
 
-def test_x32_round_trip_and_old_float_layout_tables():
-    """Fails if the x32 round trip changes a bit or a layout loses its integer kind.
+def test_round_trip_and_old_float_layout_tables():
+    """Fails if the round trip changes a bit or a layout loses its integer kind.
 
     Truth: packing and unpacking move the inputs' own values, so the scenes
     equal the canonical inputs as bit patterns (zero tolerance), with an
     int32 layout and no leaf-rule violation. A table written before the layout
     became an integer array holds it as floats; casting is exact for integral
     values; a non-integral, non-finite or out-of-range value (below the -1
-    sentinel or beyond int32) is refused, under both precisions. The
-    suite enables x64, so this is the only x32 batch test.
+    sentinel or beyond int32) is refused in both precision lanes.
     """
-    for x64 in (False, True):
-        with jax.enable_x64(x64):
-            scenes = [canonical(_scene(k)) for k in (1, 3)]
-            batch = Scene.from_scenes(scenes)
-            assert batch._source_layout.dtype == np.int32
-            assert check_tree(batch) == ()
-            for actual, expected in zip(batch.to_scenes(), scenes, strict=True):
-                assert check_tree(actual) == ()
-                _same_bits(actual, expected)
-            table = batch.to_table()
-            old = dict(table, _source_layout=table["_source_layout"].astype(float))
-            restored = Scene.from_table(old, template=scenes[1])
-            assert restored._source_layout.dtype == np.int32
-            assert check_tree(restored) == ()
-            _same_bits(restored, batch)
-            layout = old["_source_layout"]
-            for value, match in (
-                (layout + 0.5, "integer"),
-                (np.where(layout < 0, np.inf, layout), "integer"),
-                (np.where(layout < 0, np.nan, layout), "integer"),
-                (np.where(layout < 0, 2.0**31, layout), r"\[-1"),
-                (np.where(layout < 0, -2, layout).astype(np.int64), r"\[-1"),
-                (layout >= 0, "integer"),
-            ):
-                bad = dict(old, _source_layout=value)
-                with pytest.raises(ValueError, match=match):
-                    Scene.from_table(bad, template=scenes[1])
+    scenes = [canonical(_scene(k)) for k in (1, 3)]
+    batch = Scene.from_scenes(scenes)
+    assert batch._source_layout.dtype == np.int32
+    assert check_tree(batch) == ()
+    for actual, expected in zip(batch.to_scenes(), scenes, strict=True):
+        assert check_tree(actual) == ()
+        _same_bits(actual, expected)
+    table = batch.to_table()
+    old = dict(table, _source_layout=table["_source_layout"].astype(float))
+    restored = Scene.from_table(old, template=scenes[1])
+    assert restored._source_layout.dtype == np.int32
+    assert check_tree(restored) == ()
+    _same_bits(restored, batch)
+    layout = old["_source_layout"]
+    for value, match in (
+        (layout + 0.5, "integer"),
+        (np.where(layout < 0, np.inf, layout), "integer"),
+        (np.where(layout < 0, np.nan, layout), "integer"),
+        (np.where(layout < 0, 2.0**31, layout), r"\[-1"),
+        (np.where(layout < 0, -2, layout).astype(np.int64), r"\[-1"),
+        (layout >= 0, "integer"),
+    ):
+        bad = dict(old, _source_layout=value)
+        with pytest.raises(ValueError, match=match):
+            Scene.from_table(bad, template=scenes[1])
 
 
 def _read(system, times, ephemeris=None, resolution=None):
@@ -216,7 +213,7 @@ def test_parity_and_padding(count):
     """Fails if batch/padding changes any reader; identical algebra demands bits.
 
     All capacity comparisons are bitwise; scalar/batched results allow 2 ULP
-    for vectorized transcendental operations at the float64 rounding floor.
+    for vectorized transcendental operations.
     """
     scene = _scene(count)
     times = jnp.array([17.0, 230.0])
@@ -230,8 +227,8 @@ def test_parity_and_padding(count):
             actual, extended = actual[..., :count, :], extended[..., :count, :]
         np.testing.assert_array_max_ulp(actual, expected, maxulp=2)
         np.testing.assert_array_equal(
-            np.asarray(actual).view(np.uint64),
-            np.asarray(extended).view(np.uint64),
+            np.asarray(actual).view(np.uint8),
+            np.asarray(extended).view(np.uint8),
             err_msg=name,
         )
     solve = Scene.ephemeris if count == 3 else _ephemeris_jit
@@ -243,7 +240,7 @@ def test_parity_and_padding(count):
         expected = np.asarray(getattr(unpadded, field))
         np.testing.assert_array_max_ulp(actual, expected, 2)
         extra = np.asarray(getattr(extended_eph, field))[0, : count + 1]
-        np.testing.assert_array_equal(actual.view(np.uint64), extra.view(np.uint64))
+        np.testing.assert_array_equal(actual.view(np.uint8), extra.view(np.uint8))
     reused = _read_jit(small, times, eph)
     for name in a:
         # A supplied eager solve avoids fused orbital arithmetic (2 ULP floor).
@@ -326,6 +323,9 @@ def test_shared_times_and_one_compile():
     assert compiled._cache_size() == 1
 
 
+@pytest.mark.float64_only(
+    reason="float32 orbital trace compared with a float64 baseline"
+)
 def test_precision():
     """Fails if packing truncates float64 or float32 cannot trace over five years.
 
@@ -617,6 +617,7 @@ def test_rebuilt_scene_reads_the_same_planets():
 
 
 @pytest.mark.parametrize("inactive_mass", [0.0, 1.0])
+@pytest.mark.float64_only(reason="float64 orbital reference values")
 def test_inactive_slot_mass_does_not_set_orbit_rates(inactive_mass):
     """Fails if an inactive planet's mass joins the enclosed mass of an outer planet.
 

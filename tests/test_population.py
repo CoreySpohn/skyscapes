@@ -201,13 +201,14 @@ def test_occurrence_grid_total_and_mass_radius_inverse(tables):
     np.testing.assert_allclose(jax.jit(mass_to_radius)(mass_jax), radius, rtol=1e-9)
 
 
+@pytest.mark.float64_only(reason="finite-difference mass-radius derivatives")
 def test_mass_radius_traces_and_branch_derivatives():
     """Fails if tracing enters NumPy or an inactive Jovian power poisons AD.
 
     Round trips allow 16 float64 eps (power-law rounding); central differences
     use h=1e-5*x away from kinks and allow 1e-8 relative truncation error.
     At the two genuine slope discontinuities only finite one-sided AD is
-    defined. Float32 round trips allow 16 eps for the same power operations.
+    defined.
     """
     mass = jnp.geomspace(0.01, 131.6, 100)
     np.testing.assert_allclose(
@@ -228,9 +229,13 @@ def test_mass_radius_traces_and_branch_derivatives():
             difference,
             rtol=1e-8,
         )
-    with jax.enable_x64(False):
-        values = jnp.array([0.1, 2.04, 10.0, 131.6], dtype=jnp.float32)
-        result = jax.jit(jax.vmap(lambda x: radius_to_mass(mass_to_radius(x))))(values)
-        assert result.dtype == jnp.float32
-        assert np.isfinite(jax.jit(jax.vmap(jax.grad(radius_to_mass)))(values)).all()
-        np.testing.assert_allclose(result, values, rtol=16 * np.finfo(np.float32).eps)
+
+
+@pytest.mark.float32_only(reason="float32 mass-radius trace and round-trip coverage")
+def test_mass_radius_float32_round_trip():
+    """Fails if float32 round trips widen, drift beyond 16 eps, or lose gradients."""
+    values = jnp.array([0.1, 2.04, 10.0, 131.6], dtype=jnp.float32)
+    result = jax.jit(jax.vmap(lambda x: radius_to_mass(mass_to_radius(x))))(values)
+    assert result.dtype == jnp.float32
+    assert np.isfinite(jax.jit(jax.vmap(jax.grad(radius_to_mass)))(values)).all()
+    np.testing.assert_allclose(result, values, rtol=16 * np.finfo(np.float32).eps)

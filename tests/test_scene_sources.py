@@ -144,6 +144,7 @@ def _star_at(star, x):
 
 @vv.case("stellar-photometry", "code-verification")
 @pytest.mark.parametrize("method", ["linear", "cubic"])
+@pytest.mark.float64_only(reason="float64 spectral quadrature reference")
 def test_star_node_values_integrate_a_phoenix_table_exactly(rule, method):
     """Fails if the star's node values are point samples or misplaced on the nodes.
 
@@ -183,6 +184,7 @@ def test_star_node_values_integrate_a_phoenix_table_exactly(rule, method):
 
 
 @vv.case("planet-phase", "code-verification")
+@pytest.mark.float64_only(reason="float64 spectral quadrature reference")
 def test_tabulated_planet_flux_is_reduced_with_the_star(rule):
     """Fails if a tabulated planet is its node albedo times the reduced star.
 
@@ -248,6 +250,7 @@ def test_tabulated_planet_flux_is_reduced_with_the_star(rule):
 
 
 @vv.case("planet-thermal-emission", "code-verification")
+@pytest.mark.float64_only(reason="float64 spectral quadrature reference")
 def test_thermal_planet_node_flux_ignores_the_star(rule):
     """Fails if a thermal planet's node flux is scaled by the star's reduction.
 
@@ -368,6 +371,7 @@ def test_knots_are_static_and_a_new_grid_has_no_rule(rule):
 
 
 @vv.case("stellar-photometry", "code-verification")
+@pytest.mark.float64_only(reason="finite-difference derivative")
 def test_sources_are_one_program_with_table_gradients(rule):
     """Fails if a new table value retraces or a table gradient is lost.
 
@@ -594,7 +598,9 @@ def test_no_parameter_leaf_moves_the_knots():
     nu = np.asarray(jnp.linspace(1.0e4, 2.5e4, 40))
     exojax = make_physical_model(K=1, n_nu=40, n_layers=6)
     np.testing.assert_array_equal(exojax.nu_grid.values, nu)
-    np.testing.assert_array_equal(exojax.knots.nm, np.sort(1.0e7 / nu))
+    np.testing.assert_array_equal(
+        exojax.knots.nm, np.sort(1.0e7 / nu.astype(np.float64))
+    )
 
 
 def test_a_composite_derives_its_knots_from_its_components():
@@ -615,18 +621,18 @@ def test_a_composite_derives_its_knots_from_its_components():
     assert swapped.knot_digest != total.knot_digest
 
 
-def test_numpy_and_jax_input_build_one_scene(rule):
+def test_numpy_and_jax_input_build_one_scene(rule, precision):
     """Fails if a source keeps its input's array type or its knots depend on it.
 
-    Exact (bitwise), x64. The same star, tabulated planet and tabulated zodi
-    built once from NumPy arrays and once from float64 ``jnp`` arrays have
-    equal knots, the same tree, and bitwise equal ``sources`` on one rule.
+    The same star, tabulated planet and tabulated zodi built from NumPy or JAX
+    arrays have equal knots, the same tree, and bitwise equal ``sources``.
     """
     base = _phoenix()
+    wavelengths_nm = np.asarray(base.wavelengths_nm, dtype=precision)
 
     def build(array):
         star = Star(
-            wavelengths_nm=array(base.wavelengths_nm),
+            wavelengths_nm=array(wavelengths_nm),
             times_d=array([0.0]),
             flux_density_jy=array(np.asarray(base.flux_density_jy)),
             interpolation_method="linear",
@@ -644,7 +650,7 @@ def test_numpy_and_jax_input_build_one_scene(rule):
         strict=True,
     )
     for a, b in pairs:
-        assert a.dtype == b.dtype == np.float64
+        assert a.dtype == b.dtype == precision
         np.testing.assert_array_equal(a, b)
 
 
@@ -786,6 +792,7 @@ def _product_band_ratio_and_truth(offsets_tol):
 
 
 @pytest.mark.parametrize("aligned", [False, True], ids=["near", "aligned"])
+@pytest.mark.float64_only(reason="float64 spectral quadrature reference")
 def test_product_integrates_near_but_distinct_knots_exactly(aligned):
     """Fails if a planet knot and a star knot within the wavelength tolerance
     are merged into one, which moves a cell edge and biases the band integral.

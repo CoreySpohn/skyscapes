@@ -288,9 +288,8 @@ def test_imported_positive_flux_cannot_overshoot_below_zero(scene_file):
     assert np.all(np.asarray(scene.planet_flux_densities(600.0, midpoint)) > 0)
 
 
-@pytest.mark.parametrize("enable_x64", [False, True])
 def test_import_requires_precision_for_orbital_states(
-    scene_file, monkeypatch, enable_x64
+    scene_file, monkeypatch, precision
 ):
     """Fails if state-vector conversion is allowed to lose float64 orbital precision."""
     path = scene_file()
@@ -298,13 +297,12 @@ def test_import_requires_precision_for_orbital_states(
     monkeypatch.setattr(
         exovista, "jax", SimpleNamespace(config=SimpleNamespace(read=jax.config.read))
     )
-    with jax.enable_x64(enable_x64):
-        if enable_x64:
-            scene = from_exovista(path, load_disk=False)
-            assert scene.star._times_d.dtype == jnp.float64
-        else:
-            with pytest.raises(ValueError, match="jax_enable_x64"):
-                from_exovista(path, load_disk=False)
+    if precision == np.float64:
+        scene = from_exovista(path, load_disk=False)
+        assert scene.star._times_d.dtype == jnp.float64
+    else:
+        with pytest.raises(ValueError, match="jax_enable_x64"):
+            from_exovista(path, load_disk=False)
 
 
 def _writer_mask_area(mapsize=512, u1=0.0473, u2=0.0841):

@@ -186,6 +186,7 @@ def test_the_loaded_scene_carries_the_header_angles_into_a_disk_read(fits_fixtur
 
 @pytest.mark.parametrize("inc_deg", [30.0, 60.0, 120.0, 150.0])
 @pytest.mark.parametrize("pa_deg", [-30.0, 0.0, 30.0, 213.0, 390.0])
+@pytest.mark.float64_only(reason="float64 reference plane and near-side geometry")
 def test_midplane_conversion_preserves_plane_and_near_side(inc_deg, pa_deg):
     """Rotate ExoVista's basis by negating x and z, including inclinations above 90.
 

@@ -350,6 +350,7 @@ def _a_band_ratio(model):
 # Some trace gases have no lines in this narrow window; they retain Rayleigh.
 @pytest.mark.filterwarnings("ignore:.*has no HITRAN lines:UserWarning")
 @pytest.mark.slow
+@pytest.mark.float64_only(reason="float64 ExoJAX line-opacity reference")
 def test_earth_modern_a_band_resolution_converges():
     """Default sampling gives an R=140 A-band ratio within 0.02 of R=300000."""
     databases_dir = Path.home() / ".cache" / "skyscapes" / "exojax"

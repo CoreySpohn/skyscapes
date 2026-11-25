@@ -72,6 +72,7 @@ def process():
     )
 
 
+@pytest.mark.float64_only(reason="finite-difference derivative")
 def test_mark_density_gradient(process):
     """Fails if density is disconnected from orbit leaves or uses the wrong measure.
 
@@ -207,6 +208,7 @@ def test_mark_marginals_and_normalization(process, marks):
     assert np.isfinite(eqx.filter_jit(process.mark_log_density)(scene, host)).all()
 
 
+@pytest.mark.float64_only(reason="float64 log-density reference")
 def test_chart_change_of_variables(process, marks):
     """Fails if a chart Jacobian changes the reference density.
 
@@ -602,6 +604,7 @@ def test_earth_like_flags(process, worlds):
     assert (valid & ~flag).any()
 
 
+@pytest.mark.float64_only(reason="float64 log-density reference")
 def test_mark_density_equals_orbit_law(process):
     """Fails if the orientation measure of the mark density drifts from orbix.
 

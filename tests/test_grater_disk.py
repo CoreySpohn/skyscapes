@@ -233,6 +233,7 @@ def test_high_inclination_is_finite(incl):
 @pytest.mark.parametrize(
     "incl, cutoff_width", [(89.5, 0.0), (90.0, 0.0), (89.5, 0.2), (90.0, 0.2)]
 )
+@pytest.mark.float64_only(reason="finite-difference derivative")
 def test_edge_on_render_gradient_and_convergence(incl, cutoff_width):
     """Fails if the edge-on window diverges or loses gradients and convergence.
 
@@ -270,6 +271,7 @@ def test_edge_on_render_gradient_and_convergence(incl, cutoff_width):
     assert jnp.max(jnp.abs(derivative)) > 1e-4 * peak
 
 
+@pytest.mark.float64_only(reason="finite-difference derivative")
 def test_edge_on_continuity_and_smooth_cutoff_gradients():
     """Fails if a rule has a seam near edge-on or taper parameters detach.
 

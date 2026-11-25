@@ -23,6 +23,7 @@ def _pointing():
 
 
 @pytest.mark.parametrize("kind", AbstractLocalZodi.__subclasses__())
+@pytest.mark.float64_only(reason="float64 zodiacal radiance reference")
 def test_radiance_contract(kind):
     """Fails on a per-arcsec^2 or per-micron output or dropped wavelength axes.
 
@@ -113,6 +114,7 @@ def test_leinert_follows_the_frame_and_the_time():
     assert np.all(np.asarray(elsewhere) != np.asarray(expected))
 
 
+@pytest.mark.float64_only(reason="float64 zodiacal radiance reference")
 def test_models_share_table19_colour_at_the_reference_sightline():
     """Fails on a wrong colour or sr scale.
 

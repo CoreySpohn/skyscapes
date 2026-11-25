@@ -112,6 +112,7 @@ def test_planet_contrast_wavelength_agnostic_for_lambertian():
     assert jnp.allclose(c_blue, c_red, rtol=1e-6)
 
 
+@pytest.mark.float64_only(reason="float64 orbital reference values")
 def test_planet_photon_flux_density_formula_phase_and_jax():
     """Fails on inverted phase, photon units, or dropped quadrature-node axes.
 
@@ -293,10 +294,10 @@ def test_inclined_phase_angle_range():
     assert abs(float(jnp.rad2deg(beta.max())) - 150.0) < 0.2
 
 
-def test_scene_ephemeris_passes_orbix_through_exactly():
+def test_scene_ephemeris_passes_orbix_through_exactly(precision):
     """States and distances preserve orbix's public frame unchanged.
 
-    Basis: 16 float64 eps of each field's largest magnitude. The reference is
+    Basis: 16 machine eps at the lane dtype and each field's scale. The reference is
     the eager op-by-op solve and the scene solves through one compiled program,
     so the two differ by fusion and fused multiply-add rounding of the Kepler
     solve and the frame rotation (a chain of about a dozen operations per
@@ -307,7 +308,7 @@ def test_scene_ephemeris_passes_orbix_through_exactly():
     times = jnp.array([0.0, 42.0, 200.0])
     expected = p.dynamics.solve(times)
     actual = p.ephemeris(times)
-    eps = np.finfo(np.float64).eps
+    eps = np.finfo(precision).eps
     for name in ("position_AU", "velocity_AU_per_d", "dist_pc"):
         want = np.asarray(getattr(expected, name))
         np.testing.assert_allclose(
@@ -319,6 +320,7 @@ def test_scene_ephemeris_passes_orbix_through_exactly():
 
 
 @pytest.mark.parametrize("mass", [1.0, float("nan"), -1.0, float("inf"), 0.0])
+@pytest.mark.float64_only(reason="float64 orbital reference values")
 def test_scene_mass_and_observables(mass):
     """Fails if mass sanitization changes existing positions or contrasts.
 
