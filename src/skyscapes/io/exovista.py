@@ -16,7 +16,6 @@ from typing import Literal
 
 import astropy.units as u
 import equinox as eqx
-import interpax
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -322,45 +321,38 @@ def _load_single_planet(
 def _phase_model(model: TimeSeriesPhysicalModel, beta_rad) -> GridPhysicalModel:
     """Regrid stored contrasts at their ephemeris phase angles [rad]."""
     wavelengths_nm = model.wavelengths_nm.values
-    contrast_data = model.contrast_grid[0]
-    beta_deg = jnp.rad2deg(beta_rad)
+    beta_deg = np.rad2deg(np.asarray(beta_rad))
+    order = np.argsort(beta_deg)
+    beta = beta_deg[order]
+    spectra = np.asarray(model.contrast_grid[0])[:, order]
+    regular_grid = np.linspace(0.0, 180.0, 100)
 
-    # Sort by beta. Duplicates are fine for interpolation (axisymmetric
-    # atmosphere => same beta => same contrast).
-    sort_idx = jnp.argsort(beta_deg)
-    beta_sorted = beta_deg[sort_idx]
-    contrast_sorted = contrast_data[:, sort_idx]
-
-    # Regular beta axis on [0, 180].
-    regular_grid = jnp.linspace(0.0, 180.0, 100)
-    if beta_sorted.size == 1:
-        # A single epoch is a static snapshot, with no phase slope to infer.
-        # interp2d needs at least two samples on each interpolation axis.
-        contrast_grid = jnp.broadcast_to(
-            contrast_sorted, (wavelengths_nm.size, regular_grid.size)
+    # Merge phases to a microdegree, far below the regrid resolution.
+    starts = [0]
+    for i in range(1, beta.size):
+        if beta[i] - beta[starts[-1]] > 1e-6:
+            starts.append(i)
+    counts = np.diff(np.r_[starts, beta.size])
+    phases = np.add.reduceat(beta, starts) / counts
+    if np.ptp(phases) < regular_grid[1] - regular_grid[0]:
+        # Each stored epoch contributes equally to an unresolved spectrum.
+        contrast_grid = np.broadcast_to(
+            spectra.mean(axis=1, dtype=np.float64, keepdims=True).astype(spectra.dtype),
+            (wavelengths_nm.size, regular_grid.size),
         )
+        bounds = regular_grid[[0, -1]]
     else:
-        xq, yq = jnp.meshgrid(wavelengths_nm, regular_grid, indexing="ij")
-        contrast_grid = interpax.interp2d(
-            xq.flatten(),
-            yq.flatten(),
-            wavelengths_nm,
-            beta_sorted,
-            contrast_sorted,
-            method="linear",
-            extrap=True,
-        ).reshape(xq.shape)
-
-    # Contrast is a flux ratio and cannot be negative. Linear extrapolation past
-    # the orbit's sampled beta coverage (extrap=True above) can dip a few 1e-11
-    # below zero near beta = 0/180; clip so the stored grid stays physical for
-    # every consumer (contrast, alpha_dMag, image rendering).
-    contrast_grid = jnp.clip(contrast_grid, 0.0, None)
+        means = np.add.reduceat(spectra, starts, axis=1, dtype=np.float64) / counts
+        contrast_grid = np.stack(
+            [np.interp(regular_grid, phases, row) for row in means]
+        )
+        bounds = phases[[0, -1]]
 
     return GridPhysicalModel(
         knots=wavelengths_nm,
         phase_angle_deg=regular_grid,
-        contrast_grid=contrast_grid[None, ...],
+        contrast_grid=np.maximum(contrast_grid[None, ...], 0.0),
+        phase_bounds_deg=bounds[None, :],
     )
 
 
@@ -489,7 +481,9 @@ def from_exovista(
             no extrapolation beyond a multi-epoch baseline. A single epoch
             is a constant snapshot. ``phase`` explicitly assumes contrast
             is a function of phase alone, discarding activity history. The phase
-            angles come from the assembled scene at the stored epochs.
+            angles come from the assembled scene at the stored epochs. A span
+            narrower than one phase-grid interval gives the epoch-mean spectrum.
+            Resolved curves hold their endpoint spectra outside the sampled span.
         epoch: Scene epoch that stored and observation times are measured
             from. ``None`` uses the first stellar timestamp. Pass a shared
             epoch to place several scenes on one clock.
