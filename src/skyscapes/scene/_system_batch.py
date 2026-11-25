@@ -437,8 +437,10 @@ def _integral_layout(layout):
 
 
 def _table_leaf(table, path, template_leaf):
-    """Read one leaf; a table written before ``flux_scale`` existed reads as ones."""
+    """Read one leaf, supplying defaults for fields absent from older tables."""
     key = jax.tree_util.keystr(path).lstrip(".")
+    if key.endswith(".phase_bounds_deg") and key not in table:
+        return None
     if key not in table and key.endswith("flux_scale"):
         radius = key.replace("flux_scale", "Rp_Rearth")
         shape = np.shape(table[radius]) if radius in table else np.shape(template_leaf)

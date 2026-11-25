@@ -209,19 +209,40 @@ def test_single_snapshot_and_empty_spots_are_supported(
     )
 
 
-@pytest.mark.parametrize("version", [2.33, 2.5, 2.6])
-def test_single_snapshot_phase_model_preserves_spectrum(scene_file, version):
-    """A phase-independent snapshot still interpolates its measured spectrum."""
-    path = scene_file(version=version, n_times=1)
+@pytest.mark.parametrize(
+    ("version", "inclination_deg", "amplitudes", "expected_amplitude"),
+    [
+        (2.33, 0.0, [1.0], 1.0),
+        (2.5, 0.0, [1.0], 1.0),
+        (2.6, 0.0, [1.0], 1.0),
+        (2.33, 0.0, [1.0, 1.0], 1.0),
+        (2.33, 0.1, [1.0, 3.0], 2.0),
+        (2.33, 4.0, [1.0, 3.0, 5.0], [1.0, 1.0, 1.0, 4.0]),
+    ],
+)
+def test_phase_model_preserves_face_on_and_snapshot_spectra(
+    scene_file, version, inclination_deg, amplitudes, expected_amplitude
+):
+    """Fails if repeated phases erase a spectrum or extrapolate past its edges."""
+    path = scene_file(version=version, n_times=len(amplitudes))
     with fits.open(path, mode="update") as hdul:
-        hdul[-2].data[0, 16:] = np.array([1.0, 2.0, 4.0]) * 1e-10
-    scene = from_exovista(path, load_disk=False, planet_spectra="phase")
+        rows = hdul[-2].data
+        # Start at quadrature. On the 4 deg orbit the last two phases differ
+        # by less than a microdegree, so their mean sets the upper plateau.
+        rows[:, 0] = [0.0, 0.125, 0.125 + 1e-8][: len(amplitudes)]
+        speed = rows[0, 13]
+        tilt = np.deg2rad(inclination_deg)
+        rows[0, 13:15] = speed * np.array([np.cos(tilt), np.sin(tilt)])
+        rows[:, 16:] = np.outer(amplitudes, [1.0, 2.0, 4.0]) * 1e-10
+    scene = from_exovista(
+        path, planet_indices=[0], load_disk=False, planet_spectra="phase"
+    )
     model = scene.planets[0].physical_model
     phases = jnp.deg2rad(jnp.array([[0.0, 30.0, 90.0, 180.0]]))
     for wavelength, expected in [(500.0, 1.0), (550.0, 1.5), (700.0, 4.0)]:
         np.testing.assert_allclose(
-            model.contrast(phases, jnp.ones_like(phases), wavelength, jnp.ones(1)),
-            expected * 1e-10,
+            model.contrast(phases, jnp.ones_like(phases), wavelength, jnp.ones(1))[0],
+            expected * np.asarray(expected_amplitude) * 1e-10,
             rtol=1e-6,
             atol=0,
         )

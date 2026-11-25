@@ -29,11 +29,18 @@ class GridPhysicalModel(AbstractPhysicalModel):
         knots: Wavelength grid [nm], shape ``(n_wl,)``, static.
         phase_angle_deg: 1-D phase-angle grid [deg], shape ``(n_phase,)``.
         contrast_grid: Contrast cube, shape ``(K, n_wl, n_phase)``.
+        phase_bounds_deg: Optional sampled phase limits [deg], shape ``(K, 2)``.
+            The first knots outside these limits hold the endpoint spectra.
     """
 
     knots: Knots = eqx.field(static=True, converter=as_knots)
     phase_angle_deg: Array = eqx.field(converter=as_float_leaf)
     contrast_grid: Array = eqx.field(converter=as_bulk_leaf)
+    phase_bounds_deg: Array | None = eqx.field(
+        default=None,
+        kw_only=True,
+        converter=lambda x: None if x is None else as_float_leaf(x),
+    )
 
     @property
     def wavelengths_nm(self) -> np.ndarray:
@@ -82,20 +89,29 @@ class GridPhysicalModel(AbstractPhysicalModel):
         phase_angle_deg = self.phase_angle_deg.astype(dtype)
         contrast_grid = self.contrast_grid.astype(dtype)
 
-        def per_planet(grid_k, phase_row):
+        def per_planet(grid_k, phase_row, bounds):
             # grid_k: (n_wl, n_phase); phase_row: (T,)
+            phase_axis = phase_angle_deg
+            if bounds is not None:
+                # Place the endpoint spectra at their measured angles. Otherwise
+                # interpolation across a grid cell rounds off each end of the curve.
+                lo, hi = bounds
+                left = jnp.searchsorted(phase_axis, lo, side="right") - 1
+                right = jnp.searchsorted(phase_axis, hi)
+                phase_axis = phase_axis.at[left].set(lo).at[right].set(hi)
+                phase_row = jnp.clip(phase_row, lo, hi)
             wl_arr = jnp.broadcast_to(wl_arr_scalar, phase_row.shape)
             return interpax.interp2d(
                 wl_arr,
                 phase_row,
                 wavelengths_nm,
-                phase_angle_deg,
+                phase_axis,
                 grid_k,
                 method="linear",
                 extrap=True,
             )
 
-        return jax.vmap(per_planet)(contrast_grid, phase_deg_x)
+        return jax.vmap(per_planet)(contrast_grid, phase_deg_x, self.phase_bounds_deg)
 
     def __repr__(self) -> str:
         """One-line summary of grid shape (K, n_wl, n_phase) and wl range.
