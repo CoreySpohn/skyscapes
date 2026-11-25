@@ -13,7 +13,6 @@ from pathlib import Path
 
 import equinox as eqx
 import ineedvalidation as vv
-import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -259,6 +258,7 @@ def test_archive_node_matches_vendored_copy():
 @pytest.mark.parametrize(
     "teff_K, logg, factor", [(12000.0, 4.0, 1.0), (12125.0, 4.25, 4.0)]
 )
+@pytest.mark.float64_only(reason="float64 photometry reference")
 def test_castelli_kurucz_synthetic_units_and_missing_gravity(
     tmp_path, teff_K, logg, factor
 ):
@@ -350,8 +350,7 @@ def test_castelli_kurucz_phoenix_overlap_bin_flux():
     np.testing.assert_allclose(ck_flux, ph_flux, rtol=0.05, atol=0)
 
 
-@pytest.mark.parametrize("enable_x64", [False, True], ids=["x32", "x64"])
-def test_loaded_knots_are_the_file_grid(enable_x64):
+def test_loaded_knots_are_the_file_grid():
     """Fails if the loader rounds the file grid on its way to the knots.
 
     Exact digest. In x32 and x64 the star's knots are the float64 file
@@ -359,15 +358,14 @@ def test_loaded_knots_are_the_file_grid(enable_x64):
     to the requested range; passing them through ``jnp`` under x32 would
     round them to float32 and change the digest.
     """
-    with jax.enable_x64(enable_x64):
-        star = from_phoenix(
-            5800.0,
-            4.5,
-            dist_pc=10.0,
-            radius_m=Rsun2m,
-            wavelength_range_nm=(400.0, 900.0),
-            fetch=fixture_path,
-        )
+    star = from_phoenix(
+        5800.0,
+        4.5,
+        dist_pc=10.0,
+        radius_m=Rsun2m,
+        wavelength_range_nm=(400.0, 900.0),
+        fetch=fixture_path,
+    )
     with fits.open(fixture_path(5800)) as hdul:
         angstrom = np.asarray(hdul[1].data["WAVELENGTH"], dtype=np.float64)
     wave = (angstrom * u.AA).to_value(u.nm)

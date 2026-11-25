@@ -125,6 +125,7 @@ def test_system_contrasts_stacks_planets():
     assert jnp.all(c >= 0.0)
 
 
+@pytest.mark.float64_only(reason="float64 orbital reference values")
 def test_system_spec_flux_density_per_planet():
     """Pin flux dispatch to recorded Jacobi/Markley values at rtol 1e-14.
 
@@ -161,6 +162,7 @@ def test_system_spec_flux_density_per_planet():
     )
 
 
+@pytest.mark.float64_only(reason="float64 spectral quadrature reference")
 def test_bin_planet_flux_narrow_limit():
     """Narrow-bin flux equals contrast times star flux to rtol 1e-10, atol 0.
 
@@ -222,6 +224,7 @@ def test_contrast_rejects_wavelength_arrays(target, wavelength, traced):
 
 
 @pytest.mark.parametrize("tabulated", [False, True])
+@pytest.mark.float64_only(reason="float64 spectral quadrature reference")
 def test_bin_contrast_weights_flux_and_has_point_limit(tabulated):
     """Fails if contrast is averaged without photon weighting or loses its point limit.
 
@@ -266,6 +269,7 @@ def test_bin_contrast_weights_flux_and_has_point_limit(tabulated):
     )
 
 
+@pytest.mark.float64_only(reason="float64 spectral quadrature reference")
 def test_band_contrasts_resolves_planetary_break():
     """Fails if a planetary break is omitted or point contrast divides by zero.
 
@@ -303,6 +307,7 @@ def test_band_contrasts_resolves_planetary_break():
     assert np.isnan(opaque).all()
 
 
+@pytest.mark.float64_only(reason="finite-difference derivative")
 def test_sum_flux_preserves_components_bins_and_gradients():
     """Fails if summing drops a component, its gradient, or stellar bin knots.
 
@@ -404,7 +409,7 @@ def test_sum_requires_a_component_and_stellar_context():
         model.contrast_at_time(*args, time_d=jnp.zeros(1))
 
 
-def test_planet_flux_preserves_keyword_only_model_overrides():
+def test_planet_flux_preserves_keyword_only_model_overrides(precision):
     """Fails if the default flux hook breaks existing keyword-only time hooks."""
 
     class KeywordModel(AbstractPhysicalModel):
@@ -433,10 +438,13 @@ def test_planet_flux_preserves_keyword_only_model_overrides():
     actual = _system(star, (planet,)).planet_flux_densities(
         jnp.asarray(500.0), jnp.array([0.0, 1.0])
     )
-    np.testing.assert_allclose(actual, [[3e-10, 6e-10]], rtol=1e-15, atol=0)
+    np.testing.assert_allclose(
+        actual, np.array([[3e-10, 6e-10]], dtype=precision), rtol=1e-15, atol=0
+    )
 
 
 @pytest.mark.parametrize("mass", [1.0, 1000.0])
+@pytest.mark.float64_only(reason="float64 orbital reference values")
 def test_stellar_observables_scale_sign_and_sum(mass):
     """Fails on stellar sign, mass-ratio, period, or barycentric balance errors.
 
@@ -516,6 +524,7 @@ def test_stellar_observables_scale_sign_and_sum(mass):
 
 
 @pytest.mark.parametrize("tabulated", [False, True])
+@pytest.mark.float64_only(reason="float64 spectral quadrature reference")
 def test_band_contrast_tophat_and_narrow_limits(tabulated):
     """Fails if a band loses stellar knots, photon weighting, or its point limit.
 
@@ -580,6 +589,7 @@ def test_band_contrast_tophat_and_narrow_limits(tabulated):
     )
 
 
+@pytest.mark.float64_only(reason="finite-difference derivative")
 def test_band_contrast_triangle_and_temperature_gradient():
     """Fails if a band leaving a table, response breaks or weighting go wrong.
 
@@ -785,6 +795,7 @@ def _independent_observables(system, times, index=0):
 
 
 @pytest.mark.parametrize("e,inc", [(1e-6, 0.7), (0.6, 1.1), (0.2, 2.6)])
+@pytest.mark.float64_only(reason="float64 orbital reference values")
 def test_ephemeris_single_planet_conventions(e, inc):
     """Catch epoch, sky, mass, phase and RV-sign changes against two-body truth.
 
@@ -848,6 +859,7 @@ def test_ephemeris_scene_order_and_reuse(batched, monkeypatch):
 
 
 @pytest.mark.parametrize("massless", [False, True])
+@pytest.mark.float64_only(reason="float64 orbital reference values")
 def test_ephemeris_jacobi_balance_and_independent_limit(massless):
     """Catch independent reflex summation or incorrect zero-mass handling.
 
@@ -896,6 +908,7 @@ def test_ephemeris_jacobi_balance_and_independent_limit(massless):
 
 
 @pytest.mark.parametrize("field", ["star_mass", "planet_mass", "distance", "a"])
+@pytest.mark.float64_only(reason="finite-difference derivative")
 def test_ephemeris_shared_jit_gradient(field):
     """Catch host conversion, stale elements, or missing shared-state derivatives.
 
@@ -939,7 +952,7 @@ def test_ephemeris_shared_jit_gradient(field):
     np.testing.assert_allclose(derivative, finite_difference, rtol=1e-8, atol=1e-10)
 
 
-def test_classical_builder_traced_order_and_ownership():
+def test_classical_builder_traced_order_and_ownership(precision):
     """Fails if host sorting traces, explicit hierarchy fails, or owners duplicate."""
 
     def build(a, order=None, mass=1.0):
@@ -967,7 +980,9 @@ def test_classical_builder_traced_order_and_ownership():
     assert concrete.body_index == (1, 0)
     assert scene.body_index == (1, 0)
     np.testing.assert_array_equal(scene.dynamics.orbits.a_AU, [1.0, 5.0])
-    np.testing.assert_array_equal(scene.planet_mass_Msun, [0.002, 0.001])
+    np.testing.assert_array_equal(
+        scene.planet_mass_Msun, np.array([0.002, 0.001], dtype=precision)
+    )
     paths = [
         jax.tree_util.keystr(path)
         for path, _ in jax.tree_util.tree_flatten_with_path(scene)[0]
@@ -1033,6 +1048,7 @@ def test_empty_scene_and_reference_epoch():
 @pytest.mark.parametrize(
     "epoch", [Epoch(2451545.0, 0.25), Epoch(2460000.0, 0.75, "tt")]
 )
+@pytest.mark.float64_only(reason="absolute Julian date reference needs float64")
 def test_scene_epoch_offsets_match_zero_epoch(epoch):
     """Fails if traced times or orbital epochs use a different origin."""
     planet = _make_planet(0.3, 1.0)
@@ -1055,6 +1071,9 @@ def test_scene_epoch_offsets_match_zero_epoch(epoch):
 
 
 @pytest.mark.parametrize("inclination", [0.0, 0.7])
+@pytest.mark.float64_only(
+    reason="float32 epoch resolution measured against a float64 orbit"
+)
 def test_scene_epoch_float32_resolution(inclination):
     """Fails if short time steps are lost to absolute-date float32 rounding.
 

@@ -106,6 +106,7 @@ _FIT_FIELDS = ("sma_AU", "alpha_in", "alpha_out", "ksi0_AU", "gamma", "g_HG_grid
         (32, 90.0, 2.0),
     ],
 )
+@pytest.mark.float64_only(reason="finite-difference derivative")
 def test_gradients_match_central_differences(n_slices_los, incl, gamma):
     """Fails if a rule's nodes or weights drop a dependence on a parameter.
 

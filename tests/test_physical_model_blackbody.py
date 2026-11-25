@@ -44,86 +44,82 @@ def test_star_flux_scale_divides_thermal_contrast_for_any_star(kind):
     star scale of two halves it and the planet flux (contrast times the scaled
     star flux) is unchanged, to rtol 1e-12, for every star model.
     """
-    with jax.enable_x64(True):
-        wl, rp = jnp.asarray(10000.0), jnp.array([15.7])
-        model = BlackbodyPhysicalModel(teff_K=jnp.array([150.0]))
-        make = (
-            (lambda scale: BlackbodyStar(8840.0, 1.77 * Rsun2m, flux_scale=scale))
-            if kind is BlackbodyStar
-            else (lambda scale: FlatStar(3.0e-3, flux_scale=scale))
+    wl, rp = jnp.asarray(10000.0), jnp.array([15.7])
+    model = BlackbodyPhysicalModel(teff_K=jnp.array([150.0]))
+    make = (
+        (lambda scale: BlackbodyStar(8840.0, 1.77 * Rsun2m, flux_scale=scale))
+        if kind is BlackbodyStar
+        else (lambda scale: FlatStar(3.0e-3, flux_scale=scale))
+    )
+    contrast, flux = {}, {}
+    for scale in (1.0, 2.0):
+        star = make(scale)
+        contrast[scale] = model.contrast_at_time(
+            *ARGS, wl, rp, time_d=T_D, star=star, dist_pc=107.5
         )
-        contrast, flux = {}, {}
-        for scale in (1.0, 2.0):
-            star = make(scale)
-            contrast[scale] = model.contrast_at_time(
-                *ARGS, wl, rp, time_d=T_D, star=star, dist_pc=107.5
-            )
-            flux[scale] = contrast[scale] * star.photon_flux_density(
-                wl, T_D, dist_pc=107.5
-            )
-        np.testing.assert_allclose(contrast[2.0], 0.5 * contrast[1.0], rtol=1e-12)
-        np.testing.assert_allclose(flux[2.0], flux[1.0], rtol=1e-12)
+        flux[scale] = contrast[scale] * star.photon_flux_density(wl, T_D, dist_pc=107.5)
+    np.testing.assert_allclose(contrast[2.0], 0.5 * contrast[1.0], rtol=1e-12)
+    np.testing.assert_allclose(flux[2.0], flux[1.0], rtol=1e-12)
 
 
 @pytest.mark.parametrize(
     "temperature, wavelength", [(1560.0, 4400.0), (150.0, 10000.0), (100.0, 1650.0)]
 )
-@pytest.mark.parametrize("x64", [False, True])
-def test_contrast_matches_planck_ratio(temperature, wavelength, x64):
+def test_contrast_matches_planck_ratio(temperature, wavelength, precision):
     """Fails if photon units change or float32 Wien-tail flux overflows to zero.
 
     At 100 K, the exponent is 87: float32 exponent rounding allows 2e-5
     relative flux error. Other float32 cases allow 1e-5, float64 1e-12.
     """
-    with jax.enable_x64(x64):
-        # Built in the precision under test: the scale leaf carries the dtype.
-        star = BlackbodyStar(STAR.teff_K, STAR.radius_m)
-        dist_pc = 107.5
-        if temperature == 100.0:
-            star = BlackbodyStar(1000.0, 0.1 * Rsun2m)
-            dist_pc = 10.0
-        model = BlackbodyPhysicalModel(teff_K=jnp.array([temperature]))
-        wl, rp = jnp.asarray(wavelength), jnp.array([15.7])
-        args = (jnp.zeros((1, 2)), jnp.ones((1, 2)))
-        times = jnp.array([0.0, 1.0])
-        got = model.contrast_at_time(
-            *args, wl, rp, time_d=times, star=star, dist_pc=dist_pc
-        )
-        flat = FlatStar(
-            flux_phot_per_nm_m2=star.photon_flux_density(wl, times, dist_pc=dist_pc),
-        )
-        generic = model.contrast_at_time(
-            *args, wl, rp, time_d=times, star=flat, dist_pc=dist_pc
-        )
-        x = H * C / (wavelength * 1e-9 * KB)
-        area = (15.7 * 6.3781e6 / star.radius_m) ** 2
-        expected = area * np.expm1(x / star.teff_K) / np.expm1(x / temperature)
-        assert got.shape == (1, 2)
-        rtol = 1e-12 if x64 else 1e-5
-        if not x64 and temperature == 100.0:
-            rtol = 2e-5
-        assert jnp.allclose(got, expected, rtol=rtol, atol=0.0)
-        assert jnp.allclose(got, generic, rtol=rtol, atol=0.0)
-        flux = model._photon_flux_density(
-            wl,
-            phase_angle_rad=args[0],
-            star_planet_distance_AU=args[1],
-            Rp_Rearth=rp,
-            time_d=times,
-            star=star,
-            dist_pc=dist_pc,
-        )
-        # Planck photon radiance per nm, diluted by the apparent disk solid angle.
-        radiance = 2 * C / (wavelength * 1e-9) ** 4 * 1e-9 / np.expm1(x / temperature)
-        expected_flux = (
-            radiance * np.pi * (15.7 * 6.3781e6 / (dist_pc * 3.085677581491367e16)) ** 2
-        )
-        np.testing.assert_allclose(flux, expected_flux, rtol=rtol, atol=0)
-        direct = model._photon_flux_density(wl, rp, dist_pc=dist_pc)
-        np.testing.assert_allclose(direct, expected_flux, rtol=rtol, atol=0)
-        np.testing.assert_allclose(
-            flux, jnp.broadcast_to(direct[:, None], (1, 2)), rtol=rtol, atol=0
-        )
+    is_float64 = precision == np.float64
+    # Built in the precision under test: the scale leaf carries the dtype.
+    star = BlackbodyStar(STAR.teff_K, STAR.radius_m)
+    dist_pc = 107.5
+    if temperature == 100.0:
+        star = BlackbodyStar(1000.0, 0.1 * Rsun2m)
+        dist_pc = 10.0
+    model = BlackbodyPhysicalModel(teff_K=jnp.array([temperature]))
+    wl, rp = jnp.asarray(wavelength), jnp.array([15.7])
+    args = (jnp.zeros((1, 2)), jnp.ones((1, 2)))
+    times = jnp.array([0.0, 1.0])
+    got = model.contrast_at_time(
+        *args, wl, rp, time_d=times, star=star, dist_pc=dist_pc
+    )
+    flat = FlatStar(
+        flux_phot_per_nm_m2=star.photon_flux_density(wl, times, dist_pc=dist_pc),
+    )
+    generic = model.contrast_at_time(
+        *args, wl, rp, time_d=times, star=flat, dist_pc=dist_pc
+    )
+    x = H * C / (wavelength * 1e-9 * KB)
+    area = (15.7 * 6.3781e6 / star.radius_m) ** 2
+    expected = area * np.expm1(x / star.teff_K) / np.expm1(x / temperature)
+    assert got.shape == (1, 2)
+    rtol = 1e-12 if is_float64 else 1e-5
+    if not is_float64 and temperature == 100.0:
+        rtol = 2e-5
+    assert jnp.allclose(got, expected, rtol=rtol, atol=0.0)
+    assert jnp.allclose(got, generic, rtol=rtol, atol=0.0)
+    flux = model._photon_flux_density(
+        wl,
+        phase_angle_rad=args[0],
+        star_planet_distance_AU=args[1],
+        Rp_Rearth=rp,
+        time_d=times,
+        star=star,
+        dist_pc=dist_pc,
+    )
+    # Planck photon radiance per nm, diluted by the apparent disk solid angle.
+    radiance = 2 * C / (wavelength * 1e-9) ** 4 * 1e-9 / np.expm1(x / temperature)
+    expected_flux = (
+        radiance * np.pi * (15.7 * 6.3781e6 / (dist_pc * 3.085677581491367e16)) ** 2
+    )
+    np.testing.assert_allclose(flux, expected_flux, rtol=rtol, atol=0)
+    direct = model._photon_flux_density(wl, rp, dist_pc=dist_pc)
+    np.testing.assert_allclose(direct, expected_flux, rtol=rtol, atol=0)
+    np.testing.assert_allclose(
+        flux, jnp.broadcast_to(direct[:, None], (1, 2)), rtol=rtol, atol=0
+    )
     assert Rearth2m == pytest.approx(6.3781e6, rel=1e-4)
     assert Rsun2m == pytest.approx(6.957e8, rel=1e-4)
 
@@ -161,6 +157,7 @@ def test_contrast_without_star_raises():
         )
 
 
+@pytest.mark.float64_only(reason="SI Planck reference values at float64 rounding")
 def test_system_contrast_cube_stacks_wavelengths():
     """Check disk dilution and Planck contrast from SI primitives.
 
@@ -219,6 +216,7 @@ def test_system_contrast_cube_reflected_light():
     assert jnp.array_equal(cube[0], cube[1])
 
 
+@pytest.mark.float64_only(reason="finite-difference temperature derivative")
 def test_temperature_gradient_matches_finite_difference():
     """d ln(contrast) / dT through the system against a central difference."""
     wl = jnp.asarray(4400.0)
@@ -239,6 +237,9 @@ def test_temperature_gradient_matches_finite_difference():
 )
 @pytest.mark.parametrize(
     "quantity", ["log_contrast", "log_contrast_star", "planet_flux", "star_flux"]
+)
+@pytest.mark.float32_only(
+    reason="float32 forward derivatives against a float64 reference"
 )
 def test_temperature_gradient_is_finite_in_single_precision(
     temperature, wavelength, quantity
@@ -278,41 +279,38 @@ def test_temperature_gradient_is_finite_in_single_precision(
             jax.grad(reference), (t64,), (jnp.ones_like(t64),)
         )
 
-    with jax.enable_x64(False):
-        wl = jnp.asarray(wavelength, jnp.float32)
-        args = (jnp.zeros((1, 2), jnp.float32), jnp.ones((1, 2), jnp.float32))
-        time_d = jnp.array([0.0, 1.0], jnp.float32)
-        rp = jnp.array([15.7], jnp.float32)
+    wl = jnp.asarray(wavelength, jnp.float32)
+    args = (jnp.zeros((1, 2), jnp.float32), jnp.ones((1, 2), jnp.float32))
+    time_d = jnp.array([0.0, 1.0], jnp.float32)
+    rp = jnp.array([15.7], jnp.float32)
 
-        def observable(teff):
-            model = BlackbodyPhysicalModel(
-                teff_K=jnp.array([temperature])
-                if quantity == "log_contrast_star"
-                else teff
-            )
-            if quantity == "planet_flux":
-                return model._photon_flux_density(wl, rp, dist_pc=107.5)[0]
-            if quantity == "star_flux":
-                star = BlackbodyStar(teff[0], STAR.radius_m)
-                return star.photon_flux_density(wl, time_d, dist_pc=107.5)
-            star = (
-                BlackbodyStar(teff[0], STAR.radius_m)
-                if quantity == "log_contrast_star"
-                else STAR
-            )
-            out = model.contrast_at_time(
-                *args, wl, rp, time_d=time_d, star=star, dist_pc=107.5
-            )
-            return jnp.log(out)[0, 0]
+    def observable(teff):
+        model = BlackbodyPhysicalModel(
+            teff_K=jnp.array([temperature]) if quantity == "log_contrast_star" else teff
+        )
+        if quantity == "planet_flux":
+            return model._photon_flux_density(wl, rp, dist_pc=107.5)[0]
+        if quantity == "star_flux":
+            star = BlackbodyStar(teff[0], STAR.radius_m)
+            return star.photon_flux_density(wl, time_d, dist_pc=107.5)
+        star = (
+            BlackbodyStar(teff[0], STAR.radius_m)
+            if quantity == "log_contrast_star"
+            else STAR
+        )
+        out = model.contrast_at_time(
+            *args, wl, rp, time_d=time_d, star=star, dist_pc=107.5
+        )
+        return jnp.log(out)[0, 0]
 
-        def derivatives(teff):
-            grad, hvp = jax.jvp(jax.grad(observable), (teff,), (jnp.ones_like(teff),))
-            return observable(teff), grad, hvp
+    def derivatives(teff):
+        grad, hvp = jax.jvp(jax.grad(observable), (teff,), (jnp.ones_like(teff),))
+        return observable(teff), grad, hvp
 
-        t0 = jnp.array([variable_temperature], jnp.float32)
-        for evaluate in (derivatives, jax.jit(derivatives)):
-            value, auto, curvature = evaluate(t0)
-            assert auto.dtype == curvature.dtype == jnp.float32
-            np.testing.assert_allclose(value, expected_value, rtol=1e-5, atol=0.0)
-            np.testing.assert_allclose(auto, expected_grad, rtol=1e-4, atol=0.0)
-            np.testing.assert_allclose(curvature, expected_hvp, rtol=1e-3, atol=0.0)
+    t0 = jnp.array([variable_temperature], jnp.float32)
+    for evaluate in (derivatives, jax.jit(derivatives)):
+        value, auto, curvature = evaluate(t0)
+        assert auto.dtype == curvature.dtype == jnp.float32
+        np.testing.assert_allclose(value, expected_value, rtol=1e-5, atol=0.0)
+        np.testing.assert_allclose(auto, expected_grad, rtol=1e-4, atol=0.0)
+        np.testing.assert_allclose(curvature, expected_hvp, rtol=1e-3, atol=0.0)

@@ -18,18 +18,18 @@ from skyscapes.habitable_zone import (
 )
 
 
-def test_solar_twin_gives_the_published_edges_exactly():
+def test_solar_twin_gives_the_published_edges_exactly(precision):
     """A solar twin's conservative zone is 0.95 to 1.67 AU, exactly."""
     inner_AU, outer_AU = habitable_zone_AU(1.0)
-    assert float(inner_AU) == 0.95
-    assert float(outer_AU) == 1.67
+    assert float(inner_AU) == float(precision.type(0.95))
+    assert float(outer_AU) == float(precision.type(1.67))
 
 
-def test_solar_twin_optimistic_edges():
+def test_solar_twin_optimistic_edges(precision):
     """A solar twin's optimistic zone is 0.75 to 1.77 AU, exactly."""
     inner_AU, outer_AU = habitable_zone_AU(1.0, optimistic=True)
-    assert float(inner_AU) == 0.75
-    assert float(outer_AU) == 1.77
+    assert float(inner_AU) == float(precision.type(0.75))
+    assert float(outer_AU) == float(precision.type(1.77))
 
 
 def test_named_edges_are_the_published_values():
@@ -39,10 +39,10 @@ def test_named_edges_are_the_published_values():
 
 
 @pytest.mark.parametrize("luminosity_Lsun", [0.01, 0.25, 4.0, 9.0])
-def test_edges_scale_with_root_luminosity(luminosity_Lsun):
+def test_edges_scale_with_root_luminosity(luminosity_Lsun, precision):
     """Both edges scale with sqrt(L / L_sun)."""
     inner_AU, outer_AU = habitable_zone_AU(luminosity_Lsun)
-    scale = np.sqrt(luminosity_Lsun)
+    scale = np.sqrt(precision.type(luminosity_Lsun))
     np.testing.assert_allclose(float(eeid_AU(luminosity_Lsun)), scale, rtol=1e-15)
     np.testing.assert_allclose(float(inner_AU), 0.95 * scale, rtol=1e-15)
     np.testing.assert_allclose(float(outer_AU), 1.67 * scale, rtol=1e-15)
@@ -77,10 +77,14 @@ def test_jit_and_grad():
 
 
 @pytest.mark.parametrize("limit", sorted(KOPPARAPU_SEFF_COEFFICIENTS))
-def test_kopparapu_flux_at_the_solar_temperature_is_the_solar_coefficient(limit):
+def test_kopparapu_flux_at_the_solar_temperature_is_the_solar_coefficient(
+    limit, precision
+):
     """At Teff = 5780 K the polynomial reduces to its constant term."""
     s_sun = KOPPARAPU_SEFF_COEFFICIENTS[limit][0]
-    assert float(kopparapu_effective_flux(5780.0, limit)) == s_sun
+    assert float(kopparapu_effective_flux(5780.0, limit)) == float(
+        precision.type(s_sun)
+    )
 
 
 # S_eff at 3000, 4500 and 7000 K, evaluated by hand from Table 1 of
@@ -94,6 +98,7 @@ KOPPARAPU_TABLE_1_CHECKS = {
 
 
 @pytest.mark.parametrize("limit", sorted(KOPPARAPU_TABLE_1_CHECKS))
+@pytest.mark.float64_only(reason="float64 Kopparapu effective-flux reference")
 def test_kopparapu_flux_away_from_the_solar_temperature(limit):
     """The quartic matches hand evaluations of Table 1 at non-solar Teff."""
     flux = kopparapu_effective_flux(jnp.array([3000.0, 4500.0, 7000.0]), limit)

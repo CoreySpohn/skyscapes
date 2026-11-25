@@ -28,6 +28,7 @@ def test_constructor_passes_the_distribution_contract():
     check_distribution(law, jax.random.key(0), n_draws=1_000, rtol=1e-6)
 
 
+@pytest.mark.float64_only(reason="float64 log-density reference")
 def test_kipping_is_beta_and_truncation_conditions_it():
     """Kipping is Beta(0.867, 3.03) and e_max conditions it, matching scipy.
 

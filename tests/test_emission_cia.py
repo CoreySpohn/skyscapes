@@ -152,6 +152,7 @@ def test_missing_partner_is_explicit(constant_engines):
 
 @pytest.mark.parametrize("pair", FILES)
 @pytest.mark.slow
+@pytest.mark.float64_only(reason="float64 HITRAN coefficient reference")
 def test_cached_cia_matches_tabulated_point(pair):
     """A direct file sample is reproduced at its temperature and frequency."""
     path = CACHE / FILES[pair]
@@ -204,6 +205,7 @@ def test_cia_profiles_follow_planet_and_layer(constant_engines):
     np.testing.assert_allclose(reduced / reduced[-1], shape / shape[-1], rtol=1e-12)
 
 
+@pytest.mark.float64_only(reason="finite-difference derivative")
 def test_cia_constructs_under_jit_and_temperature_gradient(constant_engines):
     """Temperature interpolation remains live during traced construction."""
 

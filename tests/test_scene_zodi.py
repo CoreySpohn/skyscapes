@@ -58,6 +58,7 @@ def test_batches_reject_zodi():
         )
 
 
+@pytest.mark.float64_only(reason="float64 photometry reference")
 def test_ayo_exozodi_units():
     """Check AB normalization and photon units from SI primitives.
 

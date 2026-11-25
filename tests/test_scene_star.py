@@ -25,7 +25,7 @@ STARS = [k for k in AbstractStar.__subclasses__() if not k.__name__.startswith("
 
 
 @pytest.mark.parametrize("kind", STARS)
-def test_angular_diameter_contract(kind):
+def test_angular_diameter_contract(kind, precision):
     """Fails if a star detaches its size from JAX or misinterprets distance.
 
     Fixed diameters are exact inputs. The physical diameter uses the
@@ -62,7 +62,9 @@ def test_angular_diameter_contract(kind):
         return jax.vmap(source.angular_diameter_arcsec)(distances)
 
     actual = diameter(star, distance)
-    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=0)
+    np.testing.assert_allclose(
+        actual, np.asarray(expected, dtype=precision), rtol=1e-12, atol=0
+    )
     size = (
         (lambda s: s.radius_m)
         if kind is BlackbodyStar
@@ -149,7 +151,16 @@ def test_blackbody_star_repr(blackbody_star):
     assert repr(blackbody_star) == ("BlackbodyStar(Teff=5.77e+03 K, radius=6.96e+08 m)")
 
 
-@pytest.mark.parametrize("dtype", [jnp.float32, jnp.float64])
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        jnp.float32,
+        pytest.param(
+            jnp.float64,
+            marks=pytest.mark.float64_only(reason="explicit float64 wavelength input"),
+        ),
+    ],
+)
 def test_blackbody_star_jit_and_vmap(blackbody_star, dtype):
     """Compiled and wavelength-vectorized spectra match eager evaluation."""
     wavelength_nm = jnp.array([200.0, 550.0, 1000.0, 10_000.0], dtype=dtype)
@@ -203,6 +214,7 @@ def test_spectrum_star_wavelength_coverage(n_epochs):
     "kind,n_epochs",
     [(kind, n) for kind in STARS for n in ((1, 2) if kind is Star else (1,))],
 )
+@pytest.mark.float64_only(reason="float64 photometry reference")
 def test_photon_contract(kind, n_epochs):
     """Fails on a unit error, Jy interpolation, or lost wavelength/time axes.
 
@@ -253,6 +265,7 @@ def test_photon_contract(kind, n_epochs):
 
 
 @pytest.mark.parametrize("method", ["linear", "cubic"])
+@pytest.mark.float64_only(reason="float64 photometry reference")
 def test_flat_fnu_quadrature_anchor(method):
     """Fails on a per-nm error, missing knots, or photon integration bias.
 
@@ -293,6 +306,7 @@ def test_flat_fnu_quadrature_anchor(method):
         )
 
 
+@pytest.mark.float64_only(reason="finite-difference derivative")
 def test_photon_jax_and_stellar_gradient(blackbody_star):
     """Fails if tracing or batching changes photons or temperature derivatives detach.
 
@@ -372,6 +386,7 @@ def test_flux_scale_is_checked_finite_not_positive(index):
 
 @pytest.mark.parametrize("method", ["linear", "cubic"])
 @pytest.mark.parametrize("n_epochs", [1, 3])
+@pytest.mark.float64_only(reason="finite-difference derivative")
 def test_star_table_is_the_live_leaf_and_the_interpolant_is_derived(method, n_epochs):
     """Fails if the photon table is dead beside a stored interpolant.
 

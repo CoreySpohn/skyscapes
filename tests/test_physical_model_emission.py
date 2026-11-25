@@ -145,6 +145,7 @@ def test_constants_parity_with_hwoutils():
 
 
 @vv.case("planet-thermal-emission", "code-verification")
+@pytest.mark.float64_only(reason="float64 temperature-profile reference")
 def test_polynomial_tp_evaluates_the_given_coefficients():
     """T(P) equals the hand-summed polynomial in log10 P.
 
@@ -182,7 +183,7 @@ def test_earth_twin_profile_spans_216_to_286_kelvin(engines):
 
 
 @pytest.mark.parametrize("surface_bar", [1.0, 10**EARTH_TWIN_LOG_P0, 4.0])
-def test_pressure_column_ends_at_the_declared_surface(surface_bar):
+def test_pressure_column_ends_at_the_declared_surface(surface_bar, precision):
     """Layer widths cover exactly the declared top-to-surface column."""
     top_bar = 1.0e-4
     built = build_exojax_emission_engines(
@@ -199,7 +200,9 @@ def test_pressure_column_ends_at_the_declared_surface(surface_bar):
     )
     model = _model(built, (280.0, 40.0))
     np.testing.assert_allclose(
-        model.surface.temperature_K, [280.0 + 40.0 * np.log10(surface_bar)], rtol=1e-12
+        model.surface.temperature_K,
+        np.asarray([280.0 + 40.0 * np.log10(surface_bar)], dtype=precision),
+        rtol=1e-12,
     )
     assert rt.pressure[-1] < surface_bar
 
@@ -217,6 +220,7 @@ def test_compute_tarr_matches_temperature(engines):
 
 @vv.case("planet-thermal-emission", "code-verification")
 @pytest.mark.parametrize("ground_K", [180.0, 300.0])
+@pytest.mark.float64_only(reason="float64 thermal emission reference")
 def test_zero_opacity_emits_the_ground_blackbody(engines, ground_K):
     """With no gas opacity the planet is a blackbody at the ground temperature.
 
@@ -237,6 +241,7 @@ def test_zero_opacity_emits_the_ground_blackbody(engines, ground_K):
 
 
 @vv.case("planet-thermal-emission", "code-verification")
+@pytest.mark.float64_only(reason="float64 thermal emission reference")
 def test_emissivity_scales_the_ground_emission(engines):
     """A gray ground of emissivity e emits e times the blackbody flux."""
     model = _model(
@@ -253,6 +258,7 @@ def test_emissivity_scales_the_ground_emission(engines):
 
 @vv.case("planet-thermal-emission", "code-verification")
 @pytest.mark.parametrize("xs", [0.0, 1.0e-30, 1.0e-24, 1.0e-20])
+@pytest.mark.float64_only(reason="float64 thermal emission reference")
 def test_isothermal_atmosphere_is_a_blackbody_at_any_opacity(engines, xs):
     """An isothermal column over a ground at the same temperature is Planck.
 
@@ -274,6 +280,7 @@ def test_isothermal_atmosphere_is_a_blackbody_at_any_opacity(engines, xs):
 
 
 @vv.case("planet-thermal-emission", "code-verification")
+@pytest.mark.float64_only(reason="float64 thermal emission reference")
 def test_thick_atmosphere_hides_a_hotter_ground(engines):
     """An optically thick isothermal column emits at its own temperature."""
     model = _model(
@@ -346,6 +353,7 @@ def test_two_temperature_layers_keep_top_to_bottom_order(upper_K, lower_K):
 
 
 @vv.case("planet-thermal-emission", "code-verification")
+@pytest.mark.float64_only(reason="float64 hydrostatic optical-depth reference")
 def test_gray_species_column_opacity_has_independent_cgs_normalization():
     """Hydrostatic tau = sigma q P / (m_mol m_u g), with negligible top P.
 
@@ -460,6 +468,7 @@ def test_flux_scales_as_radius_over_distance_squared(engines):
 
 
 @vv.case("planet-thermal-emission", "code-verification")
+@pytest.mark.float64_only(reason="finite-difference derivative")
 def test_jit_equals_eager_and_gradient_matches_finite_difference(engines):
     """JIT reproduces eager, and d(flux)/d(ground T) matches a central difference."""
     model = _model(engines, (200.0,), species=_species(1.0e-24))
@@ -537,6 +546,7 @@ def _band(model, lo_um, hi_um):
 
 @vv.case("planet-thermal-emission", "code-verification")
 @pytest.mark.slow
+@pytest.mark.float64_only(reason="float64 ExoJAX line-opacity reference")
 def test_earth_twin_window_sees_the_ground(earth_twin):
     """The 11 micron window brightness temperature is near the ground's.
 
@@ -562,6 +572,7 @@ def test_earth_twin_window_sees_the_ground(earth_twin):
 
 @vv.case("planet-thermal-emission", "code-verification")
 @pytest.mark.slow
+@pytest.mark.float64_only(reason="float64 ExoJAX line-opacity reference")
 def test_earth_twin_co2_band_probes_the_tropopause(earth_twin):
     """The 15 micron CO2 band minimum sits near the profile's coldest layer.
 
@@ -574,6 +585,7 @@ def test_earth_twin_co2_band_probes_the_tropopause(earth_twin):
 
 @vv.case("planet-thermal-emission", "code-verification")
 @pytest.mark.slow
+@pytest.mark.float64_only(reason="float64 ExoJAX line-opacity reference")
 def test_earth_twin_ozone_and_water_bands_are_cooler_than_the_window(earth_twin):
     """The 9.6 micron O3 band and 6.3 micron H2O band emit above the ground."""
     window = np.median(_band(earth_twin, 10.5, 11.5))
@@ -582,6 +594,7 @@ def test_earth_twin_ozone_and_water_bands_are_cooler_than_the_window(earth_twin)
 
 
 @pytest.mark.slow
+@pytest.mark.float64_only(reason="float64 ExoJAX line-opacity reference")
 def test_ozone_uses_line_lists_in_the_infrared(earth_twin):
     """The thermal builder gives O3 a HITRAN opacity, not the PSG table."""
     o3 = next(s for s in earth_twin.species if s.name == "O3")
@@ -589,6 +602,7 @@ def test_ozone_uses_line_lists_in_the_infrared(earth_twin):
 
 
 @pytest.mark.slow
+@pytest.mark.float64_only(reason="float64 ExoJAX line-opacity reference")
 def test_earth_twin_cia_cools_oxygen_band_preserves_window(earth_twin):
     """CIA lowers mean 1450-1650 cm^-1 Tb; 10-11 um changes by <0.01 K."""
     cache = Path.home() / ".cache" / "skyscapes" / "cia"

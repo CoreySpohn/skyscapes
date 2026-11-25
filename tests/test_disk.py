@@ -114,6 +114,7 @@ def point_grid(step=0.01, radius=0.1):
 
 
 @pytest.mark.parametrize("kind", ["exovista", "grater"])
+@pytest.mark.float64_only(reason="float64 photometry reference")
 def test_calibration_anchor_and_pixel_area(kind):
     """Fails for missing calibration, host contrast dialect, or pixel-area factors.
 
@@ -199,6 +200,7 @@ def test_amplitude_round_trip_and_profile_identity(kind):
 
 
 @pytest.mark.parametrize("kind", ["exovista", "grater"])
+@pytest.mark.float64_only(reason="float64 photometry reference")
 def test_host_scaling_once(kind):
     """Fails if a K dwarf's band/bolometric host correction is counted twice.
 
@@ -396,6 +398,7 @@ def test_system_radiance_owns_midplane_override():
         system.photon_radiance(550.0, 0.0, grid=replace(grid, orientation=None))
 
 
+@pytest.mark.float64_only(reason="finite-difference derivative")
 def test_scene_midplane_is_the_one_live_orientation():
     """Fails if a disk keeps its own orientation, ignores the scene's, or mixes them.
 
@@ -669,6 +672,7 @@ def test_exovista_disk_render_equals_the_stored_spline_render():
     np.testing.assert_allclose(actual, jnp.stack(expected), rtol=1e-14)
 
 
+@pytest.mark.float64_only(reason="finite-difference derivative")
 def test_exovista_disk_cube_is_a_live_leaf_with_exact_gradient():
     """Fails if a change to the cube is ignored or its gradient is wrong.
 

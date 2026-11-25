@@ -20,7 +20,7 @@ from .test_physical_model_exojax import make_physical_model
 from .test_physical_model_grid import _flat_grid
 
 
-def _model(dtype=jnp.float64):
+def _model(dtype=None):
     values = jnp.array([[1.0, 3.0, 15.0], [3.0, 7.0, 19.0]], dtype=dtype)
     return physical_model.TimeSeriesPhysicalModel(
         wavelengths_nm=jnp.array([500.0, 700.0], dtype=dtype),
@@ -42,6 +42,7 @@ def _evaluate(model, time_d, wavelength_nm=500.0):
 
 
 @vv.case("planet-phase", "code-verification")
+@pytest.mark.float64_only(reason="float64 contrast table reference")
 def test_distinct_times_with_identical_phases_recover_table_knots():
     """Equal phases retain distinct contrasts; tolerance is floating-point roundoff."""
     result = _evaluate(_model(), jnp.array([0.0, 1.0, 4.0]))
@@ -50,6 +51,7 @@ def test_distinct_times_with_identical_phases_recover_table_knots():
 
 
 @vv.case("planet-phase", "code-verification")
+@pytest.mark.float64_only(reason="float64 contrast table reference")
 def test_interpolates_physical_time_and_wavelength():
     """Uneven epochs have hand-computed bilinear midpoints, at roundoff tolerance."""
     result = _evaluate(_model(), jnp.array([0.5, 2.5]), 600.0)
@@ -58,6 +60,7 @@ def test_interpolates_physical_time_and_wavelength():
 
 
 @vv.case("planet-phase", "code-verification")
+@pytest.mark.float64_only(reason="float64 query against a float32 contrast table")
 def test_jit_promotes_query_without_changing_float32_storage():
     """A mixed-precision query agrees within the float32 table rounding floor."""
     model = _model(jnp.float32)
@@ -84,6 +87,7 @@ def test_subday_offsets_remain_distinct():
 
 
 @vv.case("planet-phase", "code-verification")
+@pytest.mark.float64_only(reason="float64 contrast table reference")
 def test_single_epoch_is_constant_and_spectral_interpolation_remains_bounded():
     """A snapshot has no invented evolution; spectral midpoints are exact algebra."""
     model = physical_model.TimeSeriesPhysicalModel(
@@ -105,7 +109,9 @@ def test_time_and_wavelength_support_return_nan_outside_the_record():
 
 
 @pytest.mark.parametrize("times_d", [[0.0], [0.0, 1.0]])
-def test_single_wavelength_is_supported_only_at_its_tabulated_wavelength(times_d):
+def test_single_wavelength_is_supported_only_at_its_tabulated_wavelength(
+    times_d, precision
+):
     """A monochromatic table does not imply a flat spectrum outside its support."""
     model = physical_model.TimeSeriesPhysicalModel(
         wavelengths_nm=[550.0],
@@ -113,7 +119,10 @@ def test_single_wavelength_is_supported_only_at_its_tabulated_wavelength(times_d
         contrast_grid=np.full((1, 1, len(times_d)), 1e-10),
     )
     np.testing.assert_allclose(
-        _evaluate(model, jnp.array(times_d), 550.0), 1e-10, rtol=1e-14, atol=0
+        _evaluate(model, jnp.array(times_d), 550.0),
+        precision.type(1e-10),
+        rtol=1e-14,
+        atol=0,
     )
     assert jnp.isnan(_evaluate(model, jnp.array(times_d), 551.0)).all()
 
@@ -200,6 +209,7 @@ def test_default_time_hook_preserves_existing_model_behavior(kind, request):
 @vv.case("planet-phase", "code-verification")
 @settings(deadline=None, max_examples=30)
 @given(step=st.integers(min_value=0, max_value=1024))
+@pytest.mark.float64_only(reason="float64 contrast table reference")
 def test_linear_interpolation_preserves_nonnegative_contrast(step):
     """Dyadic query coordinates isolate interpolation roundoff from input rounding."""
     fraction = step / 1024
@@ -214,6 +224,7 @@ def test_linear_interpolation_preserves_nonnegative_contrast(step):
 
 
 @vv.case("planet-phase", "code-verification")
+@pytest.mark.float64_only(reason="float64 contrast table reference")
 def test_time_derivative_matches_piecewise_linear_slope():
     """Autodiff yields the table segment's known slope to roundoff tolerance."""
     model = _model()
@@ -224,6 +235,7 @@ def test_time_derivative_matches_piecewise_linear_slope():
 
 
 @vv.case("planet-phase", "code-verification")
+@pytest.mark.float64_only(reason="float64 contrast table reference")
 def test_system_contrast_and_magnitude_forward_physical_time():
     """Scene accessors recover tabulated ratios and magnitudes to roundoff."""
     model = physical_model.TimeSeriesPhysicalModel(

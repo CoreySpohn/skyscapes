@@ -105,6 +105,7 @@ def _flat_level(disk, luminosity, flux=1.0):
 
 
 @vv.case("stellar-photometry", "code-verification")
+@pytest.mark.float64_only(reason="float64 photometry reference")
 def test_bolometric_level_divides_by_the_band_mean_of_a_phoenix_star():
     """Fails if the bolometric calibration point-samples the star or mis-keys a band.
 
@@ -152,6 +153,7 @@ def test_bolometric_level_divides_by_the_band_mean_of_a_phoenix_star():
 
 
 @vv.case("stellar-photometry", "code-verification")
+@pytest.mark.float64_only(reason="float64 photometry reference")
 def test_bolometric_level_divides_by_the_band_mean_of_a_blackbody():
     """Fails if a smooth star's band mean is a point sample or the wrong band.
 
@@ -223,6 +225,7 @@ def test_band_rule_level_does_not_read_the_star():
 
 
 @vv.case("stellar-photometry", "code-verification")
+@pytest.mark.float64_only(reason="float64 photometry reference")
 def test_a_band_rule_disk_carries_the_node_effective_star():
     """Fails if the disk is read against a point sample of the star at the nodes.
 
@@ -308,6 +311,7 @@ def test_calibration_band_declaration_is_checked():
 
 
 @vv.case("stellar-photometry", "code-verification")
+@pytest.mark.float64_only(reason="float64 photometry reference")
 def test_zero_point_is_the_band_mean_of_the_zero_magnitude_density():
     """Fails if the zero point is read at the center or averaged in the wrong variable.
 
