@@ -294,13 +294,28 @@ def test_inclined_phase_angle_range():
 
 
 def test_scene_ephemeris_passes_orbix_through_exactly():
-    """States and distances preserve orbix's public frame unchanged."""
+    """States and distances preserve orbix's public frame unchanged.
+
+    Basis: 16 float64 eps of each field's largest magnitude. The reference is
+    the eager op-by-op solve and the scene solves through one compiled program,
+    so the two differ by fusion and fused multiply-add rounding of the Kepler
+    solve and the frame rotation (a chain of about a dozen operations per
+    element), not bitwise. This machine sees about 3 eps; a changed frame,
+    sign or unit moves a field by orders of magnitude more.
+    """
     p = _single_scene()
     times = jnp.array([0.0, 42.0, 200.0])
     expected = p.dynamics.solve(times)
     actual = p.ephemeris(times)
+    eps = np.finfo(np.float64).eps
     for name in ("position_AU", "velocity_AU_per_d", "dist_pc"):
-        np.testing.assert_array_equal(getattr(actual, name), getattr(expected, name))
+        want = np.asarray(getattr(expected, name))
+        np.testing.assert_allclose(
+            getattr(actual, name),
+            want,
+            rtol=16 * eps,
+            atol=16 * eps * np.max(np.abs(want)),
+        )
 
 
 @pytest.mark.parametrize("mass", [1.0, float("nan"), -1.0, float("inf"), 0.0])
