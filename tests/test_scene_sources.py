@@ -637,11 +637,13 @@ def test_a_composite_derives_its_knots_from_its_components():
     assert swapped.knot_digest != total.knot_digest
 
 
-def test_numpy_and_jax_input_build_one_scene(rule, precision):
-    """Fails if a source keeps its input's array type or its knots depend on it.
+@pytest.mark.parametrize("scalar_time", [False, True], ids=["array", "scalar"])
+def test_numpy_and_jax_input_build_one_scene(rule, precision, scalar_time):
+    """Fails if array types change the scene or a scalar date loses its time axis.
 
     The same star, tabulated planet and tabulated zodi built from NumPy or JAX
-    arrays have equal knots, the same tree, and bitwise equal ``sources``.
+    arrays have equal knots, the same tree, and bitwise equal eager ``sources``.
+    Both time inputs keep the same size-one time axis, including under JIT.
     """
     base = _phoenix()
     wavelengths_nm = np.asarray(base.wavelengths_nm, dtype=precision)
@@ -660,14 +662,25 @@ def test_numpy_and_jax_input_build_one_scene(rule, precision):
     host, device = build(np.array), build(jnp.array)
     assert jax.tree.structure(host) == jax.tree.structure(device)
     resolution = Resolution.build(rule, *host.spectral_tables())
-    pairs = zip(
-        jax.tree.leaves(host.sources(rule, resolution, TIMES)),
-        jax.tree.leaves(device.sources(rule, resolution, TIMES)),
-        strict=True,
+    time_d = 0.0 if scalar_time else TIMES
+    eager = host.sources(rule, resolution, time_d)
+    expected = device.sources(rule, resolution, TIMES)
+    compiled = eqx.filter_jit(Scene.sources)(
+        host, rule, resolution, jnp.asarray(time_d)
     )
-    for a, b in pairs:
-        assert a.dtype == b.dtype == precision
-        np.testing.assert_array_equal(a, b)
+    for eager_leaf, expected_leaf, compiled_leaf in zip(
+        jax.tree.leaves(eager),
+        jax.tree.leaves(expected),
+        jax.tree.leaves(compiled),
+        strict=True,
+    ):
+        assert (
+            eager_leaf.dtype == expected_leaf.dtype == compiled_leaf.dtype == precision
+        )
+        assert eager_leaf.shape == expected_leaf.shape == compiled_leaf.shape
+        np.testing.assert_array_equal(eager_leaf, expected_leaf)
+        # JIT can fuse the interpolation and reduction's floating-point operations.
+        np.testing.assert_array_max_ulp(compiled_leaf, expected_leaf, maxulp=8)
 
 
 def test_a_batch_refuses_twin_star_grids_by_name():
