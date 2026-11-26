@@ -57,6 +57,7 @@ from hwoutils.conversions import (
     nm_to_wavenumber_cm,
 )
 from hwoutils.leaves import HostGrid
+from hwoutils.precision import require_float64
 from jaxtyping import Array
 from optixstuff.spectral import Knots
 
@@ -128,6 +129,7 @@ def build_exojax_engines(
 ) -> dict:
     """Build the heavy shared engines and pre-built per-species data.
 
+    HITRAN line opacity requires float64.
     Each molecule's opacity engine (line-list LSD tables or cross-
     section interpolant) is built once here and reused across many
     atmosphere instantiations that vary only the per-planet
@@ -171,6 +173,12 @@ def build_exojax_engines(
         ``{molmass, opa, rayleigh_xs}``), ``bulk_prebuilt``
         (dict with ``{name, molmass, rayleigh_xs}`` or ``None``).
     """
+    uses_line_lists = any(
+        name in MOLECULE_RECIPES and MOLECULE_RECIPES[name].psg_xs_url is None
+        for name in molecules
+    )
+    if uses_line_lists:
+        require_float64("ExoJAX PreMODIT line opacity")
     if databases_dir is None:
         databases_dir = str(Path.home() / ".cache" / "skyscapes" / "exojax")
     Path(databases_dir).mkdir(parents=True, exist_ok=True)
@@ -203,10 +211,7 @@ def build_exojax_engines(
             nu_min, nu_max, n_wavenumbers, xsmode="premodit", unit="cm-1"
         )
     R_grid = grid_resolving_power(nu_grid)
-    if R_grid < 1.0e5 and any(
-        name in MOLECULE_RECIPES and MOLECULE_RECIPES[name].psg_xs_url is None
-        for name in molecules
-    ):
+    if R_grid < 1.0e5 and uses_line_lists:
         warnings.warn(
             f"R_grid={R_grid:.0f}: line-resolved band depths are biased deep "
             "at coarse grids (R_grid < 100000). See Spectral grid resolution: "

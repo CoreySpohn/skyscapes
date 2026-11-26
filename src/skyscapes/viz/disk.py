@@ -14,6 +14,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 from hwoutils.conversions import au_to_arcsec
+from hwoutils.numerics import COARSEST, eps
 from optixstuff.grids import Image, PixelGrid, SkyOrientation, resample
 
 from skyscapes.disk import AbstractDisk
@@ -816,7 +817,9 @@ def _check_brightness(image):
     peak = float(finite.max())
     worst = float(finite.min())
     scale = float(np.max(np.abs(finite)))
-    if peak > 0.0 and worst >= -1e-6 * scale:
+    # Permit cancellation in the four weighted spatial samples of a cubic
+    # spectral read. A display decision uses one threshold in both lanes.
+    if peak > 0.0 and worst >= -8 * eps(COARSEST) * scale:
         return
     raise ValueError(
         f"the disk map is not a nonnegative surface brightness (peak {peak:.3g},"

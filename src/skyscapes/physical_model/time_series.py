@@ -9,6 +9,7 @@ from hwoutils.leaves import HostGrid, as_bulk_leaf, as_float_leaf
 from jaxtyping import Array
 from optixstuff.spectral import Knots
 
+from .._sample_time import SampleOrigin
 from .._tables import as_host_grid, knots_of
 from .base import AbstractPhysicalModel
 
@@ -41,16 +42,19 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
     Attributes:
         wavelengths_nm: Finite, strictly increasing grid [nm], shape ``(W,)``,
             static.
-        times_d: Finite, strictly increasing days from the scene epoch,
-            shape ``(T,)``. The owning scene supplies the epoch metadata.
+        times_d: Increasing sample days, shape ``(T,)``. For a shared-epoch
+            import, add ``sample_origin.days`` on the host to recover scene days.
         contrast_grid: Finite, nonnegative flux ratios, shape ``(K, W, T)``.
             A declared bulk field: ExoVista planet contrast cubes are float32
             on disk, and a float32 cube is retained under x64.
+        sample_origin: First-sample offset of a shared-epoch import, or None.
     """
 
     wavelengths_nm: HostGrid = eqx.field(static=True, converter=_wavelength_grid)
     times_d: Array = eqx.field(converter=as_float_leaf)
     contrast_grid: Array = eqx.field(converter=as_bulk_leaf)
+
+    sample_origin: SampleOrigin | None = None
 
     @property
     def knots(self) -> Knots:
@@ -152,6 +156,8 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
         Returns:
             Contrast, shape ``(K, T_query)``, with NaN outside table support.
         """
+        if self.sample_origin is not None:
+            time_d = self.sample_origin.relative(time_d)
         grid = self.wavelengths_nm.array()
         dtype = jnp.result_type(
             wavelength_nm,

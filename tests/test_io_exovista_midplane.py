@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from hwoutils.numerics import eps
 from zodi import DensityDust
 
 from skyscapes import viz
@@ -186,13 +187,14 @@ def test_the_loaded_scene_carries_the_header_angles_into_a_disk_read(fits_fixtur
 
 @pytest.mark.parametrize("inc_deg", [30.0, 60.0, 120.0, 150.0])
 @pytest.mark.parametrize("pa_deg", [-30.0, 0.0, 30.0, 213.0, 390.0])
-@pytest.mark.float64_only(reason="float64 reference plane and near-side geometry")
 def test_midplane_conversion_preserves_plane_and_near_side(inc_deg, pa_deg):
     """Rotate ExoVista's basis by negating x and z, including inclinations above 90.
 
     The nodes may reverse along their line, but the near vector must match
     in all three coordinates. The supplementary-inclination representation
-    must describe the same plane AND near half. Tolerance: float64 trig.
+    must describe the same plane and near half. The host float64 unit
+    vectors allow eight roundings for converting the angle, evaluating
+    trig functions, taking products and subtracting in the cross product.
     """
     inc, pa = np.radians([inc_deg, pa_deg])
     converted_nodes = np.array([-np.cos(pa), np.sin(pa), 0.0])
@@ -204,11 +206,12 @@ def test_midplane_conversion_preserves_plane_and_near_side(inc_deg, pa_deg):
     assert converted_inc == inc_deg
     assert 0.0 <= converted_pa < 360.0
     nodes, near, normal = disk_axes_sky(converted_inc, converted_pa)
-    np.testing.assert_allclose(-nodes, converted_nodes, atol=1e-14)
-    np.testing.assert_allclose(near, converted_near, atol=1e-14)
+    tolerance = 8 * eps(nodes.dtype)
+    np.testing.assert_allclose(-nodes, converted_nodes, rtol=0, atol=tolerance)
+    np.testing.assert_allclose(near, converted_near, rtol=0, atol=tolerance)
     equivalent_nodes, equivalent_near, equivalent_normal = disk_axes_sky(
         180.0 - converted_inc, converted_pa + 180.0
     )
-    np.testing.assert_allclose(equivalent_nodes, -nodes, atol=1e-14)
-    np.testing.assert_allclose(equivalent_near, near, atol=1e-14)
-    np.testing.assert_allclose(equivalent_normal, -normal, atol=1e-14)
+    np.testing.assert_allclose(equivalent_nodes, -nodes, rtol=0, atol=tolerance)
+    np.testing.assert_allclose(equivalent_near, near, rtol=0, atol=tolerance)
+    np.testing.assert_allclose(equivalent_normal, -normal, rtol=0, atol=tolerance)

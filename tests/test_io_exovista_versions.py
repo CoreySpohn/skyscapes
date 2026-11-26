@@ -1,9 +1,8 @@
 """Import contracts for the legacy and spotted-star ExoVista layouts."""
 
 import warnings
-from types import SimpleNamespace
 
-import jax
+import equinox as eqx
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -16,6 +15,7 @@ from hwoutils.constants import (
     Mearth2kg,
     Msun2kg,
     c,
+    d2s,
     h,
     k_B,
     pc2m,
@@ -23,14 +23,19 @@ from hwoutils.constants import (
     yr2s,
 )
 from hwoutils.conversions import flux_jy_to_mag
-from optixstuff.spectral import Knots
+from hwoutils.epoch import Epoch
+from hwoutils.numerics import roundoff
+from hwoutils.precision import precision_of
+from hwoutils.testing import ulps
+from optixstuff.spectral import Band, Knots, Quadrature, Resolution
 
 from skyscapes.io import (
-    exovista,
     exovista_header,
     from_exovista,
     get_earth_like_planet_indices,
 )
+from skyscapes.io.exovista import _phase_model
+from skyscapes.physical_model import TimeSeriesPhysicalModel
 from skyscapes.scene import Scene
 
 
@@ -105,8 +110,7 @@ def test_loaded_knots_are_the_file_grid(scene_file, wave_dtype):
 
     Exact digest. The star's and every planet's knots are the stored micron
     grid (float32 or float64 on disk), widened to float64 and then scaled to
-    nm, computed here from the file. The ExoVista import requires x64 for
-    its orbital states; the disk loader's x32 case is in the disk dtype test.
+    nm, computed here from the file.
     """
     path = scene_file(wave_dtype=wave_dtype)
     truth = Knots(np.asarray(fits.getdata(path, 0), dtype=np.float64) * um2nm)
@@ -128,6 +132,21 @@ def test_layout_selects_actual_bodies_and_earths(scene_file, version):
     assert from_exovista(path, only_earths=True, load_disk=False).n_planets == 1
     selected = from_exovista(path, planet_indices=[1, 0], load_disk=False)
     np.testing.assert_array_equal([p.Rp_Rearth[0] for p in selected.planets], [11, 1])
+
+
+def test_earth_selection_uses_file_header_precision(scene_file):
+    """The half-open habitable zone uses the float64 values from the file.
+
+    One planet is just inside the outer limit and the other is just below
+    the inner limit. Both would round onto the corresponding limit in float32.
+    """
+    path = scene_file()
+    with fits.open(path, mode="update") as hdul:
+        hdul[6].header["A"] = 1.67 - 1e-9
+        hdul[7].header["A"] = 0.95 - 1e-9
+        hdul[7].header["R"] = 1.0
+    assert get_earth_like_planet_indices(path) == [0]
+    assert from_exovista(path, only_earths=True, load_disk=False).n_planets == 1
 
 
 def test_new_layout_preserves_spot_history_and_stellar_temperatures(scene_file):
@@ -160,12 +179,32 @@ def test_header_is_host_data_beside_a_batchable_scene(scene_file):
     assert header["RA"] == 10.0
     assert header["MASS"] == 1.0
     assert not {"COMMENT", "HISTORY", ""} & header.keys()
-    scenes = [from_exovista(p, load_disk=False, local_zodi=None) for p in (a, b)]
+    shared = Epoch(2451545.0)
+    cadence = np.arange(3) * 2.0**-26
+    for path, start in ((a, 0.0), (b, 30.0)):
+        with fits.open(path, mode="update") as hdul:
+            for hdu in hdul[5:]:
+                hdu.data[:, 0] = start + cadence
+    scenes = [
+        from_exovista(
+            p, planet_indices=[0], load_disk=False, local_zodi=None, epoch=shared
+        )
+        for p in (a, b)
+    ]
     assert not hasattr(scenes[0].star, "metadata")
     batch = Scene.from_scenes(scenes)
     assert batch.batch_shape == (2,)
     np.testing.assert_array_equal(batch.ra_deg, [10.0, 200.0])
     np.testing.assert_array_equal(batch.dec_deg, [-5.0, 40.0])
+    dates = (np.array([0.0, 30.0])[:, None] + cadence) * (yr2s / d2s)
+    expected = [np.array([1.0, 2.0, 3.0], dtype=np.float32) * np.float32(1e-10)]
+    reads = batch.contrasts(600.0, dates)
+    for row, clock, scene, other in zip(
+        reads, dates, scenes, reversed(scenes), strict=True
+    ):
+        np.testing.assert_array_equal(row, expected)
+        restored = Scene.from_table(scene.to_table(), template=other)
+        np.testing.assert_array_equal(restored.contrasts(600.0, clock), expected)
 
 
 def test_new_layout_keeps_time_dependent_contrast_at_equal_phase(scene_file):
@@ -248,6 +287,19 @@ def test_phase_model_preserves_face_on_and_snapshot_spectra(
         )
 
 
+def test_one_phase_grid_interval_resolves_the_spectrum(precision):
+    """A span of one grid interval retains its two endpoint spectra in both lanes."""
+    phases = np.deg2rad([90.0, 90.0 + 180.0 / 99]).astype(precision)
+    table = TimeSeriesPhysicalModel(
+        wavelengths_nm=[500.0, 600.0],
+        times_d=[0.0, 1.0],
+        contrast_grid=np.array([[[1.0, 3.0], [2.0, 4.0]]]),
+    )
+    grid = _phase_model(table, phases)
+    np.testing.assert_array_equal(grid.contrast_grid[0, :, 0], [1.0, 2.0])
+    np.testing.assert_array_equal(grid.contrast_grid[0, :, -1], [3.0, 4.0])
+
+
 def test_legacy_has_no_imported_spots(scene_file):
     """Older files do not pretend to carry measured zero spot coverage."""
     scene = from_exovista(scene_file(version=2.33), load_disk=False)
@@ -268,7 +320,7 @@ def test_elapsed_years_use_fixed_duration_and_shared_epoch(scene_file):
             hdu.data[:, 0] = [0.0, 0.5, 1.0]
     scene = from_exovista(path, load_disk=False)
     expected = np.array([0.0, 182.625, 365.25])
-    np.testing.assert_allclose(scene.star._times_d, expected, rtol=0, atol=1e-9)
+    np.testing.assert_array_equal(scene.star._times_d, expected)
     np.testing.assert_array_equal(scene.star.spots.times_d, expected)
     for planet in scene.planets:
         np.testing.assert_array_equal(planet.physical_model.times_d, expected)
@@ -288,21 +340,99 @@ def test_imported_positive_flux_cannot_overshoot_below_zero(scene_file):
     assert np.all(np.asarray(scene.planet_flux_densities(600.0, midpoint)) > 0)
 
 
-def test_import_requires_precision_for_orbital_states(
-    scene_file, monkeypatch, precision
+@pytest.mark.parametrize("epoch", [None, Epoch(2451545.0)])
+@pytest.mark.parametrize("mode", ["time", "phase"])
+def test_import_centers_states_and_times_before_narrowing(
+    scene_file, precision, epoch, mode
 ):
-    """Fails if state-vector conversion is allowed to lose float64 orbital precision."""
+    """Recover a one-AU separation and sub-second samples from float64 FITS rows.
+
+    Raw coordinates and years round together in float32. Allow one rounding
+    of each host day offset, and 32 operations at the orbital radius for the
+    Cartesian-to-frame conversion, Kepler evaluation and sky projection.
+    At the knots, allow two roundings for linear interpolation of the recorded
+    float32 contrasts. The stellar spectrum is stored as float32 in either
+    process, so its photon flux allows four float32 roundings (storage, the
+    wavelength interpolation, and the Jy-to-photon conversion).
+    """
+    stored = float(roundoff(1.0, n_ops=4, dtype=np.float32))
     path = scene_file()
-    # Only expose the supported config API to the loader.
-    monkeypatch.setattr(
-        exovista, "jax", SimpleNamespace(config=SimpleNamespace(read=jax.config.read))
+    with fits.open(path, mode="update") as hdul:
+        years = 30.0 + np.arange(3) * 2.0**-26
+        for body in hdul[5:]:
+            body.data[:, 0] = years
+            body.data[:, 9:12] += 2.0**27
+        expected_east = -(hdul[6].data[0, 9] - hdul[5].data[0, 9])
+        expected_east /= hdul[5].header["DIST"]
+    scene = from_exovista(
+        path,
+        planet_indices=[0],
+        load_disk=False,
+        epoch=epoch,
+        planet_spectra=mode,
     )
-    if precision == np.float64:
-        scene = from_exovista(path, load_disk=False)
-        assert scene.star._times_d.dtype == jnp.float64
+    offsets = (years - years[0]) * (yr2s / d2s)
+    assert precision_of(scene) == precision
+    assert scene.star._times_d.dtype == precision
+    np.testing.assert_array_equal(scene.star._times_d, offsets.astype(precision))
+    np.testing.assert_array_equal(scene.star.spots.times_d, offsets.astype(precision))
+    np.testing.assert_array_equal(scene.dynamics.orbits.epoch_d, 0)
+    first_d = 0.0 if epoch is None else years[0] * (yr2s / d2s)
+    dates = first_d + offsets
+    amplitudes = np.arange(1, 4)
+    if mode == "time":
+        np.testing.assert_array_equal(
+            scene.planets[0].physical_model.times_d, offsets.astype(precision)
+        )
+        expected = amplitudes * 1e-10
     else:
-        with pytest.raises(ValueError, match="jax_enable_x64"):
-            from_exovista(path, load_disk=False)
+        # The face-on orbit has one unresolved phase: its spectrum is the mean.
+        expected = np.full(3, amplitudes.mean() * 1e-10)
+
+    def read(scene):
+        return scene.contrasts(600.0, dates), scene.star.photon_flux_density(
+            600.0, dates, dist_pc=scene.dist_pc
+        )
+
+    for contrast, flux in (read(scene), eqx.filter_jit(read)(scene)):
+        np.testing.assert_allclose(
+            contrast[0], expected.astype(np.float32), rtol=float(ulps(2, 1.0)), atol=0
+        )
+        np.testing.assert_allclose(
+            flux, amplitudes * Jy / (h * 600.0), rtol=stored, atol=0
+        )
+    # The star table holds the photon flux density at the 600 and 700 nm knots
+    # and interpolates it linearly, so a band between them integrates
+    # analytically whatever the node layout.
+    low, high = 610.0, 640.0
+    slope = (1 / 700 - 1 / 600) / 100
+    integral = (high - low) / 600 + slope * ((high - 600) ** 2 - (low - 600) ** 2) / 2
+    rule = Quadrature.build([Band(low, high)])
+    resolution = Resolution.build(rule, *scene.spectral_tables())
+    sources = scene.sources(rule, resolution, dates)
+    weights = np.asarray(rule.weights(), dtype=np.float64)[0]
+    band_flux = np.einsum("q,qt->t", weights, np.asarray(sources.unscaled_star[0]))
+    np.testing.assert_allclose(
+        band_flux,
+        amplitudes * Jy / h * integral,
+        rtol=stored + float(roundoff(1.0, n_ops=16, dtype=precision)),
+        atol=0,
+    )
+    np.testing.assert_allclose(
+        sources.contrast[0, 0, 0],
+        expected.astype(np.float32),
+        rtol=stored,
+        atol=0,
+    )
+    positions = scene.positions(dates)
+    np.testing.assert_array_equal(
+        scene.ephemeris(dates).position_AU, scene.dynamics.solve(dates).position_AU
+    )
+    actual = positions[:, 0, 0]
+    assert actual.dtype == precision
+    np.testing.assert_allclose(
+        actual, [expected_east, 0.0], rtol=0, atol=float(ulps(32, expected_east))
+    )
 
 
 def _writer_mask_area(mapsize=512, u1=0.0473, u2=0.0841):

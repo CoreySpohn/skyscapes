@@ -9,6 +9,8 @@ import numpy as np
 import priorities
 import pytest
 from hwoutils.epoch import Epoch
+from hwoutils.numerics import roundoff
+from hwoutils.precision import PrecisionError
 
 from skyscapes.population import (
     HostStars,
@@ -17,7 +19,7 @@ from skyscapes.population import (
     PopulationConfig,
     occurrence_table_from_grid,
 )
-from skyscapes.scene import FlatStar
+from skyscapes.scene import FlatStar, Scene
 
 
 def _star_relative_a(s):
@@ -100,20 +102,67 @@ def marks(process):
     return host, scene
 
 
-def test_mark_marginals_and_normalization(process, marks):
-    """Fails if cell weights, isotropy, mass Jacobian, or normalization drift.
+@pytest.mark.float32_only(reason="population inference requires float64")
+@pytest.mark.parametrize("method", ["mark_log_density", "log_intensity"])
+def test_density_requires_x64(process, marks, method):
+    """Fails if density evaluation starts before refusing float32, eager or traced."""
+    host, scenes = marks
+    scene = jax.tree.map(lambda x: x[0], scenes)
+    circular = eqx.tree_at(lambda p: p.config, process, PopulationConfig())
+    evaluate = getattr(circular, method)
+    for run in (evaluate, eqx.filter_jit(evaluate)):
+        with pytest.raises(
+            PrecisionError, match=rf"{method} requires float64.*enable_x64"
+        ):
+            run(scene, host)
+
+
+@pytest.mark.float64_only(reason="float32 density inputs in an x64 process")
+@pytest.mark.parametrize("method", ["mark_log_density", "log_intensity"])
+def test_density_requires_float64_inputs(process, marks, method):
+    """Fails if a narrow density input silently participates in x64 inference."""
+    host, scenes = marks
+    scene = jax.tree.map(lambda x: x[0], scenes)
+
+    def narrow(x):
+        return x.astype(jnp.float32)
+
+    for population, system, stars in (
+        (
+            process,
+            eqx.tree_at(lambda s: s.dynamics.orbits.a_AU, scene, replace_fn=narrow),
+            host,
+        ),
+        (
+            process,
+            scene,
+            eqx.tree_at(lambda h: h.luminosity_Lsun, host, replace_fn=narrow),
+        ),
+        (
+            eqx.tree_at(lambda p: p.occurrence.rate, process, replace_fn=narrow),
+            scene,
+            host,
+        ),
+    ):
+        evaluate = getattr(population, method)
+        for run in (evaluate, eqx.filter_jit(evaluate)):
+            with pytest.raises(
+                PrecisionError, match=rf"{method} requires float64.*canonical"
+            ):
+                run(system, stars)
+
+
+def test_mark_marginals(process, marks):
+    """Fails if the cell weights, isotropy or type probabilities drift.
 
     Four 8-bin chi-square tests use false-rejection probability 1e-4 each.
-    N=1536 resolves order 4/sqrt(N)=0.102 marginal errors. The independent
-    uniform-classical-box importance estimate uses its measured 4-sigma
-    standard error (not the sampler itself as a proposal).
+    N=1536 resolves order 4/sqrt(N)=0.102 marginal errors. Type counts
+    allow four standard deviations for independent draws.
     """
-    from hwoutils.constants import GM_SUN_AU3_PER_D2, Mearth2kg, Msun2kg
-    from orbix.system.charts import ClassicalChart
-    from orbix.system.frame_orbit import FrameOrbit
+    from hwoutils.constants import Mearth2kg, Msun2kg
     from scipy.stats import chi2
 
-    host, scene = marks
+    _, scene = marks
     elem = scene.dynamics.orbits.to_classical()
     mass = np.asarray(scene.dynamics.planets.mass_Msun[:, 0]) * Msun2kg / Mearth2kg
     values = [
@@ -146,6 +195,20 @@ def test_mark_marginals_and_normalization(process, marks):
         expected = probabilities[:, index].sum()
         sigma = np.sqrt(np.sum(probabilities[:, index] * (1 - probabilities[:, index])))
         assert abs(np.sum(labels == index) - expected) < 4 * sigma
+
+
+@pytest.mark.float64_only(reason="population inference requires float64")
+def test_mark_density_normalization(process, marks):
+    """Fails if the mass Jacobian or mark density normalization drifts.
+
+    A uniform classical-box importance estimate allows four measured
+    standard errors on 1536 draws from an independent proposal.
+    """
+    from hwoutils.constants import GM_SUN_AU3_PER_D2, Mearth2kg, Msun2kg
+    from orbix.system.charts import ClassicalChart
+    from orbix.system.frame_orbit import FrameOrbit
+
+    host, scene = marks
     # A proper sub-box of the first occurrence cell, with uniform proposal in
     # a,e,i,W,w,M,m, not log-scaled or isotropic coordinates.
     rng = np.random.default_rng(0)
@@ -269,15 +332,13 @@ def test_chart_change_of_variables(process, marks):
     np.testing.assert_allclose(joint, separate[:, 0], rtol=0, atol=2e-12)
 
 
-def test_support_errors_and_type_photometry(process, marks):
-    """Fails if support, padding, degeneracy, or type spectra are ignored.
+@pytest.mark.float64_only(reason="population inference requires float64")
+def test_mark_density_support(process, marks):
+    """Fails if support, padding or degeneracy is ignored.
 
-    Albedo and photometry use the same interpolation and permit 16 float64
-    eps for fused phase/radius arithmetic; support and masks are exact.
+    Support and masks are exact.
     A narrow tilt is tested because isotropic mixing removes its singularity.
     """
-    from skyscapes.physical_model import LambertianPhysicalModel
-
     host, scenes = marks
     scene = jax.tree.map(lambda x: x[:8], scenes)
     outside = eqx.tree_at(
@@ -305,6 +366,19 @@ def test_support_errors_and_type_photometry(process, marks):
         process.log_intensity(single, host),
         process.mark_log_density(single, host) + process.log_rate(host)[0],
     )
+
+
+def test_type_photometry(process, marks):
+    """Fails if the type spectrum does not set the planet contrast.
+
+    Albedo and photometry use the same interpolation and permit 16
+    working-precision roundings for fused phase and radius arithmetic.
+    """
+    from skyscapes.physical_model import LambertianPhysicalModel
+
+    _, scenes = marks
+    scene = jax.tree.map(lambda x: x[:8], scenes)
+    single = jax.tree.map(lambda x: x[0], scene)
     albedo = process.type_albedo(scene, 600.0)
     actual = jax.jit(lambda s: s.contrasts(jnp.asarray(600.0), jnp.array([0.0])))(scene)
     # Verify the physical-model hook independently of the population accessor.
@@ -315,7 +389,9 @@ def test_support_errors_and_type_photometry(process, marks):
         jnp.asarray(600.0),
         single.planets[0].Rp_Rearth,
     )
-    np.testing.assert_allclose(actual[0], expected, rtol=16 * np.finfo(float).eps)
+    np.testing.assert_allclose(
+        actual[0], expected, rtol=float(roundoff(1.0, n_ops=16, dtype=expected.dtype))
+    )
     assert np.isfinite(actual).all()
 
 
@@ -398,11 +474,22 @@ def test_star_and_world_identity(process):
     _equal(reverse, jax.tree.map(lambda x: x[:, ::-1], three), bits=True)
 
 
-def test_structure_padding_and_compile(process, marks):
+@pytest.fixture(scope="module")
+def packed_mark(marks):
+    host, singles = marks
+    single = jax.tree.map(lambda x: x[0], singles)
+    return host, single, Scene.from_scenes([single], capacity=3)
+
+
+def test_structure_padding_and_compile(process, packed_mark):
     """Fails if mass is photometric only, padding is active, or values recompile.
 
     One fixed (S,K) program is reused exactly. Recovered two-body radii allow
     64 eps for orbital state conversions; padding values must match exactly.
+
+    Sixty-four unit roundings also cover the two quaternion rotations and
+    dot product, and enclosed-mass addition and unit conversion. Sixteen
+    cover interpolation and Lambert phase/flux products in the packed read.
     """
     from hwoutils.constants import Mearth2kg, Msun2kg
 
@@ -424,19 +511,26 @@ def test_structure_padding_and_compile(process, marks):
     dots = np.einsum("...ik,...jk->...ij", normal, normal)
     pairs = valid[..., :, None] & valid[..., None, :]
     # Every pair is at most twice the largest tilt from their shared midplane.
-    assert np.all(dots[pairs] >= np.cos(np.deg2rad(10.0)) - 64 * np.finfo(float).eps)
+    assert np.all(
+        dots[pairs]
+        >= np.cos(np.deg2rad(10.0)) - float(roundoff(1.0, n_ops=64, dtype=normal.dtype))
+    )
     mass = scene.dynamics.planets.mass_Msun * Msun2kg / Mearth2kg
+    tol = float(roundoff(1.0, n_ops=64, dtype=mass.dtype))
     np.testing.assert_allclose(
         np.asarray(mass_to_radius(mass))[valid],
         np.asarray(scene.planets[0].Rp_Rearth)[valid],
-        rtol=64 * np.finfo(float).eps,
+        rtol=tol,
     )
     np.testing.assert_array_equal(np.asarray(mass)[~valid], 0.0)
     np.testing.assert_array_equal(np.asarray(scene.planets[0].Rp_Rearth)[~valid], 0.0)
     for path, value in jax.tree_util.tree_flatten_with_path(scene.dynamics.orbits)[0]:
         np.testing.assert_array_equal(
             np.asarray(value)[~valid],
-            np.broadcast_to(_PAD_ORBIT[path[-1].name], np.asarray(value)[~valid].shape),
+            np.broadcast_to(
+                _PAD_ORBIT[path[-1].name].astype(value.dtype),
+                np.asarray(value)[~valid].shape,
+            ),
         )
     # Kinematic rates must include each enclosed planet, not just the host.
     enclosed = scene.star_mass_Msun[..., None] + jnp.cumsum(
@@ -447,23 +541,36 @@ def test_structure_padding_and_compile(process, marks):
     np.testing.assert_allclose(
         np.asarray(scene.dynamics.orbits.mu_AU3_per_d2)[valid],
         np.asarray(enclosed * GM_SUN_AU3_PER_D2)[valid],
-        rtol=64 * np.finfo(float).eps,
+        rtol=tol,
     )
 
-    from skyscapes.scene import Scene
-
-    host, singles = marks
-    single = jax.tree.map(lambda x: x[0], singles)
-    packed = Scene.from_scenes([single], capacity=3)
+    _, single, packed = packed_mark
     restored = packed.to_scenes()[0]
     _equal(restored, single)
-    density = eqx.filter_jit(process.mark_log_density)
-    np.testing.assert_allclose(
-        density(packed, host)[0, :1], density(single, host), atol=2e-12
-    )
     read = jax.jit(lambda s: s.contrasts(jnp.asarray(600.0), jnp.array([0.0])))
     np.testing.assert_allclose(
-        read(packed)[0, :1], read(single), rtol=16 * np.finfo(float).eps
+        read(packed)[0, :1],
+        read(single),
+        rtol=float(roundoff(1.0, n_ops=16, dtype=mass.dtype)),
+    )
+
+
+@pytest.mark.float64_only(reason="population inference requires float64")
+def test_packed_mark_density(process, packed_mark):
+    """Fails if padding or packing changes a live planet's log density.
+
+    Orbital rotation, eccentricity vector recovery and its norm allow 32
+    float64 roundings, amplified by the derivative 1/e of log(e).
+    """
+    host, single, packed = packed_mark
+    density = eqx.filter_jit(process.mark_log_density)
+    orbit = single.dynamics.orbits
+    ecc = jnp.hypot(orbit.ex, orbit.ey)[0]
+    np.testing.assert_allclose(
+        density(packed, host)[0, :1],
+        density(single, host),
+        rtol=0,
+        atol=float(roundoff(1 / ecc, n_ops=32)),
     )
 
 
@@ -499,8 +606,15 @@ def test_pruning_residual(process, worlds):
 def test_capacity_keeps_innermost(process):
     """Fails if capacity selection is random or happens before the stability sweep.
 
-    Identical candidates imply matching selected star-relative marks; 2e-13
-    accounts for Jacobi inverse roundoff when different tails are omitted.
+    Identical candidates imply matching selected star-relative marks, but each
+    run rebuilds the semimajor axis from its own rounded star-relative state.
+    The vis-viva energy subtracts two terms whose sum is 4a/r - 1 times the
+    energy, so a relative state error is amplified by kappa = 4a/r - 1, at most
+    4/(1 - e) - 1 at periapsis. Per run, the kinetic term carries thirteen
+    roundings (state construction 3, scaling division and norm 3, squaring 1,
+    all doubled for the square, 1 more in the scaling product) and the
+    potential term ten; the subtraction, reciprocal and rescaling add three.
+    Two independent runs are differenced: (2 * 13 * kappa + 6) roundings.
     """
     key = jax.random.key(0)
     large = process
@@ -511,8 +625,12 @@ def test_capacity_keeps_innermost(process):
     a, b = run(large), run(small)
     assert np.any(a.valid.sum(axis=-1) > 1)
     np.testing.assert_array_equal(b.valid[..., 0], a.valid[..., 0])
-    np.testing.assert_allclose(
-        b.dynamics.orbits.a_AU[..., 0], a.dynamics.orbits.a_AU[..., 0], rtol=2e-13
+    ecc = jnp.hypot(b.dynamics.orbits.ex[..., 0], b.dynamics.orbits.ey[..., 0])
+    kappa = 4 / (1 - ecc) - 1
+    tol = roundoff(1.0, n_ops=1, dtype=a.dynamics.orbits.a_AU.dtype) * (26 * kappa + 6)
+    np.testing.assert_array_less(
+        np.abs(b.dynamics.orbits.a_AU[..., 0] - a.dynamics.orbits.a_AU[..., 0]),
+        np.asarray(tol * np.abs(a.dynamics.orbits.a_AU[..., 0])),
     )
     np.testing.assert_array_equal(
         b.dynamics.planets.mass_Msun[..., 0], a.dynamics.planets.mass_Msun[..., 0]
@@ -523,60 +641,73 @@ def test_capacity_keeps_innermost(process):
     pruned_small = eqx.tree_at(lambda p: p.config.mutual_hill_min, small, 6.0)
     a, b = run(pruned_large), run(pruned_small)
     assert np.any(a.dynamics.planets.mass_Msun[..., 0] != unpruned_mass)
-    np.testing.assert_allclose(
-        b.dynamics.orbits.a_AU[..., 0], a.dynamics.orbits.a_AU[..., 0], rtol=2e-13
+    ecc = jnp.hypot(b.dynamics.orbits.ex[..., 0], b.dynamics.orbits.ey[..., 0])
+    tol = roundoff(1.0, n_ops=1, dtype=a.dynamics.orbits.a_AU.dtype) * (
+        26 * (4 / (1 - ecc) - 1) + 6
+    )
+    np.testing.assert_array_less(
+        np.abs(b.dynamics.orbits.a_AU[..., 0] - a.dynamics.orbits.a_AU[..., 0]),
+        np.asarray(tol * np.abs(a.dynamics.orbits.a_AU[..., 0])),
     )
     np.testing.assert_array_equal(
         b.dynamics.planets.mass_Msun[..., 0], a.dynamics.planets.mass_Msun[..., 0]
     )
 
 
-def test_mark_coordinate_round_trip(process, marks):
-    """Fails if rebuilding loses mass, type, epoch state, or batch axes.
-
-    State and density allow 256 ulps at unit scale (256*eps*(1+abs(x)))
-    for Cartesian/frame transformations; integer labels and masks are exact.
-    Scalar, vector and two-axis batches use the same eight sampled marks.
-    """
+@pytest.fixture(scope="module", params=[(), (8,), (2, 4)])
+def mark_round_trip(process, marks, request):
     host, scenes = marks
     small = jax.tree.map(lambda x: x[:8], scenes)
+    shape = request.param
+    scene = (
+        jax.tree.map(lambda x: x.reshape((*shape, *x.shape[1:])), small)
+        if shape
+        else jax.tree.map(lambda x: x[0], small)
+    )
 
     @eqx.filter_jit
     def rebuild(scene):
         return process.mark_build(host, *process.mark_read(scene))
 
-    for shape in ((), (8,), (2, 4)):
-        scene = (
-            jax.tree.map(lambda x: x[0], small)
-            if not shape
-            else jax.tree.map(
-                lambda x, shape=shape: x.reshape((*shape, *x.shape[1:])), small
-            )
-        )
-        rebuilt = rebuild(scene)
-        assert rebuilt.batch_shape == shape
-        for before, after in zip(
-            jax.tree.leaves(scene), jax.tree.leaves(rebuilt), strict=True
-        ):
-            if jnp.issubdtype(jnp.asarray(before).dtype, jnp.inexact):
-                np.testing.assert_allclose(
-                    before,
-                    after,
-                    rtol=256 * np.finfo(float).eps,
-                    atol=256 * np.finfo(float).eps,
-                )
-            else:
-                np.testing.assert_array_equal(before, after)
-        np.testing.assert_allclose(
-            process.mark_log_density(scene, host),
-            process.mark_log_density(rebuilt, host),
-            rtol=0,
-            atol=256 * np.finfo(float).eps,
-        )
-        padded = eqx.tree_at(lambda s: s.valid, scene, jnp.zeros_like(scene.valid))
-        read = eqx.filter_jit(process.mark_read)(padded)
-        assert all(np.isfinite(x).all() for x in jax.tree.leaves(read))
-        assert read[2].dtype == jnp.int32
+    return host, scene, rebuild(scene)
+
+
+def test_mark_coordinate_round_trip(process, mark_round_trip):
+    """Fails if rebuilding loses mass, type, epoch state, or batch axes.
+
+    State allows 256 roundings at unit and coordinate scale for Cartesian
+    and frame transformations. Integer labels and masks are exact.
+    """
+    _, scene, rebuilt = mark_round_trip
+    tol = float(roundoff(1.0, n_ops=256, dtype=scene.dynamics.orbits.a_AU.dtype))
+    assert rebuilt.batch_shape == scene.batch_shape
+    for before, after in zip(
+        jax.tree.leaves(scene), jax.tree.leaves(rebuilt), strict=True
+    ):
+        if jnp.issubdtype(jnp.asarray(before).dtype, jnp.inexact):
+            np.testing.assert_allclose(before, after, rtol=tol, atol=tol)
+        else:
+            np.testing.assert_array_equal(before, after)
+    padded = eqx.tree_at(lambda s: s.valid, scene, jnp.zeros_like(scene.valid))
+    read = eqx.filter_jit(process.mark_read)(padded)
+    assert all(np.isfinite(x).all() for x in jax.tree.leaves(read))
+    assert read[2].dtype == jnp.int32
+
+
+@pytest.mark.float64_only(reason="population inference requires float64")
+def test_mark_coordinate_density_round_trip(process, mark_round_trip):
+    """Fails if rebuilding a mark changes its log density.
+
+    The Cartesian and frame round trip allows 256 float64 roundings at
+    unit scale in the log density for scalar, vector and two-axis batches.
+    """
+    host, scene, rebuilt = mark_round_trip
+    np.testing.assert_allclose(
+        process.mark_log_density(scene, host),
+        process.mark_log_density(rebuilt, host),
+        rtol=0,
+        atol=float(roundoff(1.0, n_ops=256, dtype=np.float64)),
+    )
 
 
 def test_earth_like_flags(process, worlds):

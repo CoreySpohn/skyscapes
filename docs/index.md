@@ -50,10 +50,6 @@ The easiest path is loading an ExoVista FITS file into a `Scene`:
 Requires a user-supplied ExoVista FITS file.
 
 ```python notest
-import jax
-
-jax.config.update("jax_enable_x64", True)
-
 from skyscapes import from_exovista
 
 scene = from_exovista("path/to/exovista_system.fits")  # with a default AYOZodi

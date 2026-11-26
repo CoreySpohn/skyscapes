@@ -15,6 +15,7 @@ from hwoutils.constants import G, Msun2kg
 from hwoutils.conversions import contrast_to_delta_mag
 from hwoutils.epoch import Epoch
 from hwoutils.leaves import as_float_leaf
+from hwoutils.precision import like
 from jaxtyping import Array
 from optixstuff.spectral import Quadrature, Resolution, spectral_breaks
 from orbix.kepler import Markley
@@ -22,6 +23,7 @@ from orbix.system import Body, Ephemeris, SkyFrame
 from orbix.system import System as DynamicsSystem
 
 from .._repr import indent
+from .._sample_time import SampledSystem, with_sample_origin
 from .._tables import ProductTable, is_table
 from ..disk import AbstractDisk
 from . import _system_batch
@@ -88,7 +90,13 @@ def _batch_method(method):
         bound.apply_defaults()
         options = dict(bound.arguments)
         options.pop("self")
-        time = jnp.asarray(options.pop("time_d"))
+        time = options.pop("time_d")
+        if isinstance(self.dynamics, SampledSystem):
+            # The whole batch can arrive as host dates on a common clock.
+            # Center each row before vmap moves those dates to the device.
+            time = self.dynamics.sample_origin.relative(time)
+            self = with_sample_origin(self, None)
+        time = jnp.asarray(time)
         paired = time.ndim != 1
         if paired and time.shape[:-1] != self.batch_shape:
             raise ValueError("time_d must have shape (T,) or B + (T,)")
@@ -589,6 +597,8 @@ class Scene(eqx.Module):
                 Unknown or nonpositive masses contribute zero.
             dist_pc: Distance to the system [pc].
             position_AU: Positions [AU] in any common origin, shape (1 + K, 3).
+                Concrete snapshots are centered on the host before narrowing.
+                Traced inputs must already resolve the star-planet offsets.
                 Row zero is the star, followed by the K planets in scene order.
             velocity_AU_per_d: Velocities [AU/day] in the same frame and row order.
             epoch_d: Scalar snapshot time in days from the scene epoch.
@@ -618,21 +628,29 @@ class Scene(eqx.Module):
             raise ValueError(
                 f"Cartesian positions and velocities must have shape {expected}"
             )
+
+        def centered(values):
+            # Concrete host inputs can resolve offsets smaller than one float32 ULP
+            # of the common position or velocity. Keep that origin out of JAX.
+            if any(isinstance(x, jax.core.Tracer) for x in jax.tree.leaves(values)):
+                values = jnp.asarray(values)
+            else:
+                values = np.asarray(values, dtype=np.float64)
+            return values - values[0]
+
+        position = centered(position_AU)
+        velocity = centered(velocity_AU_per_d)
         if order is None:
             inputs = (position_AU, velocity_AU_per_d, star_mass_Msun, planet_mass_Msun)
             if any(isinstance(x, jax.core.Tracer) for x in jax.tree.leaves(inputs)):
                 raise ValueError(
                     "Traced Cartesian states or masses require an explicit order"
                 )
-            position = np.asarray(position_AU, dtype=np.float64)
-            velocity = np.asarray(velocity_AU_per_d, dtype=np.float64)
             masses = _known_planet_mass(
                 np.asarray(planet_mass_Msun, dtype=np.float64), xp=np
             )
             mu = (G * Msun2kg) * (np.asarray(star_mass_Msun, dtype=np.float64) + masses)
-            a, _ = _state_a_e(
-                position[1:] - position[0], velocity[1:] - velocity[0], mu
-            )
+            a, _ = _state_a_e(position[1:], velocity[1:], mu)
             if np.any(~np.isfinite(a) | (a <= 0)):
                 raise ValueError(
                     "Automatic order requires bound star-relative states "
@@ -646,8 +664,8 @@ class Scene(eqx.Module):
                 star_body,
                 planet_bodies,
                 frame,
-                position_AU=jnp.asarray(position_AU)[rows],
-                velocity_AU_per_d=jnp.asarray(velocity_AU_per_d)[rows],
+                position_AU=like(position, position_AU)[rows],
+                velocity_AU_per_d=like(velocity, velocity_AU_per_d)[rows],
                 epoch_d=epoch_d,
             )
 
@@ -763,8 +781,12 @@ class Scene(eqx.Module):
         Returns:
             The solved ephemeris, with ``scene_planet_indices`` in scene order.
         """
+        dynamics = self.dynamics
+        if isinstance(dynamics, SampledSystem):
+            time_d = dynamics.sample_origin.relative(time_d)
+            dynamics = dynamics.local_system()
         solved = _masked_solve(
-            self.dynamics,
+            dynamics,
             self._chain_valid(),
             time_d,
             Markley() if solver is None else solver,
@@ -903,7 +925,9 @@ class Scene(eqx.Module):
             )
             values.append(value * scale.reshape(scale.shape + (1,) * (value.ndim - 1)))
         result = (
-            jnp.concatenate(values, axis=0) if values else jnp.empty((0, time_d.size))
+            jnp.concatenate(values, axis=0)
+            if values
+            else jnp.empty((0, jnp.size(time_d)))
         )
         return jnp.where(self.valid[:, None], result, 0.0) * self.valid[:, None]
 
@@ -1015,7 +1039,6 @@ class Scene(eqx.Module):
         Returns:
             The node-effective values of every source.
         """
-        time_d = jnp.atleast_1d(jnp.asarray(time_d))
         dist_pc = self.dynamics.frame.dist_pc
         unscaled, scale, planets = self._node_star_and_planets(
             quadrature, resolution, time_d, ephemeris
@@ -1027,7 +1050,7 @@ class Scene(eqx.Module):
                     quadrature, resolution, self.sky_frame, t
                 ),
                 out_axes=-1,
-            )(time_d)
+            )(jnp.atleast_1d(time_d))
         luminosity = getattr(self.star, "luminosity_Lsun", None)
         bands = self.calibration_bands()
         return Sources(
@@ -1062,7 +1085,7 @@ class Scene(eqx.Module):
         planets = (
             jnp.concatenate(values, axis=2)
             if values
-            else jnp.zeros((*nodes.shape, 0, time_d.size))
+            else jnp.zeros((*nodes.shape, 0, jnp.size(time_d)))
         )
         valid = self.valid[:, None]
         planets = jnp.where(valid, planets, 0.0) * valid
@@ -1166,7 +1189,6 @@ class Scene(eqx.Module):
             response = jnp.broadcast_to(transmission(wave), wave.shape)[0, 0]
             return jnp.where(response > 0, contrast, jnp.nan)
 
-        time_d = jnp.atleast_1d(jnp.asarray(time_d))
         unscaled, scale, planet = self._node_star_and_planets(
             quadrature, resolution, time_d, eph
         )

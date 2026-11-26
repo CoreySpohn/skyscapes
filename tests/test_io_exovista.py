@@ -258,8 +258,8 @@ def test_exovista_supplied_epoch_keeps_absolute_dates(fits_fixture):
 
     The same Julian dates give the same sky positions and contrasts whether
     the epoch is the file's first timestamp or one 1000.25 days earlier.
-    Offsets are formed in float64 on the host, so the only difference is
-    rounding of the day offsets (1e-10 relative is far above it).
+    The quarter-day offsets and their bracketing demo knots have exact binary
+    representations, so translating them preserves the reads exactly.
     """
     kwargs = dict(planet_indices=[0, 2], load_disk=False, planet_spectra="time")
     default = from_exovista(fits_fixture, **kwargs)
@@ -269,13 +269,10 @@ def test_exovista_supplied_epoch_keeps_absolute_dates(fits_fixture):
     dates = [2451545.0, 2451645.5, 2451795.0]
     t_default = jnp.asarray(default.epoch.days(jd=dates))
     t_moved = jnp.asarray(moved.epoch.days(jd=dates))
-    np.testing.assert_allclose(t_moved - t_default, 1000.25, rtol=0, atol=1e-9)
-    np.testing.assert_allclose(
-        moved.positions(t_moved), default.positions(t_default), rtol=1e-10, atol=0
+    np.testing.assert_array_equal(t_moved - t_default, 1000.25)
+    np.testing.assert_array_equal(
+        moved.positions(t_moved), default.positions(t_default)
     )
-    np.testing.assert_allclose(
-        moved.contrasts(600.0, t_moved),
-        default.contrasts(600.0, t_default),
-        rtol=1e-10,
-        atol=0,
+    np.testing.assert_array_equal(
+        moved.contrasts(600.0, t_moved), default.contrasts(600.0, t_default)
     )

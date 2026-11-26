@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 from hwoutils.constants import deg2rad
+from hwoutils.testing import ulps
 from scipy.integrate import quad
 
 from skyscapes.disk._los import los_integrate_scattered
@@ -87,6 +88,8 @@ def test_demo_first_epoch_states_match_file(fits_fixture):
     barycentric states, so each planet's first-epoch position and velocity
     relative to the star equal the file values after the axis change
     (west, north, toward) to (east, north, away) and AU/yr to AU/day.
+    Each vector allows 32 roundings at its own norm for Jacobi differencing,
+    frame construction, Kepler reconstruction and the rotation to sky axes.
     """
     system = from_exovista(fits_fixture, load_disk=False)
     with fits.open(fits_fixture, memmap=False) as hdul:
@@ -112,5 +115,8 @@ def test_demo_first_epoch_states_match_file(fits_fixture):
     chain = np.asarray(system.body_index)
     rel_r = got_r[1:][chain] - got_r[0]
     rel_v = got_v[1:][chain] - got_v[0]
-    np.testing.assert_allclose(rel_r, position[1:] - position[0], rtol=0, atol=1e-9)
-    np.testing.assert_allclose(rel_v, velocity[1:] - velocity[0], rtol=0, atol=1e-9)
+    for recovered, stored in [(rel_r, position), (rel_v, velocity)]:
+        for got, want in zip(recovered, stored[1:] - stored[0], strict=True):
+            np.testing.assert_allclose(
+                got, want, rtol=0, atol=float(ulps(32, np.linalg.norm(want)))
+            )

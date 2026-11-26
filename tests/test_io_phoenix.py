@@ -20,6 +20,7 @@ from astropy import units as u
 from astropy.io import fits
 from hwoutils.constants import Rsun2m, h, k_B, nm2m, pc2m, sigma_SB
 from hwoutils.constants import c as c_si
+from hwoutils.testing import ulps
 from optixstuff.spectral import Band, Knots, Quadrature
 
 from skyscapes.datasets import fetch_castelli_kurucz, fetch_phoenix
@@ -258,14 +259,15 @@ def test_archive_node_matches_vendored_copy():
 @pytest.mark.parametrize(
     "teff_K, logg, factor", [(12000.0, 4.0, 1.0), (12125.0, 4.25, 4.0)]
 )
-@pytest.mark.float64_only(reason="float64 photometry reference")
 def test_castelli_kurucz_synthetic_units_and_missing_gravity(
     tmp_path, teff_K, logg, factor
 ):
     """Fails if CK04 columns, gravity, log blends, or spectral units are misread.
 
     Constant F_lambda gives a photon density linear in wavelength. Its bin
-    mean equals its central value exactly; rtol 1e-12 allows float64 roundoff.
+    mean equals its central value. Allow 16 roundings for stellar dilution,
+    spectral interpolation and unit conversions, plus the depth of the
+    weighted sum and its normalization.
     """
     wave_angstrom = np.array([9000.0, 10000.0, 20000.0, 40000.0, 60000.0])
     paths = {}
@@ -300,7 +302,7 @@ def test_castelli_kurucz_synthetic_units_and_missing_gravity(
     np.testing.assert_allclose(
         rule.mean(star.photon_flux_density(rule.nodes_nm, 0.0, dist_pc=10.0)),
         expected,
-        rtol=1e-12,
+        rtol=float(ulps(16 + 2 * int(np.ceil(np.log2(rule.nodes_nm.shape[-1]))), 1.0)),
     )
     for bad_temperature, bad_gravity in ((12000, 0.0), (51000, 4.0)):
         with pytest.raises(ValueError):

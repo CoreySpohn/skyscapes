@@ -1,11 +1,14 @@
 """ExoVista Cartesian-state regressions against a Newtonian three-body solution."""
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 from astropy.io import fits
 from hwoutils.constants import AU2m, G, G_si, Mearth2kg, Msun2kg, d2s, yr2s
 from hwoutils.conversions import au_per_yr_to_m_per_s
+from hwoutils.numerics import roundoff
+from hwoutils.testing import ulps
 from orbix.equations.orbit import state_vector_to_keplerian
 from orbix.system import FrameOrbit, phase_angle_rad
 from scipy.integrate import solve_ivp
@@ -127,7 +130,11 @@ def _file_relative_states(path):
 
 
 def test_first_epoch_reproduces_all_relative_states(jacobi_file, jacobi_scene):
-    """Detect star-relative elements installed as Jacobi elements (outer reflex)."""
+    """Detect star-relative elements installed as Jacobi elements (outer reflex).
+
+    Allow 32 roundings at each row's state norm for Jacobi differencing,
+    frame construction, Kepler evaluation, rotation and barycentric recovery.
+    """
     position, velocity = _file_relative_states(jacobi_file)
     eph = jacobi_scene.ephemeris(np.array([0.0]))
     targets = eph.scene_planet_indices
@@ -138,18 +145,25 @@ def test_first_epoch_reproduces_all_relative_states(jacobi_file, jacobi_scene):
         (eph.velocity_AU_per_d, velocity),
     ]:
         relative = actual[targets, 0] - actual[0, 0]
-        np.testing.assert_allclose(relative, expected[:, 0], rtol=0, atol=1e-9)
+        for got, want in zip(relative, expected[:, 0], strict=True):
+            np.testing.assert_allclose(
+                got, want, rtol=0, atol=float(ulps(32, np.linalg.norm(want)))
+            )
 
 
 def test_outer_first_offset_survives_inner_deselection(jacobi_file, jacobi_scene):
-    """The outer planet starts at the same sky offset in a one-planet chain."""
+    """The outer planet starts at the same sky offset in a one-planet chain.
+
+    Both reconstructed states can round: 32 operations per path through
+    frame construction, propagation and projection, at the outer orbit scale.
+    """
     outer = from_exovista(jacobi_file, load_disk=False, planet_indices=[1])
     times = np.array([0.0])
     np.testing.assert_allclose(
         1000 * outer.positions(times)[:, 0],
         1000 * jacobi_scene.positions(times)[:, 1],
         rtol=0,
-        atol=1e-6,
+        atol=float(ulps(64, 1000 * outer.dynamics.orbits.a_AU[0] / outer.dist_pc)),
     )
 
 
@@ -225,7 +239,11 @@ def test_first_epoch_mismatch_is_rejected(jacobi_file, tmp_path):
 # A cold run compiles both the classical reference and the Cartesian phase grid.
 @pytest.mark.medium
 def test_one_planet_phase_samples_match_classical_reconstruction(tmp_path, monkeypatch):
-    """Preserve the old phase samples when the header matches the stored state."""
+    """Preserve classical phases when the header matches the stored state.
+
+    Allow 32 roundings for state inversion, mean motion, Kepler solution
+    and sky projection at the largest propagated mean longitude (radians).
+    """
     path = tmp_path / "one_planet.fits"
     write_one_planet_fits(path, JUPITER_MEARTH)
     with fits.open(path, mode="update") as hdul:
@@ -266,11 +284,19 @@ def test_one_planet_phase_samples_match_classical_reconstruction(tmp_path, monke
     scene = from_exovista(path, load_disk=False, planet_spectra="phase")
     assert isinstance(scene.planets[0].physical_model, GridPhysicalModel)
     (actual_beta,) = phase_samples
-    np.testing.assert_allclose(actual_beta, expected_beta, rtol=0, atol=1e-9)
+    phase_scale = np.pi + np.ptp(times_d) * float(base.n_rad_per_d)
+    np.testing.assert_allclose(
+        actual_beta, expected_beta, rtol=0, atol=float(ulps(32, phase_scale))
+    )
 
 
 def test_phase_grid_uses_each_planets_assembled_ephemeris(jacobi_file, tmp_path):
-    """Reproduce the stored contrast grid from scene-order star-relative phases."""
+    """Regrid against the float64 ephemeris of the original FITS state and times.
+
+    The contrast is interpolated on the host and rounded once into the
+    stored grid. The union of cadences and each planet separately must use
+    the same physical body, even when the requested order is reversed.
+    """
     path = tmp_path / "different-cadences.fits"
     with fits.open(jacobi_file) as hdul:
         hdul[7].data = hdul[7].data[::2]
@@ -278,19 +304,32 @@ def test_phase_grid_uses_each_planets_assembled_ephemeris(jacobi_file, tmp_path)
     scene = from_exovista(
         path, planet_indices=[1, 0], load_disk=False, planet_spectra="phase"
     )
-    with fits.open(path) as hdul:
+    with jax.enable_x64(), fits.open(path) as hdul:
+        reference = from_exovista(
+            path, planet_indices=[1, 0], load_disk=False, planet_spectra="time"
+        )
         for planet, body, hdu in zip(
             scene.planets, np.add(scene.body_index, 1), (hdul[7], hdul[6]), strict=True
         ):
             times_yr = hdu.data[:, 0].astype(float)
             times_d = (times_yr - times_yr[0]) * (yr2s / d2s)
-            beta = np.rad2deg(scene.ephemeris(times_d).phase_angle_rad(body))
+            radians = reference.ephemeris(times_d).phase_angle_rad(body)
+            beta = np.rad2deg(np.asarray(radians, dtype=np.float64))
             order = np.argsort(beta)
             model = planet.physical_model
             grid = np.asarray(model.phase_angle_deg)
             covered = (beta.min() <= grid) & (grid <= beta.max())
             assert covered.any()
             expected = np.interp(grid[covered], beta[order], hdu.data[order, 16])
-            np.testing.assert_allclose(
-                model.contrast_grid[0, 0, covered], expected, rtol=2e-7, atol=0
+            actual = np.asarray(model.contrast_grid[0, 0])[covered]
+            # The loader and this reference assemble the float64 phase angles
+            # separately, so they differ by 32 float64 roundings at 180 degrees
+            # (rotations, dot products, arccos). That moves the interpolated
+            # value by at most the steepest segment slope times it; the stored
+            # value then rounds once to the grid dtype.
+            slope = np.max(np.abs(np.diff(hdu.data[order, 16]) / np.diff(beta[order])))
+            tolerance = slope * float(roundoff(180.0, n_ops=32, dtype=np.float64))
+            tolerance = tolerance + np.asarray(
+                roundoff(np.abs(expected), n_ops=1, dtype=actual.dtype)
             )
+            assert np.all(np.abs(actual - expected) <= tolerance)

@@ -12,6 +12,7 @@ from __future__ import annotations
 import warnings
 from itertools import pairwise
 from pathlib import Path
+from unittest.mock import patch
 
 import equinox as eqx
 import jax
@@ -19,6 +20,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from exojax.database.multimol import database_path_hitran12
+from hwoutils.precision import PrecisionError
 
 import skyscapes.physical_model.exojax.components.species as species_pm
 import skyscapes.physical_model.exojax.physical_model as exojax_pm
@@ -31,6 +33,7 @@ from skyscapes.physical_model import (
 from skyscapes.physical_model.exojax import (
     EARTH_MODERN_VMRS,
     MOLECULE_RECIPES,
+    build_exojax_emission_engines,
     build_exojax_engines,
     vmr_dict_to_log_mmr_dict,
 )
@@ -168,6 +171,46 @@ def make_physical_model(K: int = 2, n_nu: int = 100, n_layers: int = 20):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.float32_only(reason="PreMODIT requires float64")
+@pytest.mark.parametrize(
+    "builder", [build_exojax_engines, build_exojax_emission_engines]
+)
+def test_line_opacity_refuses_float32_before_reading_lines(builder, tmp_path):
+    """Fails if a float32 line-list build reaches the database or returns an engine."""
+    cia = (
+        {"cia_pairs": ("O2-O2",), "cia_dir": tmp_path}
+        if builder is build_exojax_emission_engines
+        else {}
+    )
+    with pytest.raises(PrecisionError, match=r"PreMODIT.*enable_x64"):
+        builder(
+            molecules=("O2",), databases_dir=str(tmp_path), n_wavenumbers=400, **cia
+        )
+
+
+def test_line_opacity_rejects_a_narrow_grid(tmp_path, precision):
+    """A direct species build rejects a float32 grid before opening HITRAN."""
+    remedy = "enable_x64" if precision == np.float32 else "canonical"
+    with (
+        patch.object(
+            species_pm,
+            "MdbHitran",
+            side_effect=AssertionError("opened HITRAN with a float32 grid"),
+        ) as reader,
+        pytest.raises(PrecisionError, match=remedy),
+    ):
+        species_pm.build_species_prebuilt(
+            name="O2",
+            nu_grid=np.array([13000.0, 13100.0], dtype=np.float32),
+            nu_min=13000.0,
+            nu_max=13100.0,
+            databases_dir=str(tmp_path),
+            crit=0.0,
+        )
+    reader.assert_not_called()
+
+
+@pytest.mark.float64_only(reason="PreMODIT line database lifecycle requires float64")
 @pytest.mark.parametrize("failure", [None, "no-lines", "activation", "opacity"])
 def test_hitran_reader_closes_after_extraction(monkeypatch, failure):
     """The lazy reader closes on success, empty selections, and build failures."""
@@ -260,15 +303,18 @@ def test_grid_requires_positive_finite_resolving_power(resolving_power):
         build_exojax_engines(molecules=(), resolving_power=resolving_power)
 
 
+_LINE_GRID = pytest.mark.float64_only(reason="PreMODIT line-grid resolution")
+
+
 @pytest.mark.parametrize(
     ("molecules", "resolving_power", "n_wavenumbers", "warns"),
     [
-        (("O2",), 2000.0, None, True),
-        (("O3", "O2"), 2000.0, None, True),
+        pytest.param(("O2",), 2000.0, None, True, marks=_LINE_GRID),
+        pytest.param(("O3", "O2"), 2000.0, None, True, marks=_LINE_GRID),
         (("O3", "SO2"), 2000.0, None, False),
-        (("O2",), 1.0e5, None, False),
-        (("O2",), 3.0e5, None, False),
-        (("O2",), 3.0e5, 2001, True),
+        pytest.param(("O2",), 1.0e5, None, False, marks=_LINE_GRID),
+        pytest.param(("O2",), 3.0e5, None, False, marks=_LINE_GRID),
+        pytest.param(("O2",), 3.0e5, 2001, True, marks=_LINE_GRID),
     ],
 )
 def test_coarse_grid_warning_only_for_line_lists(

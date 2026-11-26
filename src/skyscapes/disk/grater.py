@@ -207,7 +207,14 @@ class GraterDisk(AbstractParametricDisk):
             )
 
     def _scattered_integral(
-        self, wavelength_nm, east_AU, north_AU, inclination_deg, position_angle_deg
+        self,
+        wavelength_nm,
+        east_AU,
+        north_AU,
+        inclination_deg,
+        position_angle_deg,
+        *,
+        sky_offsets_arcsec=None,
     ):
         """Unit-density LOS integral times the spectral scattering coefficient."""
         # Wavelength-dependent scattering coefficients.
@@ -261,9 +268,11 @@ class GraterDisk(AbstractParametricDisk):
         def phase_fn(cos_phi: Array) -> Array:
             return henyey_greenstein(cos_phi, g_HG)
 
-        def scale_height_fn(r_AU: Array) -> Array:
-            r_ratio = r_AU / self.sma_AU
-            return self.ksi0_AU * (r_ratio if fixed else r_ratio**self.beta)
+        def scale_height_fn(r_AU, sma, ksi0, beta):
+            ratio = r_AU / sma
+            if fixed:
+                return ksi0 * ratio, ksi0 / sma
+            return ksi0 * ratio**beta, (ksi0 * beta / sma) * ratio ** (beta - 1)
 
         integral = los_integrate_scattered(
             density_fn,
@@ -276,6 +285,8 @@ class GraterDisk(AbstractParametricDisk):
             north_AU=north_AU,
             n_slices_los=self.n_slices_los,
             scale_height_fn=scale_height_fn,
+            height_args=(self.sma_AU, self.ksi0_AU, self.beta),
+            sky_offsets_arcsec=sky_offsets_arcsec,
             vertical_exponent=2.0 if fixed else self.gamma,
         )
         return Ag * integral

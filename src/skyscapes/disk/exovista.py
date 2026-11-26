@@ -12,6 +12,7 @@ from hwoutils.map_coordinates import map_coordinates
 from jaxtyping import Array
 from optixstuff.grids import PixelGrid
 from optixstuff.spectral import Knots, as_knots
+from scipy.interpolate import CubicSpline
 
 from .base import AbstractDisk, check_sky_grid
 
@@ -27,12 +28,9 @@ def _spline_operator(knots: Knots) -> np.ndarray:
     values, which interpax cannot offer under a trace.
     """
     n = knots.values.size
-    # The build is concrete even when the first render is being traced.
-    with jax.ensure_compile_time_eval(), jax.enable_x64(True):
-        spline = interpax.CubicSpline(
-            np.asarray(knots.values, dtype=np.float64), np.eye(n), axis=0
-        )
-        return np.asarray(spline.c)
+    # Both splines use not-a-knot boundary conditions. Static host knots
+    # allow this build even when the first render is traced in float32.
+    return CubicSpline(knots.values, np.eye(n), axis=0).c
 
 
 class ExovistaDisk(AbstractDisk):

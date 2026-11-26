@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from hwoutils.numerics import roundoff
 
 from skyscapes.habitable_zone import (
     HZ_INNER_EEID,
@@ -98,11 +99,21 @@ KOPPARAPU_TABLE_1_CHECKS = {
 
 
 @pytest.mark.parametrize("limit", sorted(KOPPARAPU_TABLE_1_CHECKS))
-@pytest.mark.float64_only(reason="float64 Kopparapu effective-flux reference")
 def test_kopparapu_flux_away_from_the_solar_temperature(limit):
-    """The quartic matches hand evaluations of Table 1 at non-solar Teff."""
-    flux = kopparapu_effective_flux(jnp.array([3000.0, 4500.0, 7000.0]), limit)
-    np.testing.assert_allclose(flux, KOPPARAPU_TABLE_1_CHECKS[limit], rtol=1e-9)
+    """Compare with hand evaluations rounded to ten decimal places.
+
+    Half a unit in the last decimal bounds reference rounding. Eight
+    roundings at the sum of absolute term magnitudes cover a coefficient
+    conversion, powers through four, a product and four additions.
+    """
+    temperatures = np.array([3000.0, 4500.0, 7000.0])
+    flux = kopparapu_effective_flux(temperatures, limit)
+    terms = np.polynomial.polynomial.polyval(
+        np.abs(temperatures - 5780.0), np.abs(KOPPARAPU_SEFF_COEFFICIENTS[limit])
+    )
+    tolerance = 0.5e-10 + roundoff(terms, n_ops=8, dtype=flux.dtype)
+    error = np.abs(np.asarray(flux, dtype=np.float64) - KOPPARAPU_TABLE_1_CHECKS[limit])
+    np.testing.assert_array_less(error, tolerance)
 
 
 def test_kopparapu_solar_edges():
@@ -118,11 +129,23 @@ def test_kopparapu_solar_edges():
 
 
 def test_kopparapu_edges_scale_with_root_luminosity_at_fixed_temperature():
-    """At fixed Teff the flux-based edges scale with sqrt(L / L_sun)."""
+    """At fixed Teff the flux-based edges scale with sqrt(L / L_sun).
+
+    Three roundings cover division by the shared flux, square root and scaling by three.
+    """
     inner_1, outer_1 = kopparapu_habitable_zone_AU(1.0, 4500.0)
     inner_9, outer_9 = kopparapu_habitable_zone_AU(9.0, 4500.0)
-    np.testing.assert_allclose(float(inner_9), 3.0 * float(inner_1), rtol=1e-14)
-    np.testing.assert_allclose(float(outer_9), 3.0 * float(outer_1), rtol=1e-14)
+    tol = float(roundoff(1.0, n_ops=3, dtype=inner_1.dtype))
+    np.testing.assert_allclose(
+        float(inner_9),
+        3.0 * float(inner_1),
+        rtol=tol,
+    )
+    np.testing.assert_allclose(
+        float(outer_9),
+        3.0 * float(outer_1),
+        rtol=tol,
+    )
 
 
 def test_cooler_hosts_move_the_flux_limits_down():

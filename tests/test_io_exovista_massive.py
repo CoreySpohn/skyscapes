@@ -24,6 +24,7 @@ from hwoutils.constants import (
     yr2s,
 )
 from hwoutils.constants import G as G_AU3_PER_KG_D2
+from hwoutils.testing import ulps
 from scipy.integrate import solve_ivp
 
 from skyscapes.io import from_exovista
@@ -170,7 +171,11 @@ def test_massive_planet_positions_follow_the_two_body_integration(jupiter_system
 
 
 def test_unknown_planet_mass_falls_back_to_the_stellar_mass(jupiter_system):
-    """NaN, zero or negative masses add nothing; known masses add G M_planet."""
+    """NaN, zero or negative masses add nothing; known masses add G M_planet.
+
+    Allow three roundings for storing the Earth mass and the two operations
+    that convert it to solar masses. Masked masses are exactly zero.
+    """
     system, _ = jupiter_system
     masses = jnp.array([JUPITER_MEARTH, jnp.nan, 0.0, -3.0]) * Mearth2kg / Msun2kg
     scene = Scene.from_classical(
@@ -187,7 +192,8 @@ def test_unknown_planet_mass_falls_back_to_the_stellar_mass(jupiter_system):
         M0_rad=jnp.zeros(4),
     )
     known = jax.jit(lambda s: s.dynamics.planets.mass_Msun)(scene)
+    expected = JUPITER_MEARTH * Mearth2kg / Msun2kg
     np.testing.assert_allclose(
-        known[0], JUPITER_MEARTH * Mearth2kg / Msun2kg, rtol=1e-14
+        known[0], expected, rtol=0, atol=float(ulps(3, expected))
     )
     np.testing.assert_array_equal(known[1:], 0.0)

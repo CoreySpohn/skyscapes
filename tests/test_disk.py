@@ -12,6 +12,8 @@ import pytest
 from hwoutils.constants import arcsec2rad, h
 from hwoutils.conversions import jy_to_photons_per_nm_per_m2
 from hwoutils.map_coordinates import map_coordinates
+from hwoutils.numerics import eps
+from hwoutils.testing import ulps
 from optixstuff.grids import Measure, PixelGrid, SkyOrientation, resample
 from zodi import DensityDust, SurfaceBrightnessDust
 
@@ -200,12 +202,12 @@ def test_amplitude_round_trip_and_profile_identity(kind):
 
 
 @pytest.mark.parametrize("kind", ["exovista", "grater"])
-@pytest.mark.float64_only(reason="float64 photometry reference")
 def test_host_scaling_once(kind):
     """Fails if a K dwarf's band/bolometric host correction is counted twice.
 
     K dwarf M_V=7 and L=0.2 at 10 pc; compare at sqrt(0.2) AU.
-    Ratio tolerance 3e-14 is float64 cancellation, not a profile approximation.
+    The float64 analytic ratios allow 32 rounding operations for magnitude and
+    radius conversion, LOS normalization, eight-point band mean and division.
     """
     star = solar_star(magnitude=7.0, luminosity=0.2)
     # The bolometric rule averages the host over the calibration band, so it
@@ -231,16 +233,16 @@ def test_host_scaling_once(kind):
     # The same physical profile and point cancel, leaving independently stated
     # host luminosities. This also catches a common extra factor in BOTH rules.
     np.testing.assert_allclose(
-        values[0] / solar, 10 ** (-0.4 * (7.0 - 4.83)), rtol=3e-14
+        values[0] / solar, 10 ** (-0.4 * (7.0 - 4.83)), rtol=32 * eps(solar)
     )
-    np.testing.assert_allclose(values[1] / solar, 0.2, rtol=3e-14)
+    np.testing.assert_allclose(values[1] / solar, 0.2, rtol=32 * eps(solar))
     ratio = 0.2 / 10 ** (-0.4 * (7.0 - 4.83))
-    np.testing.assert_allclose(values[1] / values[0], ratio, rtol=3e-14)
+    np.testing.assert_allclose(values[1] / values[0], ratio, rtol=32 * eps(solar))
     np.testing.assert_allclose(
         bolo.at_eeid(host_band_abs_mag=7.0, host_luminosity_lsun=0.2)
         / band.at_eeid(host_band_abs_mag=7.0, host_luminosity_lsun=0.2),
         ratio,
-        rtol=2e-15,
+        rtol=8 * eps(solar),
     )
     assert abs(ratio - 1) > 0.1  # doubling the correction is distinguishable
 
@@ -304,8 +306,9 @@ def test_orientation_and_rotated_grid():
 def test_jax_radiance_contract(kind):
     """Fails for detached amplitude levels or wavelength-axis broadcasting.
 
-    5e-14 relative covers float64 fusion/reduction; linear derivatives have
-    the 3e-15 multiplication floor. Two wavelength axes name their dimensions.
+    Allow 32 rounded operations for sky rotation, density and phase evaluation,
+    the positive LOS sum and flux scaling. The linear derivative cancels
+    its amplitude within four products/divisions. Two wavelength axes survive.
     """
     disk, star, grid = profile(kind), solar_star(), point_grid()
     waves = jnp.array([[510.0, 550.0], [580.0, 620.0]])
@@ -315,12 +318,12 @@ def test_jax_radiance_contract(kind):
 
     eager = render(disk, waves)
     np.testing.assert_allclose(
-        eqx.filter_jit(render)(disk, waves).data, eager.data, rtol=5e-14
+        eqx.filter_jit(render)(disk, waves).data, eager.data, rtol=32 * eps(eager.data)
     )
     assert eager.leading_axes == ("wavelength_0", "wavelength_1")
     mapped = jax.vmap(lambda w: render(disk, w).data)(waves.ravel())
     loop = jnp.stack([render(disk, w).data for w in waves.ravel()])
-    np.testing.assert_allclose(mapped, loop, rtol=5e-14)
+    np.testing.assert_allclose(mapped, loop, rtol=32 * eps(eager.data))
 
     def scalar(level):
         return render(
@@ -328,14 +331,17 @@ def test_jax_radiance_contract(kind):
         ).data.sum()
 
     value, gradient = jax.value_and_grad(scalar)(disk.amplitude.level)
-    np.testing.assert_allclose(gradient, value / disk.amplitude.level, rtol=3e-15)
+    np.testing.assert_allclose(
+        gradient, value / disk.amplitude.level, rtol=4 * eps(value)
+    )
 
 
 def test_exovista_disk_flux_shape():
     """Fails if stored pixel contrast is treated as a density or re-area-scaled.
 
-    Native-grid recovery has 3e-15 relative algebra roundoff. Near zero,
-    allow one float64 epsilon of peak flux for the rotated coordinate round trip.
+    Two rotations, pixel scaling, bilinear interpolation and area conversion
+    take up to 16 rounded operations. The peak sets the absolute scale at
+    the null pixel where neighbouring light can enter through interpolation.
     """
     wave = jnp.array([500.0, 550.0, 650.0])
     cube = jnp.arange(3 * 4 * 6, dtype=float).reshape(3, 4, 6) * 1e-10
@@ -351,8 +357,8 @@ def test_exovista_disk_flux_shape():
     np.testing.assert_allclose(
         image.data * omega,
         expected,
-        rtol=3e-15,
-        atol=np.finfo(expected.dtype).eps * expected.max(),
+        rtol=0,
+        atol=float(ulps(16, expected.max())),
     )
     assert isinstance(disk, AbstractDisk)
 
@@ -476,8 +482,9 @@ def test_scene_midplane_is_the_one_live_orientation():
 def test_system_point_radiance_matches_grid(kind):
     """Fails if a disk point uses a different sky frame or wavelength sampling.
 
-    Relative tolerance 5e-14 allows float64 coordinate round trips and JIT
-    fusion. The rotated target samples the stored cube between native pixels.
+    Two rotations, a spectral cubic, bilinear sampling or a density and
+    phase evaluation, a positive LOS sum and flux conversion allow 48
+    rounded operations. The rotated target lies between native pixels.
     """
     from skyscapes.disk import CompositeDisk
     from skyscapes.scene import Scene
@@ -528,7 +535,7 @@ def test_system_point_radiance_matches_grid(kind):
     actual = eqx.filter_jit(scene.photon_radiance_at)(
         query, jnp.asarray(0.0), east, north
     )
-    np.testing.assert_allclose(actual, expected, rtol=5e-14, atol=0)
+    np.testing.assert_allclose(actual, expected, rtol=48 * eps(actual), atol=0)
     if kind == "cube":
         # The input is affine in wavelength, so interpax reproduces linear
         # interpolation. Resample the independent native radiance as before.
@@ -549,7 +556,7 @@ def test_system_point_radiance_matches_grid(kind):
             "ph s^-1 m^-2 nm^-1",
         )
         np.testing.assert_allclose(
-            actual, resample(native_image, grid).data, rtol=5e-14
+            actual, resample(native_image, grid).data, rtol=48 * eps(actual)
         )
     if kind is None:
         np.testing.assert_array_equal(actual, 0.0)
@@ -631,8 +638,9 @@ def _live_disk():
 def test_exovista_disk_spline_operator_is_the_interpax_spline():
     """Fails if the derived spline differs from the one interpax would store.
 
-    The cube-to-coefficients map is linear for fixed knots; agreement to 1e-15
-    of the largest coefficient (float64 rounding of the same recurrence).
+    The two representations apply a five-knot cubic recurrence or a
+    five-term dot product. Allow two operations per knot at the largest
+    coefficient, including coefficients that cancel to zero.
     """
     from skyscapes.disk.exovista import _spline_operator
 
@@ -642,7 +650,10 @@ def test_exovista_disk_spline_operator_is_the_interpax_spline():
     derived = jnp.einsum("kjm,myx->kjyx", operator, disk.contrast_cube)
     stored = interpax.CubicSpline(disk.wavelengths_nm, disk.contrast_cube, axis=0).c
     np.testing.assert_allclose(
-        derived, stored, rtol=0, atol=1e-15 * float(jnp.max(jnp.abs(stored)))
+        derived,
+        stored,
+        rtol=0,
+        atol=float(ulps(2 * operator.shape[-1], jnp.max(jnp.abs(stored)))),
     )
 
 
@@ -650,7 +661,9 @@ def test_exovista_disk_render_equals_the_stored_spline_render():
     """Fails if deriving the spline on use changes today's values.
 
     Reference: the full interpax spline evaluated per wavelength, then the same
-    bilinear sampling (extrapolating polynomially outside the knots), 1e-14.
+    bilinear sampling (extrapolating polynomially outside the knots).
+    Allow 32 operations for the five-term coefficient sum, cubic Horner
+    evaluation, bilinear weights and radiance scaling in both orders.
     """
     disk = _live_disk()
     stored = interpax.CubicSpline(disk.wavelengths_nm, disk.contrast_cube, axis=0)
@@ -669,7 +682,9 @@ def test_exovista_disk_render_equals_the_stored_spline_render():
         sample = map_coordinates(plane, (pixels.y, pixels.x), order=1)
         flux = star.photon_flux_density(jnp.asarray(w), 0.0, dist_pc=10.0)
         expected.append(sample * flux / grid.cell_area("sr"))
-    np.testing.assert_allclose(actual, jnp.stack(expected), rtol=1e-14)
+    np.testing.assert_allclose(
+        actual, jnp.stack(expected), rtol=32 * eps(actual), atol=0
+    )
 
 
 @pytest.mark.float64_only(reason="finite-difference derivative")

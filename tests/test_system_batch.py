@@ -7,9 +7,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from hwoutils.constants import GM_SUN_AU3_PER_D2
+from hwoutils.constants import GM_SUN_AU3_PER_D2, Msun2kg, Rearth2AU, pc2AU, rad2arcsec
 from hwoutils.epoch import Epoch
 from hwoutils.leaves import canonical, check_tree
+from hwoutils.numerics import roundoff
 from optixstuff.grids import PixelGrid, SkyOrientation
 from optixstuff.spectral import Band, Quadrature, Resolution
 
@@ -17,6 +18,8 @@ from skyscapes import AYOZodi
 from skyscapes.disk import AYOExozodi
 from skyscapes.physical_model import LambertianPhysicalModel
 from skyscapes.scene import FlatStar, Planet, Scene
+
+from .conftest import two_body_reference
 
 
 def _scene(count):
@@ -323,34 +326,51 @@ def test_shared_times_and_one_compile():
     assert compiled._cache_size() == 1
 
 
-@pytest.mark.float64_only(
-    reason="float32 orbital trace compared with a float64 baseline"
-)
-def test_precision():
-    """Fails if packing truncates float64 or float32 cannot trace over five years.
+def test_precision(precision):
+    """Five-year positions and contrasts match independent float64 orbits.
 
-    Float32 uses 1e-5 relative tolerance for accumulated orbital-phase roundoff;
-    float64 output dtype and packing preservation (a round trip under x64) are
-    exact requirements.
+    The fastest planet travels 32 radians. Allow two roundings of its phase
+    (rate and elapsed-time product), plus 16 for rotation, enclosed-mass
+    offsets and Lambert photometry. Scale sky error by each vector norm;
+    padding has zero contrast and no physical sky position.
     """
-    batch = Scene.from_scenes([_scene(3)], capacity=6)
-    times = jnp.array([123.0, 777.0, 1500.0, 1826.25])
-    truth = _read_jit(batch, times)
-    assert all(x.dtype == np.float64 for x in jax.tree.leaves(truth))
-    with jax.enable_x64(False):
-        single = jax.tree.map(
-            lambda x: x.astype(np.float32) if x.dtype != bool else x, batch
-        )
-        actual = _read_jit(single, times.astype(jnp.float32))
+    count = 3
+    batch = Scene.from_scenes([_scene(count)], capacity=6)
+    times = np.array([123.0, 777.0, 1500.0, 1826.25])
+    actual = _read_jit(batch, jnp.asarray(times))
+    assert all(x.dtype == precision for x in jax.tree.leaves(actual))
     rebuilt = Scene.from_scenes(batch.to_scenes(), capacity=6)
     _equal(rebuilt, batch)
-    # A sky coordinate crosses zero; compare relative vector error there.
-    delta = np.linalg.norm(actual["positions"] - truth["positions"], axis=-3)
-    scale = np.linalg.norm(truth["positions"], axis=-3)
-    assert np.all(delta < 1e-5 * scale)
-    np.testing.assert_allclose(
-        actual["contrasts"], truth["contrasts"], rtol=1e-5, atol=0.0
+
+    enclosed = 1.0 + np.arange(1, count + 1) * 0.001
+    jacobi = two_body_reference(
+        times,
+        a_AU=np.arange(1, count + 1),
+        e=0.08,
+        i_rad=0.4,
+        W_rad=0.3,
+        w_rad=0.2,
+        M0_rad=0.7,
+        star_mass_kg=enclosed * Msun2kg,
+    ).position_AU
+    # Each interior body shifts the origin of every following Jacobi orbit.
+    relative = jacobi.copy()
+    for inner in range(count - 1):
+        relative[inner + 1 :] += 0.001 / enclosed[inner] * jacobi[inner]
+    position = relative[:, :2].transpose(1, 0, 2) * (rad2arcsec / (10 * pc2AU))
+    phase = np.arctan2(np.hypot(relative[:, 0], relative[:, 1]), relative[:, 2])
+    lambert = (np.sin(phase) + (np.pi - phase) * np.cos(phase)) / np.pi
+    contrast = 0.3 * lambert * (Rearth2AU / np.linalg.norm(relative, axis=1)) ** 2
+
+    tol = float(roundoff(1.0, n_ops=2 * 32 + 16, dtype=precision))
+    error = np.asarray(actual["positions"])[0, :, :count] - position
+    np.testing.assert_array_less(
+        np.linalg.norm(error, axis=0), tol * np.linalg.norm(position, axis=0)
     )
+    np.testing.assert_allclose(
+        actual["contrasts"][0, :count], contrast, rtol=tol, atol=0
+    )
+    np.testing.assert_array_equal(actual["contrasts"][0, count:], 0.0)
 
 
 @pytest.mark.parametrize("kind", ["capacity", "epoch", "star", "model", "disk"])
@@ -617,14 +637,14 @@ def test_rebuilt_scene_reads_the_same_planets():
 
 
 @pytest.mark.parametrize("inactive_mass", [0.0, 1.0])
-@pytest.mark.float64_only(reason="float64 orbital reference values")
 def test_inactive_slot_mass_does_not_set_orbit_rates(inactive_mass):
     """Fails if an inactive planet's mass joins the enclosed mass of an outer planet.
 
     Truth: Kepler's third law, n^2 a^3 = GM_sun (M_star + m) with the star and
     the outer planet alone, from the Gaussian gravitational constant squared
-    typed here (parity-checked against hwoutils), at 1e-12 relative, the
-    double-precision floor for a square root of products. The inactive inner
+    typed here (parity-checked against hwoutils), within six roundings for
+    enclosed mass, multiplication, cubing the axis, division and square root. The
+    inactive inner
     slot holds zero or one solar mass; the outer mean motion is bitwise the
     same for both, and a mask applied after the enclosed mass gives 0.02432744
     rad/day instead of 0.0172021.
@@ -652,5 +672,8 @@ def test_inactive_slot_mass_does_not_set_orbit_rates(inactive_mass):
     rate = outer_rate(inactive_mass)
     np.testing.assert_array_equal(rate, outer_rate(0.0))
     np.testing.assert_allclose(
-        rate, np.sqrt(GM_SUN_AU3_PER_D2 * (1.0 + 3e-6)), rtol=1e-12, atol=0
+        rate,
+        np.sqrt(GM_SUN_AU3_PER_D2 * (1.0 + 3e-6)),
+        rtol=float(roundoff(1.0, n_ops=6, dtype=rate.dtype)),
+        atol=0,
     )

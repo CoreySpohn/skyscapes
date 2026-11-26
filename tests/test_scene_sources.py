@@ -23,6 +23,7 @@ import pytest
 from hwoutils.constants import Rearth2m, c, h, k_B, pc2m
 from hwoutils.leaves import is_param
 from hwoutils.model_paths import assign
+from hwoutils.numerics import roundoff
 from numpy.polynomial.legendre import leggauss
 from optixstuff.grids import PixelGrid, SkyOrientation
 from optixstuff.spectral import Band, Knots, Quadrature, Resolution
@@ -293,8 +294,9 @@ def test_tabulated_source_without_a_rule_is_refused(rule):
     A PHOENIX scene on a resolution built for its local-zodi table only, and
     a composite planet on one built for the star only, raise a LookupError at
     trace time, eagerly and under ``jax.jit``. With every rule the zodi node
-    radiance integrates its linear table against a cubic response to 1e-12
-    (Gauss on every cell, exact; basis floating-point).
+    radiance integrates its linear table against a cubic response within 32
+    relative roundings for interpolation,
+    cubic response and tree reductions over 100 cells and eight Gauss nodes.
     """
     star = _phoenix()
     zodi_nm = np.linspace(400.0, 900.0, 101)
@@ -323,7 +325,11 @@ def test_tabulated_source_without_a_rule_is_refused(rule):
             * np.interp(x, zodi_nm, zodi.radiance_phot_per_s_m2_nm_sr)
             * _response(x, band)
         )
-        np.testing.assert_allclose(_band_sum(rule, radiance, band), truth, rtol=1e-12)
+        np.testing.assert_allclose(
+            _band_sum(rule, radiance, band),
+            truth,
+            rtol=float(roundoff(1.0, n_ops=32, dtype=radiance.dtype)),
+        )
 
 
 def test_knots_are_static_and_a_new_grid_has_no_rule(rule):
@@ -446,7 +452,8 @@ def test_smooth_sources_keep_the_point_read(rule):
 
     A blackbody star of scale 1.3 with a gray and a thermal planet:
     ``band_contrasts`` with an empty resolution equals the band ratio of the
-    point reads at the nodes to a few ULP (rtol 1e-14), so the reflected
+    point reads at the nodes to 32 relative roundings (Planck factors, scales, the
+    eight-term node and line-of-sight sums and division), so the reflected
     planet carries the star's scale once, and the star's node values are its
     point samples. A disk rendered against the node star reproduces the disk
     at each node: all nodes at once, and band 1 node 2 alone (a transposed
@@ -487,21 +494,30 @@ def test_smooth_sources_keep_the_point_read(rule):
         nodes[..., None], TIMES, dist_pc=scene.dist_pc
     )
     point_path = rule.integrate(planet_points) / rule.integrate(star_points)[:, None, :]
+    tol = float(roundoff(1.0, n_ops=32, dtype=nodes.dtype))
     np.testing.assert_allclose(
-        scene.band_contrasts(rule, TIMES, resolution=empty), point_path, rtol=1e-14
+        scene.band_contrasts(rule, TIMES, resolution=empty),
+        point_path,
+        rtol=tol,
     )
     sources = scene.sources(rule, empty, TIMES)
-    np.testing.assert_allclose(sources.star[..., 0], _star_at(star, nodes), rtol=1e-15)
+    np.testing.assert_allclose(
+        sources.star[..., 0],
+        _star_at(star, nodes),
+        rtol=tol,
+    )
     grid = PixelGrid.regular((4, 4), 0.1, "arcsec", orientation=SkyOrientation(0.0))
     east, north = grid.coordinates()
     every = scene.photon_radiance_at(nodes, 0.0, east, north, star=sources.node_star())
     np.testing.assert_allclose(
-        every, scene.photon_radiance_at(nodes, 0.0, east, north), rtol=1e-14
+        every,
+        scene.photon_radiance_at(nodes, 0.0, east, north),
+        rtol=tol,
     )
     one = scene.photon_radiance_at(
         nodes[1, 2], 0.0, east, north, star=sources.node_star(1, 2)
     )
-    np.testing.assert_allclose(one, every[1, 2], rtol=1e-14)
+    np.testing.assert_allclose(one, every[1, 2], rtol=tol)
 
 
 def test_the_node_star_builds_under_jit_and_a_concrete_nonfinite_scale_still_raises(
@@ -739,8 +755,8 @@ def test_a_one_wavelength_table_names_itself_when_integrated():
             build()
 
 
-def _product_band_ratio_and_truth(offsets_tol):
-    """Band contrast of a line-by-line planet over a coarse star, and its truth.
+def _product_scene(offsets_tol):
+    """A line-by-line planet over a coarse star with nearby or aligned knots.
 
     The planet is a time-series table at R = 1.5e5 over 498 to 552 nm with
     random ordinates; the star is a linear table of 13 knots, each moved off a
@@ -769,11 +785,42 @@ def _product_band_ratio_and_truth(offsets_tol):
     )
     model = TimeSeriesPhysicalModel(planet, np.zeros(1), contrast[None, :, None])
     system = _scene(star, (model,))
+    return system, planet, star_grid, contrast
+
+
+@pytest.mark.parametrize("aligned", [False, True], ids=["near", "aligned"])
+def test_product_knots_keep_distinct_host_wavelengths(aligned):
+    """Inside the common band, every distinct host wavelength stays an edge."""
+    offsets = np.zeros(13) if aligned else np.linspace(0.1, 0.9, 13)
+    system, planet, star, _ = _product_scene(offsets)
+    union = np.union1d(planet, star)
+    edges = system.spectral_tables()[-1].knots.values
+    np.testing.assert_array_equal(
+        edges[(edges >= 500.0) & (edges <= 550.0)],
+        union[(union >= 500.0) & (union <= 550.0)],
+    )
+
+
+@pytest.mark.parametrize("aligned", [False, True], ids=["near", "aligned"])
+@pytest.mark.float64_only(
+    reason="V&V exact cell-integral reference resolves sub-float32-ULP knot shifts"
+)
+def test_product_integrates_near_but_distinct_knots_exactly(aligned):
+    """The independent Simpson integral is exact for each quadratic product.
+
+    Merging distinct knots biases the integral by about 1e-6 on this fixture.
+    The 1e-12 relative float64 reference resolves that signal above rounding
+    across 15,000 cells. The raw knot union is tested exactly in both lanes.
+    """
+    offsets = np.zeros(13) if aligned else np.linspace(0.1, 0.9, 13)
+    system, planet, star_grid, contrast = _product_scene(offsets)
     rule = Quadrature.build([Band(500.0, 550.0)], order=4)
     resolution = Resolution.build(rule, *system.spectral_tables())
     value = system.band_contrasts(rule, jnp.zeros(1), resolution=resolution)[0, 0, 0]
     photons = np.asarray(
-        star.photon_flux_density(jnp.asarray(star_grid), jnp.zeros(1), dist_pc=DIST_PC)
+        system.star.photon_flux_density(
+            jnp.asarray(star_grid), jnp.zeros(1), dist_pc=DIST_PC
+        )
     ).reshape(-1)
     edges = np.union1d(planet, star_grid)
     edges = np.union1d(edges[(edges > 500.0) & (edges < 550.0)], [500.0, 550.0])
@@ -788,27 +835,7 @@ def _product_band_ratio_and_truth(offsets_tol):
 
     num = simpson(lambda x: np.prod(read(x), axis=0))
     den = simpson(lambda x: read(x)[1])
-    return float(value), num / den, system
-
-
-@pytest.mark.parametrize("aligned", [False, True], ids=["near", "aligned"])
-@pytest.mark.float64_only(reason="float64 spectral quadrature reference")
-def test_product_integrates_near_but_distinct_knots_exactly(aligned):
-    """Fails if a planet knot and a star knot within the wavelength tolerance
-    are merged into one, which moves a cell edge and biases the band integral.
-
-    Truth is the independent Simpson integral on the union of both raw grids
-    (see the helper), 1e-12 relative in x64: the integrand is a quadratic per
-    cell and the sums run over about 15,000 cells, so rounding is near 1e-14.
-    The star knots sit 0.1 to 0.9 tolerances from planet knots; merging them
-    moves the edges by up to 1.1e-4 nm and the contrast by about 1e-6. The
-    aligned case, with star knots on planet knots, stays exact.
-    """
-    offsets = np.zeros(13) if aligned else np.linspace(0.1, 0.9, 13)
-    value, truth, system = _product_band_ratio_and_truth(offsets)
-    np.testing.assert_allclose(value, truth, rtol=1e-12, atol=0)
-    edges = system.spectral_tables()[-1].knots.values
-    assert edges.size >= 14000
+    np.testing.assert_allclose(value, num / den, rtol=1e-12, atol=0)
 
 
 def test_knot_caches_hold_at_most_32_grids():

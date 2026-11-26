@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 import zodi
 from hwoutils import constants as const
+from hwoutils.numerics import eps
 from orbix.observatory import ecliptic_pointing
 from orbix.system import SkyFrame
 from zodi.tables import TABLE19_WAVELENGTH_UM
@@ -114,13 +115,13 @@ def test_leinert_follows_the_frame_and_the_time():
     assert np.all(np.asarray(elsewhere) != np.asarray(expected))
 
 
-@pytest.mark.float64_only(reason="float64 zodiacal radiance reference")
 def test_models_share_table19_colour_at_the_reference_sightline():
     """Fails on a wrong colour or sr scale.
 
     Setting AYO to the table's AB magnitude at (longitude 90, latitude 0)
     makes it coincide exactly with Leinert there; the cached table of that
-    radiance reads back unchanged. 3e-14 bounds float64 log roundoff.
+    radiance reads back unchanged. Allow 32 relative epsilons for the AB
+    magnitude log/power round trip, table interpolation and photon conversion.
     """
     wave = jnp.array([500.0, 550.0, 700.0])
     mag = zodi.surface_brightness_ab_mag(
@@ -134,11 +135,17 @@ def test_models_share_table19_colour_at_the_reference_sightline():
     )
     fixed = AYOZodi(surface_brightness_mag_arcsec2=mag)
     np.testing.assert_allclose(
-        fixed.photon_radiance(wave, FRAME, TIME_D), radiance, rtol=3e-14, atol=0
+        fixed.photon_radiance(wave, FRAME, TIME_D),
+        radiance,
+        rtol=32 * eps(radiance),
+        atol=0,
     )
     cached = PrecomputedZodi(wave, radiance)
     np.testing.assert_allclose(
-        cached.photon_radiance(wave, FRAME, TIME_D), radiance, rtol=3e-14, atol=0
+        cached.photon_radiance(wave, FRAME, TIME_D),
+        radiance,
+        rtol=32 * eps(radiance),
+        atol=0,
     )
 
 
@@ -158,11 +165,10 @@ def test_leinert_refuses_an_unplaced_frame_and_the_others_do_not():
 def test_radiance_jax(kind):
     """Fails if JIT or wavelength vmap changes the radiance.
 
-    3e-14 is float64 roundoff. Leinert also reduces the Sun's longitude modulo
-    360 degrees, which compiled and eager code round differently by about
-    3e-12 relative; 1e-9 bounds it.
+    The colour and photon conversion use at most 24 scalar operations.
+    Leinert also rotates a Kepler state and interpolates sky brightness;
+    allow another 40 operations for that pointing calculation.
     """
-    rtol = 1e-9 if kind is LeinertZodi else 3e-14
     model = (
         kind(jnp.array([500.0, 700.0]), jnp.array([2e10, 5e10]))
         if kind is PrecomputedZodi
@@ -174,6 +180,7 @@ def test_radiance_jax(kind):
         return model.photon_radiance(w, FRAME, TIME_D)
 
     loop = jnp.stack([evaluate(w) for w in wave])
+    rtol = (64 if kind is LeinertZodi else 24) * eps(loop)
     np.testing.assert_allclose(eqx.filter_jit(evaluate)(wave), loop, rtol=rtol, atol=0)
     np.testing.assert_allclose(jax.vmap(evaluate)(wave), loop, rtol=rtol, atol=0)
 
@@ -181,16 +188,15 @@ def test_radiance_jax(kind):
 def test_time_is_traced_and_batched():
     """Fails if the observation time cannot be a traced or vmapped argument.
 
-    The Sun's longitude is a large angle reduced modulo 360 degrees, so a
-    vmapped and a looped evaluation agree to the float64 roundoff of that
-    reduction (about 1e-11 relative); 1e-9 bounds it.
+    Allow 64 relative epsilons through the epoch-relative Earth ephemeris,
+    sky rotation, brightness interpolation and photon-unit conversion.
     """
     wave = jnp.array([550.0])
     model = LeinertZodi()
     times = jnp.array([0.0, 100.0, 200.0])
     batched = jax.vmap(lambda t: model.photon_radiance(wave, FRAME, t))(times)
     loop = jnp.stack([model.photon_radiance(wave, FRAME, t) for t in times])
-    np.testing.assert_allclose(batched, loop, rtol=1e-9, atol=0)
+    np.testing.assert_allclose(batched, loop, rtol=64 * eps(loop), atol=0)
     assert len(set(np.asarray(batched).ravel().tolist())) == 3
 
 

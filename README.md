@@ -112,28 +112,28 @@ The easiest path is loading an ExoVista FITS file:
 Requires a user-supplied ExoVista FITS file.
 
 ```python notest
-import jax
-
-jax.config.update("jax_enable_x64", True)
-
 from skyscapes import from_exovista
 
 # A Scene: star, planets and disk, plus a default AYOZodi (scene.local_zodi)
 scene = from_exovista("path/to/exovista_system.fits", planet_spectra="auto")
 ```
 
-The importer requires JAX x64 to preserve orbital-state precision. ExoVista's elapsed years map to Julian Dates as
+The importer supports float32 and float64. It subtracts the stellar position
+and velocity on the host before converting the relative states to the scene
+precision. ExoVista's elapsed years map to Julian Dates as
 `2451545.0 + 365.25 * elapsed_years`. The importer assigns simulation
 time zero to J2000.0; this origin is not a measured observation date.
-The first stellar timestamp sets `system.epoch` (default `tdb` label;
-the file states no time scale). All stored times and orbit reference times
-are days from that epoch, converted on the host before transfer to JAX.
+By default, the first stellar timestamp sets `system.epoch` (the file has
+no time scale, so the default label is `tdb`). Stellar and planetary table
+knots, spot records and orbital elements use days from that first timestamp.
 
-All evaluation arguments are `time_d`, days from the scene epoch.
-Convert Julian dates once on the host with
-`time_d = system.epoch.days(absolute_dates)`, then pass the offsets to JAX.
-The read-only `system.epoch` is `system.dynamics.frame.epoch`; models
-store only offset arrays such as `times_d`.
+Pass `epoch=shared_epoch` to read multiple scenes on one observation clock.
+Scene reads, stellar flux, time-series contrast and `system.dynamics.solve`
+take days from `system.epoch`. Pass the NumPy float64 offsets from
+`system.epoch.days(jd=absolute_dates)` directly so the first-sample offset
+is subtracted before conversion to the working precision. For varying
+float32 time arguments inside JIT, load with the default epoch and convert
+dates to days from the first sample on the host.
 
 `from_exovista` identifies the stellar and planetary extensions from
 their FITS headers, supporting both the legacy layout and the newer

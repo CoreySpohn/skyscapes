@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import priorities
 from hwoutils.constants import GM_SUN_AU3_PER_D2, Mearth2kg, Msun2kg
 from hwoutils.epoch import Epoch
+from hwoutils.precision import require_float64
 from orbix.system import Body, SkyFrame, enclosed_mu, jacobi_to_barycentric
 from orbix.system import System as DynamicsSystem
 from orbix.system.frame_orbit import FrameOrbit
@@ -619,7 +620,13 @@ class OccurrencePopulation(eqx.Module):
 
         Returns:
             Log mark density, shape ``B + (K,)``.
+
+        Raises:
+            PrecisionError: If x64 is disabled or the population, scene, or
+                hosts use a working precision other than float64.
+            ValueError: If the eccentricity distribution is absent.
         """
+        require_float64("OccurrencePopulation.mark_log_density", self, system, stars)
         if self.config.eccentricity is None:
             raise ValueError(
                 "config.eccentricity is None (circular orbits), which has no "
@@ -645,7 +652,12 @@ class OccurrencePopulation(eqx.Module):
 
         Returns:
             Log of the pre-pruning point-process intensity, shape ``B + (K,)``.
+
+        Raises:
+            PrecisionError: If x64 is disabled or the population, scene, or
+                hosts use a working precision other than float64.
         """
+        require_float64("OccurrencePopulation.log_intensity", self, system, stars)
         log_rate = (
             jnp.broadcast_to(self.log_rate(stars), system.batch_shape)
             if system.batch_shape

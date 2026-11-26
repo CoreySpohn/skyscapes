@@ -18,17 +18,31 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from hwoutils.constants import deg2rad
+from hwoutils.conversions import arcsec_to_au
+from hwoutils.numerics import COARSEST
 from jaxtyping import Array
 
 DensityFn = Callable[[Array, Array, Array], Array]
 PhaseFn = Callable[[Array], Array]
-ScaleHeightFn = Callable[[Array], Array]
+ScaleHeightFn = Callable[..., Array | tuple[Array, Array]]
 
 # The vertical profile exp(-(|z| / h)^gamma) is below exp(-16) = 1.1e-7 of
 # its midplane value outside 16^(1 / gamma) scale heights (4 for a Gaussian).
 _LOG_TRUNCATION = 16.0
 
-_SMALL = 1e-9
+
+def _sincos_deg(degrees, xp):
+    """Reduce in degrees so supplementary angles share the same trig arguments."""
+    quadrant = xp.rint(degrees / 90.0)
+    angle = (degrees - 90.0 * quadrant) * deg2rad
+    sine, cosine = xp.sin(angle), xp.cos(angle)
+    quarter = (quadrant % 4).astype(np.int32)
+    odd = (quarter % 2) == 1
+    return (
+        xp.where(quarter < 2, 1.0, -1.0) * xp.where(odd, cosine, sine),
+        xp.where((quarter == 0) | (quarter == 3), 1.0, -1.0)
+        * xp.where(odd, sine, cosine),
+    )
 
 
 def _midplane_crossing(
@@ -37,12 +51,13 @@ def _midplane_crossing(
     cos_i: Array,
     sin_i: Array,
     rmax_AU: Array,
-) -> tuple[Array, Array, Array]:
-    """Depth of the midplane crossing, its radius capped at rmax, safe cos."""
-    safe_cos = jnp.where(jnp.abs(cos_i) < _SMALL, _SMALL, cos_i)
+    xp,
+) -> tuple[Array, Array]:
+    """Depth of the midplane crossing and its radius capped at rmax."""
+    safe_cos = xp.where(cos_i == 0, 1.0, cos_i)
     l_cross = y_rot * sin_i / safe_cos
-    r_cross = jnp.sqrt(x_rot**2 + (y_rot / safe_cos) ** 2 + 1e-12)
-    return l_cross, jnp.minimum(r_cross, rmax_AU), safe_cos
+    r_cross = xp.sqrt(x_rot**2 + (y_rot / safe_cos) ** 2 + 1e-12)
+    return l_cross, xp.minimum(r_cross, rmax_AU)
 
 
 def _legendre_nodes(
@@ -53,32 +68,43 @@ def _legendre_nodes(
     rmax_AU: Array,
     scale_height_fn: ScaleHeightFn,
     vertical_exponent: Array | float,
-    n: int,
+    nodes_weights,
+    height_args,
+    xp,
 ) -> tuple[Array, Array]:
     """Depths and path weights of Gauss-Legendre on the exact LOS window."""
-    l_cross, r_cross, _ = _midplane_crossing(x_rot, y_rot, cos_i, sin_i, rmax_AU)
-    h_cross, slope = jax.jvp(scale_height_fn, (r_cross,), (jnp.ones_like(r_cross),))
+    l_cross, r_cross = _midplane_crossing(x_rot, y_rot, cos_i, sin_i, rmax_AU, xp)
+    if height_args is None:
+        h_cross, slope = jax.jvp(scale_height_fn, (r_cross,), (xp.ones_like(r_cross),))
+    else:
+        h_cross, slope = scale_height_fn(r_cross, *height_args)
     n_h = _LOG_TRUNCATION ** (1.0 / vertical_exponent)
     # |z| <= n_h h(r), with h bounded by its tangent at the crossing radius.
     # When the denominator closes the ray never leaves the flared layer and
     # the window becomes the whole chord of the outer cylinder.
-    closing = jnp.abs(cos_i) - n_h * slope * jnp.abs(sin_i)
-    half = n_h * h_cross / jnp.maximum(closing, _SMALL)
+    closing = xp.abs(cos_i) - n_h * slope * xp.abs(sin_i)
+    bounded_layer = (closing > 0) & (cos_i != 0)
+    half = n_h * h_cross / xp.where(bounded_layer, closing, 1.0)
 
     chord_sq = rmax_AU**2 - x_rot**2
     inside = chord_sq > 0.0
-    half_chord = jnp.where(inside, jnp.sqrt(jnp.where(inside, chord_sq, 1.0)), 0.0)
-    safe_sin = jnp.where(jnp.abs(sin_i) < _SMALL, _SMALL, sin_i)
+    half_chord = xp.where(inside, xp.sqrt(xp.where(inside, chord_sq, 1.0)), 0.0)
+    safe_sin = xp.where(sin_i == 0, 1.0, sin_i)
     chord_a = (-half_chord - y_rot * cos_i) / safe_sin
     chord_b = (half_chord - y_rot * cos_i) / safe_sin
 
-    low = jnp.maximum(l_cross - half, jnp.minimum(chord_a, chord_b))
-    high = jnp.minimum(l_cross + half, jnp.maximum(chord_a, chord_b))
-    width = jnp.maximum(high - low, 0.0)
-    u, w = np.polynomial.legendre.leggauss(n)
-    u = jnp.asarray(0.5 * (u + 1.0), dtype=width.dtype)
-    w = jnp.asarray(0.5 * w, dtype=width.dtype)
-    node_shape = (n,) + (1,) * width.ndim
+    # A face-on ray has constant cylindrical radius; only the vertical
+    # window limits its depth. At edge-on a flared layer can span the chord.
+    chord_low, chord_high = xp.minimum(chord_a, chord_b), xp.maximum(chord_a, chord_b)
+    low = xp.where(sin_i == 0, l_cross - half, chord_low)
+    high = xp.where(sin_i == 0, l_cross + half, chord_high)
+    low = xp.where(bounded_layer, xp.maximum(low, l_cross - half), low)
+    high = xp.where(bounded_layer, xp.minimum(high, l_cross + half), high)
+    width = xp.maximum(high - low, 0.0)
+    u, w = nodes_weights
+    u = xp.asarray(0.5 * (u + 1.0), dtype=width.dtype)
+    w = xp.asarray(0.5 * w, dtype=width.dtype)
+    node_shape = (len(u),) + (1,) * width.ndim
     return low + u.reshape(node_shape) * width, w.reshape(node_shape) * width
 
 
@@ -95,6 +121,8 @@ def los_integrate_scattered(
     n_slices_los: int,
     scale_height_fn: ScaleHeightFn,
     vertical_exponent: Array | float = 2.0,
+    height_args: tuple | None = None,
+    sky_offsets_arcsec: tuple | None = None,
 ) -> Array:
     """Integrate scattered light along LOS around the disk midplane.
 
@@ -143,44 +171,88 @@ def los_integrate_scattered(
         vertical_exponent: ``gamma`` of the vertical profile. A Python
             number is a compile-time constant; an array stays
             differentiable.
+        height_args: Explicit profile parameters for a scale-height function
+            returning both height and radial derivative.
+        sky_offsets_arcsec: Original east and north sky offsets in arcseconds and
+            distance in parsecs, when the caller converted angular coordinates.
 
     Returns:
         Scattered-light integral with the broadcast shape of the sky offsets.
         Integral of rho * phase / distance_AU**2 over depth_AU.
     """
-    incl = incl_deg * deg2rad
-    cos_i, sin_i = jnp.cos(incl), jnp.sin(incl)
-    pa = position_angle_deg * deg2rad
-    x_rot = jnp.sin(pa) * east_AU + jnp.cos(pa) * north_AU
-    y_rot = -jnp.cos(pa) * east_AU + jnp.sin(pa) * north_AU
+    geometry = (incl_deg, position_angle_deg, rmin_AU, rmax_AU, vertical_exponent)
 
-    l_grid, weights = _legendre_nodes(
-        x_rot,
-        y_rot,
-        cos_i,
-        sin_i,
-        rmax_AU,
-        scale_height_fn,
-        vertical_exponent,
-        n_slices_los,
+    nodes_weights = np.polynomial.legendre.leggauss(n_slices_los)
+
+    def samples(geometry, east, north, height_args, xp):
+        inclination, pa, _, outer, exponent = geometry
+        sin_i, cos_i = _sincos_deg(inclination, xp)
+        sin_pa, cos_pa = _sincos_deg(pa, xp)
+        x_rot = sin_pa * east + cos_pa * north
+        y_rot = -cos_pa * east + sin_pa * north
+        depth, weights = _legendre_nodes(
+            x_rot,
+            y_rot,
+            cos_i,
+            sin_i,
+            outer,
+            scale_height_fn,
+            exponent,
+            nodes_weights,
+            height_args,
+            xp,
+        )
+        y_d = y_rot * cos_i + depth * sin_i
+        z_d = -y_rot * sin_i + depth * cos_i
+        xy_sq = x_rot * x_rot + y_d * y_d
+        d_sq = xy_sq + z_d * z_d
+        return depth, weights, z_d, xy_sq, d_sq
+
+    l_grid, weights, z_d, xy_sq, d_star_sq = samples(
+        geometry, jnp.asarray(east_AU), jnp.asarray(north_AU), height_args, jnp
     )
+    # Radial membership is decided on one float32 grid for every query, host or
+    # runtime, in either working precision. A host query skips the device only
+    # when its geometry is concrete; the rule is the same.
+    sky = (east_AU, north_AU) if sky_offsets_arcsec is None else sky_offsets_arcsec
 
-    y_d = y_rot * cos_i + l_grid * sin_i
-    z_d = -y_rot * sin_i + l_grid * cos_i
+    def host_values(tree):
+        return not any(isinstance(x, jax.Array) for x in jax.tree.leaves(tree))
 
-    xy_sq = x_rot * x_rot + y_d * y_d
-    d_star_sq = xy_sq + z_d * z_d
-    # Relative guard band on the truncation edges. The dense midplane node lands
-    # the deprojected inner-edge pixels within a ULP of rmin_sq, and xy_sq is
-    # rounded differently under jit vs eager on x86 (FMA contraction of
-    # x_rot*x_rot + y_d*y_d), so a hard >=/<= flips that node's high-density
-    # contribution on/off between the two paths -- a platform-dependent jit/eager
-    # mismatch. A 1e-9 band sits far above 1-ULP noise and costs a negligible
-    # sliver of disk radius.
-    edge = 1e-9
-    rmin_sq = rmin_AU * rmin_AU * (1.0 - edge)
-    rmax_sq = rmax_AU * rmax_AU * (1.0 + edge)
-    valid = (xy_sq >= rmin_sq) & (xy_sq <= rmax_sq) & (d_star_sq > 0.0)
+    # Neither the position angle nor the vertical law affects a face-on radius.
+    host_face_on = (
+        host_values((incl_deg, rmin_AU, rmax_AU, sky)) and float(incl_deg) % 180 == 0
+    )
+    host_geometry = height_args is not None and host_values(
+        (geometry, sky, height_args)
+    )
+    xp = np if host_face_on or host_geometry else jnp
+    dtype = COARSEST
+    coords = tuple(xp.asarray(x, dtype=dtype) for x in sky)
+    east, north = coords[:2]
+    if sky_offsets_arcsec is not None:
+        east, north = arcsec_to_au(east, coords[2]), arcsec_to_au(north, coords[2])
+
+    if host_face_on:
+        radial_sq = east * east + north * north
+        inner, outer = (xp.asarray(x, dtype=dtype) for x in (rmin_AU, rmax_AU))
+        distance_sq = d_star_sq
+    else:
+        geom, args = jax.tree.map(
+            lambda x: xp.asarray(x, dtype=dtype), (geometry, height_args)
+        )
+        _, _, _, projected_sq, distance_sq = samples(geom, east, north, args, xp)
+        inclination, _, inner, outer, _ = geom
+        radial_sq = xp.where(inclination % 180 == 0, east**2 + north**2, projected_sq)
+    # Compiled and eager float32 arithmetic round the squared radius
+    # differently (fused multiply-add), so each edge keeps a band of four
+    # float32 epsilons, on host and runtime paths alike.
+    band = 4 * float(np.finfo(COARSEST).eps)
+    valid = (
+        (radial_sq >= inner**2 * (1 - band))
+        & (radial_sq <= outer**2 * (1 + band))
+        & (distance_sq > 0)
+    )
 
     # Sqrt only inside the valid annulus; the caller's density_fn handles
     # any further safe substitution before evaluating its formula.

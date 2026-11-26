@@ -8,6 +8,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from hwoutils.numerics import eps
 from scipy.special import erfcx
 from zodi import DensityDust
 
@@ -145,27 +146,31 @@ def test_outer_halo_falls_as_r_minus_one_point_five():
     assert sb_outer < 0.5 * sb_inner
 
 
-def test_density_is_continuous_at_the_ring_edges():
-    """Fails if a sample exactly on ``r0 -+ dr`` falls outside every branch.
+@pytest.mark.parametrize("radius", [20.0, 1.1])
+def test_density_is_continuous_at_the_ring_edges(radius):
+    """All three radial branches meet at exp(-1/2) of the vertical density.
 
-    The ring, halo and inward-decay branches all equal ``exp(-0.5)`` at the
-    ring edges. A line-of-sight node at the midplane crossing lands exactly
-    on an edge for some pixels (here ``r0 + dr = 22`` AU), and a density of
-    one there, the piecewise fallback, brightened that pixel by 19 percent.
+    At 1.1 AU the rounded endpoint need not subtract back to the rounded
+    half-width. Subtraction and division by dr/r0=0.1 amplify radius
+    roundoff tenfold; allow 16 epsilons including exp and normalization.
     """
-    edges = jnp.array([18.0, 22.0])
-    just_inside = jnp.array([18.0 + 1e-9, 22.0 - 1e-9])
-    parameters = dict(
-        r0_AU=jnp.array(20.0),
-        dror=jnp.array(0.1),
-        rinner_AU=jnp.array(2.0),
-        hor=jnp.array(0.05),
-        density_multiplier=jnp.array(3.0),
-        eta=jnp.array(1.0),
+    r0 = jnp.asarray(radius)
+    dr = r0 * 0.1
+    edges = jnp.stack((r0 - dr, r0 + dr))
+    on_edge = exovista_density(
+        edges,
+        jnp.zeros(2),
+        r0_AU=r0,
+        dror=0.1,
+        rinner_AU=0.5,
+        hor=0.05,
+        density_multiplier=3.0,
+        eta=1.0,
     )
-    on_edge = exovista_density(edges, jnp.zeros(2), **parameters)
-    inside = exovista_density(just_inside, jnp.zeros(2), **parameters)
-    np.testing.assert_allclose(on_edge, inside, rtol=1e-8)
+    truth = (
+        3.0 * np.exp(-0.5) / (0.05 * np.array([0.9, 1.1]) * radius * np.sqrt(2 * np.pi))
+    )
+    np.testing.assert_allclose(on_edge, truth, rtol=16 * eps(on_edge), atol=0)
 
 
 def test_three_hg_weight_concentrates_forward():
@@ -206,7 +211,7 @@ def test_supplementary_inclination_is_the_mirrored_physical_map(incl):
     depth toward the observer, so the maps are row-reversed copies. The
     forward-peaked three-component phase function brightens the near half,
     which lies along ``+y`` below 90 degrees and along ``-y`` above it.
-    Tolerance basis: floating-point.
+    Degree reduction makes the mirrored projections identical.
     """
     d = make_disk()
     low = np.asarray(_render(d, position_angle_deg=90.0 - (0.0), inclination_deg=incl))
@@ -217,7 +222,7 @@ def test_supplementary_inclination_is_the_mirrored_physical_map(incl):
         assert np.all(np.isfinite(sb))
         assert np.all(sb >= 0.0), f"negative radiance, min {sb.min():.3g}"
         assert sb.sum() > 0.0
-    np.testing.assert_allclose(high, low[::-1], rtol=1e-9, atol=1e-12 * low.max())
+    np.testing.assert_array_equal(high, low[::-1])
     c = low.shape[0] // 2
     assert low[c + 1 :].sum() > low[:c].sum(), "near (+y) half not brighter"
     assert high[:c].sum() > high[c + 1 :].sum(), "near (-y) half not brighter"
@@ -248,11 +253,21 @@ def test_jit_round_trip():
 
 @pytest.mark.parametrize("incl", [89.9, 90.0, 90.3])
 def test_edge_on_has_supplementary_symmetry(incl):
-    """Fails if the shared edge-on extension breaks ExovistaParametricDisk geometry."""
+    """The compiled edge-on image mirrors the eager image on the same support.
+
+    The forward HG lobe amplifies cosine roundoff by up to
+    3*g/(1-g)**2 at unit cosine. Allow two cosine operations there and
+    48 operations for the LOS window, three HG terms and a 41-node sum.
+    """
     d = make_disk()
     image = jax.jit(lambda i: _render(d, inclination_deg=i))(jnp.asarray(incl))
     mirrored = _render(d, inclination_deg=180.0 - incl)
-    np.testing.assert_allclose(image, mirrored[::-1], rtol=1e-9, atol=1e-12)
+    np.testing.assert_array_equal(image > 0, mirrored[::-1] > 0)
+    g = float(d.g0)
+    n_ops = 48 + int(np.ceil(6 * g / (1 - g) ** 2))
+    np.testing.assert_allclose(
+        image, mirrored[::-1], rtol=n_ops * eps(mirrored), atol=0
+    )
     assert jnp.all(jnp.isfinite(image)) and image.max() > 0
 
 

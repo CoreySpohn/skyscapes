@@ -22,6 +22,7 @@ from hwoutils.constants import (
 )
 from hwoutils.conversions import photons_per_nm_per_m2_to_jy
 from hwoutils.epoch import Epoch
+from hwoutils.numerics import roundoff
 from optixstuff.grids import PixelGrid, SkyOrientation
 from optixstuff.spectral import Band, Quadrature, Resolution, Transmission
 
@@ -125,12 +126,12 @@ def test_system_contrasts_stacks_planets():
     assert jnp.all(c >= 0.0)
 
 
-@pytest.mark.float64_only(reason="float64 orbital reference values")
 def test_system_spec_flux_density_per_planet():
-    """Pin flux dispatch to recorded Jacobi/Markley values at rtol 1e-14.
+    """Pin flux dispatch to recorded Jacobi/Markley values in both lanes.
 
     Truth is the circular classical chain with current masses and elements;
-    this float64 tolerance permits rounding without grid interpolation error.
+    32 relative roundings cover propagation, basis rotation, Lambert phase
+    and photon products for this circular chain.
     """
     star = FlatStar(flux_phot_per_nm_m2=1e9)
     p1 = _make_planet(0.3, 1.0)
@@ -142,13 +143,14 @@ def test_system_spec_flux_density_per_planet():
     f = sys_obj.planet_flux_densities(jnp.array(600.0), times)
     c = sys_obj.contrasts(jnp.array(600.0), times)
     # Recorded from the circular Jacobi chain with Markley propagation.
+    tol = float(roundoff(1.0, n_ops=32, dtype=f.dtype))
     np.testing.assert_allclose(
         c,
         [
             [1.7358140773855917e-10, 4.759592439468622e-10],
             [4.628831980300861e-11, 5.6348425008226415e-11],
         ],
-        rtol=1e-14,
+        rtol=tol,
         atol=0,
     )
     np.testing.assert_allclose(
@@ -157,18 +159,19 @@ def test_system_spec_flux_density_per_planet():
             [0.17358140773855918, 0.47595924394686223],
             [0.04628831980300861, 0.05634842500822641],
         ],
-        rtol=1e-14,
+        rtol=tol,
         atol=0,
     )
 
 
-@pytest.mark.float64_only(reason="float64 spectral quadrature reference")
 def test_bin_planet_flux_narrow_limit():
-    """Narrow-bin flux equals contrast times star flux to rtol 1e-10, atol 0.
+    """Narrow-bin flux approaches contrast times star flux.
 
     A blackbody varies smoothly over 1e-3 nm at 500-700 nm, so the symmetric
     bin's second-order correction (about 1e-11) is below this float64 relative
-    tolerance. The bins are wider than the wavelength tolerance (1.2e-4 nm at
+    truncation allowance. Another 24 relative roundings cover Planck
+    evaluation, reflected flux and the weighted mean. The bins are wider than the
+    wavelength tolerance (1.2e-4 nm at
     500 nm, 2.4e-4 nm at 700 nm), below which a rule is refused.
     Include multiple planets, dates and narrow channels to check axes.
     """
@@ -196,7 +199,12 @@ def test_bin_planet_flux_narrow_limit():
         )
     )()
     assert actual.shape == (2, 2, 2)
-    np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=0)
+    np.testing.assert_allclose(
+        actual,
+        expected,
+        rtol=1e-10 + float(roundoff(1.0, n_ops=24, dtype=actual.dtype)),
+        atol=0,
+    )
 
 
 @pytest.mark.parametrize("target", ["contrast", "system", "planet_flux"])
@@ -224,13 +232,13 @@ def test_contrast_rejects_wavelength_arrays(target, wavelength, traced):
 
 
 @pytest.mark.parametrize("tabulated", [False, True])
-@pytest.mark.float64_only(reason="float64 spectral quadrature reference")
 def test_bin_contrast_weights_flux_and_has_point_limit(tabulated):
     """Fails if contrast is averaged without photon weighting or loses its point limit.
 
     For photon density F(lambda)=lambda/500 and C(lambda)=lambda/500,
     the band ratio is (center + width**2/(12*center))/500, independent
-    of epoch. Tolerance 1e-12 allows float64 polynomial quadrature roundoff.
+    of epoch. Thirty-two relative roundings cover linear interpolation, Gauss
+    products, the node reductions and division by total stellar photons.
     """
     wave = jnp.array([400.0, 500.0, 600.0, 800.0])
     if tabulated:
@@ -258,23 +266,28 @@ def test_bin_contrast_weights_flux_and_has_point_limit(tabulated):
     centers = jnp.array([b.center_nm for b in bands])
     widths = jnp.array([b.width_nm for b in bands])
     expected = (centers + (widths**2 / (12 * centers) if tabulated else 0)) / 500
+    tol = float(roundoff(1.0, n_ops=32, dtype=actual.dtype))
     np.testing.assert_allclose(
-        actual, jnp.broadcast_to(expected[:, None, None], (2, 2, 2)), rtol=1e-12
+        actual,
+        jnp.broadcast_to(expected[:, None, None], (2, 2, 2)),
+        rtol=tol,
     )
     mono = Quadrature.monochromatic(575.0)
     np.testing.assert_allclose(
         system.band_contrasts(mono, times, resolution=Resolution())[0],
         system.contrasts(575.0, times),
-        rtol=1e-12,
+        rtol=tol,
     )
 
 
-@pytest.mark.float64_only(reason="float64 spectral quadrature reference")
 def test_band_contrasts_resolves_planetary_break():
     """Fails if a planetary break is omitted or point contrast divides by zero.
 
     A triangular contrast peaks at 530 nm and has exact band mean 1/2.
-    The tolerance covers float64 summation and interpolation on each side.
+    Sixteen relative roundings cover linear interpolation, four-node
+    weights and summation on either side of the break, and division. The
+    point read allows four for linear phase interpolation; any nonzero
+    transmission leaves the monochromatic result bitwise unchanged.
     """
     wave = jnp.array([450.0, 530.0, 650.0])
     contrast = jnp.array([0.0, 1.0, 0.0])[None, :, None] * jnp.ones((1, 1, 2))
@@ -285,21 +298,22 @@ def test_band_contrasts_resolves_planetary_break():
     np.testing.assert_allclose(
         system.band_contrasts(rule, jnp.zeros(1), resolution=_resolved(system, rule)),
         0.5,
-        rtol=2e-15,
+        rtol=float(roundoff(1.0, n_ops=16, dtype=wave.dtype)),
         atol=0,
     )
 
     dark = _system(FlatStar(0.0), (Planet(jnp.ones(1), model),))
     point = Quadrature.monochromatic(530.0)
     empty = Resolution()
-    np.testing.assert_array_equal(
-        dark.band_contrasts(point, jnp.zeros(1), resolution=empty), 1.0
+    direct = dark.band_contrasts(point, jnp.zeros(1), resolution=empty)
+    np.testing.assert_allclose(
+        direct, 1.0, atol=0, rtol=float(roundoff(1.0, n_ops=4, dtype=direct.dtype))
     )
     np.testing.assert_array_equal(
         dark.band_contrasts(
             point, jnp.zeros(1), resolution=empty, transmission=lambda w: 0.3
         ),
-        1.0,
+        direct,
     )
     opaque = dark.band_contrasts(
         point, jnp.zeros(1), resolution=empty, transmission=lambda w: 0.0
@@ -444,15 +458,14 @@ def test_planet_flux_preserves_keyword_only_model_overrides(precision):
 
 
 @pytest.mark.parametrize("mass", [1.0, 1000.0])
-@pytest.mark.float64_only(reason="float64 orbital reference values")
 def test_stellar_observables_scale_sign_and_sum(mass):
     """Fails on stellar sign, mass-ratio, period, or barycentric balance errors.
 
     Truth is two-body barycentric balance and the circular Kepler RV
     amplitude derived from G, masses, a and inclination; multiple planets
     obey mass-weighted barycentric balance instead of independent summation.
-    Float64 algebra
-    permits rtol 3e-14, atol 0; sign assertions have no tolerance.
+    Thirty-two roundings cover the Kepler rate, rotated circular state,
+    barycentric two-body sum and unit scaling. Signs remain exact.
     """
     star = FlatStar(1e9)
     planet = _make_planet(0.3, 1.0)
@@ -466,17 +479,23 @@ def test_stellar_observables_scale_sign_and_sum(mass):
         planet_mass_Msun=jnp.array([mass * Mearth2kg / Msun2kg]),
     )
     reflex = single.star_reflex(times)
+    tol = float(roundoff(1.0, n_ops=32, dtype=reflex.dtype))
     np.testing.assert_allclose(
         reflex,
         -mp / (Msun2kg + mp) * single.positions(times)[:, 0],
-        rtol=3e-14,
+        rtol=tol,
         atol=0,
     )
     assert jnp.all(jnp.sum(reflex * single.positions(times)[:, 0], axis=0) < 0)
     amplitude = (2 * np.pi * G_si / period_s) ** (1 / 3) * mp * np.sin(np.pi / 3)
     amplitude /= (Msun2kg + mp) ** (2 / 3)
     rv = single.star_radial_velocity(times)
-    np.testing.assert_allclose(rv, [-amplitude, amplitude], rtol=3e-14, atol=0)
+    np.testing.assert_allclose(
+        rv,
+        [-amplitude, amplitude],
+        rtol=tol,
+        atol=0,
+    )
     velocity = two_body_reference(
         times, **_reference_elements(single), star_mass_kg=Msun2kg, planet_mass_kg=mp
     ).velocity_AU_per_d
@@ -500,13 +519,13 @@ def test_stellar_observables_scale_sign_and_sum(mass):
     np.testing.assert_allclose(
         pair.star_reflex(times),
         -weighted_position[:, :2].T * (rad2arcsec / (10.0 * pc2AU)),
-        rtol=3e-14,
+        rtol=tol,
         atol=0,
     )
     np.testing.assert_allclose(
         pair.star_radial_velocity(times),
         -weighted_velocity[:, 2] * (AU2m / d2s),
-        rtol=3e-14,
+        rtol=tol,
         atol=0,
     )
     batched = Scene(
@@ -518,17 +537,17 @@ def test_stellar_observables_scale_sign_and_sum(mass):
         np.testing.assert_allclose(
             getattr(batched, name)(times),
             getattr(pair, name)(times),
-            rtol=3e-14,
+            rtol=tol,
             atol=0,
         )
 
 
 @pytest.mark.parametrize("tabulated", [False, True])
-@pytest.mark.float64_only(reason="float64 spectral quadrature reference")
 def test_band_contrast_tophat_and_narrow_limits(tabulated):
     """Fails if a band loses stellar knots, photon weighting, or its point limit.
 
-    Truth is the existing top-hat quadrature (rtol 3e-14 for float64), and
+    Truth is the existing top-hat quadrature (32 relative roundings for
+    Planck factors, two linear table interpolations, weights and reduction), and
     monochromatic contrast for a 0.01 nm band (rtol 1e-10 for curvature; a
     band narrower than four float32 ULPs of its wavelength, 0.002 nm at
     5000 nm, is one wavelength and is refused by the build).
@@ -561,11 +580,20 @@ def test_band_contrast_tophat_and_narrow_limits(tabulated):
         rule, times, resolution=resolution, transmission=response
     )
     expected = system.band_contrasts(rule, times, resolution=resolution)
-    np.testing.assert_allclose(actual, expected, rtol=3e-14, atol=0)
+    tol = float(roundoff(1.0, n_ops=32, dtype=actual.dtype))
+    np.testing.assert_allclose(
+        actual,
+        expected,
+        rtol=tol,
+        atol=0,
+    )
     if not tabulated:
         # Measured with the stellar-only order-four top-hat mean, at 800 K.
         np.testing.assert_allclose(
-            actual[0, 0, 0], 1.4481434672863644e-6, rtol=3e-14, atol=0
+            actual[0, 0, 0],
+            1.4481434672863644e-6,
+            rtol=tol,
+            atol=0,
         )
     batched = Scene(
         star,
@@ -577,14 +605,14 @@ def test_band_contrast_tophat_and_narrow_limits(tabulated):
             rule, times, resolution=resolution, transmission=response
         ),
         actual,
-        rtol=3e-14,
+        rtol=tol,
         atol=0,
     )
     narrow = Quadrature.build([Band(4999.995, 5000.005)], system)
     np.testing.assert_allclose(
         system.band_contrasts(narrow, times, resolution=_resolved(system, narrow))[0],
         system.contrasts(jnp.asarray(5000.0), times),
-        rtol=1e-10,
+        rtol=1e-10 + tol,
         atol=0,
     )
 
@@ -795,13 +823,13 @@ def _independent_observables(system, times, index=0):
 
 
 @pytest.mark.parametrize("e,inc", [(1e-6, 0.7), (0.6, 1.1), (0.2, 2.6)])
-@pytest.mark.float64_only(reason="float64 orbital reference values")
 def test_ephemeris_single_planet_conventions(e, inc):
     """Catch epoch, sky, mass, phase and RV-sign changes against two-body truth.
 
     Truth is the independent NumPy Newton/perifocal reference.
-    rtol 3e-13 plus 3e-13 absolute allows float64 basis/epoch roundoff;
-    contrast and flux use relative tolerance only to protect tiny signals.
+    Allow 64 roundings for the eccentric solve, rotation and flux or velocity
+    conversion over two periods. Near a coordinate zero use the observable
+    amplitude. Tiny contrasts and fluxes retain a relative-only comparison.
     """
     system = _ephemeris_scene(e, inc, masses=(0.01,))
     times = jnp.array([-100.0, 23.0, 200.0, 700.0])
@@ -809,9 +837,17 @@ def test_ephemeris_single_planet_conventions(e, inc):
     actual = _scene_observables(system, times, ephemeris=eph)
     expected = _independent_observables(system, times)
     for name, want in expected.items():
-        absolute = 0 if "contrast" in name or "flux" in name else 3e-13
+        absolute = (
+            0
+            if "contrast" in name or "flux" in name
+            else float(roundoff(jnp.max(jnp.abs(want)), n_ops=64))
+        )
         np.testing.assert_allclose(
-            actual[name], want, rtol=3e-13, atol=absolute, err_msg=name
+            actual[name],
+            want,
+            rtol=float(roundoff(1.0, n_ops=64, dtype=times.dtype)),
+            atol=absolute,
+            err_msg=name,
         )
 
 
@@ -822,6 +858,9 @@ def test_ephemeris_scene_order_and_reuse(batched, monkeypatch):
     Truth is the same inner-to-outer Jacobi chain in both scenes; require
     exact arrays for cached/default paths and reordered arrays (no roundoff
     changes are needed). Both tuple modules and K=2 modules are exercised.
+
+    The independent Halley and Markley paths allow 32 roundings at the
+    orbital scale for trigonometric evaluation, rotation and Jacobi sums.
     """
     from orbix.kepler import Halley
 
@@ -841,8 +880,8 @@ def test_ephemeris_scene_order_and_reuse(batched, monkeypatch):
     np.testing.assert_allclose(
         system.ephemeris(times, solver=Halley()).position_AU,
         eph.position_AU,
-        rtol=3e-14,
-        atol=3e-14,
+        rtol=0,
+        atol=float(roundoff(jnp.max(jnp.abs(eph.position_AU)), n_ops=32)),
     )
 
     def unexpected_solve(*args, **kwargs):
@@ -859,16 +898,18 @@ def test_ephemeris_scene_order_and_reuse(batched, monkeypatch):
 
 
 @pytest.mark.parametrize("massless", [False, True])
-@pytest.mark.float64_only(reason="float64 orbital reference values")
 def test_ephemeris_jacobi_balance_and_independent_limit(massless):
     """Catch independent reflex summation or incorrect zero-mass handling.
 
-    Truth: sum(m*r)=sum(m*v)=0 (Jacobi barycentric balance), with atol
-    4e-17 Msun AU and 4e-19 Msun AU/day for x64 cancellation. For masses
+    Truth: sum(m*r)=sum(m*v)=0 (Jacobi barycentric balance). Eight roundings
+    at the largest weighted term cover the three products, Jacobi offsets
+    and their reduction. For masses
     .001/.005 Msun at 1/5 AU, the relative maximum stellar-offset change
     from independent NumPy two-body orbits must be nonzero and below .0033
-    (over three times the measured .00106742). Massless values use 3e-13
-    relative/absolute float64 tolerance, with relative-only photometry.
+    (over three times the measured .00106742). Massless comparisons allow 64
+    roundings for
+    solving Kepler, rotation and photometric or velocity conversion.
+    Photometry has relative-only tolerance, including near small signals.
     """
     masses = (0.0, 0.0) if massless else (0.001, 0.005)
     system = _ephemeris_scene(masses=masses)
@@ -877,12 +918,14 @@ def test_ephemeris_jacobi_balance_and_independent_limit(massless):
     times = jnp.array([-100.0, 23.0, 200.0, 700.0])
     eph = system.ephemeris(times)
     weights = jnp.array([1.0, *masses])
-    np.testing.assert_allclose(
-        jnp.einsum("k,ktc->tc", weights, eph.position_AU), 0, atol=4e-17
-    )
-    np.testing.assert_allclose(
-        jnp.einsum("k,ktc->tc", weights, eph.velocity_AU_per_d), 0, atol=4e-19
-    )
+    for values in (eph.position_AU, eph.velocity_AU_per_d):
+        scale = jnp.max(jnp.abs(weights[:, None, None] * values))
+        np.testing.assert_allclose(
+            jnp.einsum("k,ktc->tc", weights, values),
+            0,
+            rtol=0,
+            atol=float(roundoff(scale, n_ops=8)),
+        )
     independent = [
         _independent_observables(system, times, i) for i in range(len(system.planets))
     ]
@@ -894,9 +937,17 @@ def test_ephemeris_jacobi_balance_and_independent_limit(massless):
             else:
                 axis = 1 if name in ("positions", "alpha_dMag") or got.ndim == 3 else 0
                 want = jnp.concatenate([item[name] for item in independent], axis=axis)
-            absolute = 0 if "contrast" in name or "flux" in name else 3e-13
+            absolute = (
+                0
+                if "contrast" in name or "flux" in name
+                else float(roundoff(jnp.max(jnp.abs(want)), n_ops=64))
+            )
             np.testing.assert_allclose(
-                got, want, rtol=3e-13, atol=absolute, err_msg=name
+                got,
+                want,
+                rtol=float(roundoff(1.0, n_ops=64, dtype=times.dtype)),
+                atol=absolute,
+                err_msg=name,
             )
     else:
         control = sum(item["star_reflex"] for item in independent)
@@ -1048,32 +1099,42 @@ def test_empty_scene_and_reference_epoch():
 @pytest.mark.parametrize(
     "epoch", [Epoch(2451545.0, 0.25), Epoch(2460000.0, 0.75, "tt")]
 )
-@pytest.mark.float64_only(reason="absolute Julian date reference needs float64")
 def test_scene_epoch_offsets_match_zero_epoch(epoch):
-    """Fails if traced times or orbital epochs use a different origin."""
+    """A host absolute-date reference resolves a sub-ULP time step in either lane.
+
+    Sixteen phase and projection roundings at the angular orbital radius,
+    scaled by elapsed orbital radians, bound propagation over ten years.
+    """
     planet = _make_planet(0.3, 1.0)
     scene = _system(FlatStar(1.0), (planet,), epoch=epoch, epoch_d=23.25)
-    zero = Epoch(scale=epoch.scale)
-    reference = _system(
-        scene.star,
-        scene.planets,
-        epoch=zero,
-        epoch_d=23.25 + epoch.days_between(zero),
-    )
     dates = epoch.jd(np.array([100.0, 100.125, 3652.5]))
+    reference = two_body_reference(
+        dates,
+        epoch_d=epoch.jd(23.25),
+        star_mass_kg=Msun2kg,
+        planet_mass_kg=Mearth2kg,
+        dist_pc=10.0,
+        a_AU=1.0,
+        e=0.0,
+        i_rad=np.pi / 3,
+        W_rad=0.0,
+        w_rad=0.0,
+        M0_rad=0.0,
+    )
     assert scene.epoch is scene.dynamics.frame.epoch
-    np.testing.assert_allclose(
-        scene.positions(jnp.asarray(scene.epoch.days(jd=dates))),
-        reference.positions(jnp.asarray(zero.days(jd=dates))),
-        rtol=3e-13,
-        atol=3e-13,
+    offsets = scene.epoch.days(jd=dates)
+    actual = scene.positions(jnp.asarray(offsets))
+    phase = jnp.maximum(
+        1.0, jnp.abs((offsets - 23.25) * scene.dynamics.orbits.n_rad_per_d[0])
+    )
+    slack = roundoff(phase / scene.dist_pc, n_ops=16)
+    np.testing.assert_array_less(
+        np.abs(actual - reference.position_arcsec), np.broadcast_to(slack, actual.shape)
     )
 
 
 @pytest.mark.parametrize("inclination", [0.0, 0.7])
-@pytest.mark.float64_only(
-    reason="float32 epoch resolution measured against a float64 orbit"
-)
+@pytest.mark.float32_only(reason="absolute-date narrowing negative control")
 def test_scene_epoch_float32_resolution(inclination):
     """Fails if short time steps are lost to absolute-date float32 rounding.
 
@@ -1104,7 +1165,18 @@ def test_scene_epoch_float32_resolution(inclination):
         epoch=epoch,
     )
     times_d = np.arange(11, dtype=np.float64) * 0.01
-    truth = np.asarray(scene.positions(jnp.asarray(times_d)))
+    truth = two_body_reference(
+        times_d,
+        a_AU=axis,
+        e=0.0,
+        W_rad=0.0,
+        i_rad=inclination,
+        w_rad=0.0,
+        M0_rad=0.0,
+        epoch_d=-elapsed_d,
+        star_mass_kg=Msun2kg,
+        dist_pc=10.0,
+    ).position_arcsec
     zero = eqx.tree_at(
         lambda s: (s.dynamics.orbits.epoch_d, s.dynamics.frame),
         scene,
@@ -1113,19 +1185,10 @@ def test_scene_epoch_float32_resolution(inclination):
             type(scene.dynamics.frame)(scene.dist_pc, Epoch()),
         ),
     )
-    with jax.enable_x64(False):
-        single = jax.tree.map(
-            lambda x: x.astype(jnp.float32) if eqx.is_inexact_array(x) else x, scene
-        )
-        absolute = jax.tree.map(
-            lambda x: x.astype(jnp.float32) if eqx.is_inexact_array(x) else x, zero
-        )
-        actual = eqx.filter_jit(Scene.positions)(
-            single, time_d=jnp.asarray(times_d, jnp.float32)
-        )
-        negative = eqx.filter_jit(Scene.positions)(
-            absolute, time_d=jnp.asarray(epoch.jd(times_d), jnp.float32)
-        )
+    actual = eqx.filter_jit(Scene.positions)(scene, time_d=jnp.asarray(times_d))
+    negative = eqx.filter_jit(Scene.positions)(
+        zero, time_d=jnp.asarray(epoch.jd(times_d))
+    )
     error = float(np.max(np.abs(np.asarray(actual) - truth)))
     negative_error = float(np.max(np.abs(np.asarray(negative) - truth)))
     assert actual.dtype == jnp.float32
@@ -1134,8 +1197,11 @@ def test_scene_epoch_float32_resolution(inclination):
 
 
 @pytest.mark.parametrize(("version", "start_year"), [(2.33, 0.0), (2.6, 30.123456789)])
-def test_exovista_scene_epoch_recovers_dates(request, version, start_year):
-    """Fails if imported times keep absolute dates or lose the fractional start."""
+def test_exovista_scene_epoch_recovers_dates(request, version, start_year, precision):
+    """Offsets match the host differences rounded once to the working dtype.
+
+    The split first epoch reconstructs the FITS Julian date on the host.
+    """
     from astropy.io import fits
 
     from skyscapes.io import from_exovista
@@ -1153,11 +1219,8 @@ def test_exovista_scene_epoch_recovers_dates(request, version, start_year):
         grids.append(scene.star.spots.times_d)
     for times_d in grids:
         assert times_d[0] == 0.0
-        np.testing.assert_allclose(
-            scene.epoch.jd(times_d),
-            2451545.0 + years * 365.25,
-            rtol=0,
-            atol=1e-9,
-        )
+        expected = (years - years[0]) * 365.25
+        np.testing.assert_array_equal(times_d, expected.astype(precision))
+    assert scene.epoch.jd(0.0) == 2451545.0 + years[0] * 365.25
     np.testing.assert_array_equal(scene.dynamics.orbits.epoch_d, 0.0)
     assert scene.epoch.scale == "tdb"
