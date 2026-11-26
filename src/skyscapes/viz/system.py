@@ -12,6 +12,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 from hwoutils.conversions import au_to_arcsec
+from hwoutils.precision import like
 
 from skyscapes.viz import _geometry
 from skyscapes.viz._draw import Arrow, halo
@@ -218,11 +219,12 @@ def plot_system(
 
     # Planets and their tracks.
     if n_planets:
-        t_now = jnp.atleast_1d(jnp.asarray(time_d, dtype=float))
+        orbit_scale = system.dynamics.orbits.a_AU
+        t_now = jnp.atleast_1d(like(time_d, orbit_scale))
         now = _positions_xyz_AU(system, t_now)[:, :, 0]
         track = None
         if track_time_d is not None:
-            track = _positions_xyz_AU(system, jnp.asarray(track_time_d, dtype=float))
+            track = _positions_xyz_AU(system, like(track_time_d, orbit_scale))
         for k, name in enumerate(names):
             color, marker = _planet_style(styles, name)
             if track is not None:

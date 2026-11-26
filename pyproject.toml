@@ -108,6 +108,7 @@ exclude = ["/scripts", "/docs", "/tests", "/.github"]
 [tool.pytest.ini_options]
 addopts = "-p hwoutils.testing.precision"
 default_precision = "float32"
+precision_guard_enforce = true
 filterwarnings = [
     "error",
     # ExoJAX applies its line-opacity resolution threshold to continuum-only grids.
