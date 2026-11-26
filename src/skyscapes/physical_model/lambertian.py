@@ -17,8 +17,9 @@ from .base import AbstractPhysicalModel
 def lambert_phase(phase_angle_rad: Array) -> Array:
     """Lambert phase on [0, pi], clipped at zero to suppress endpoint roundoff.
 
-    Phi(b) = (sin(b) + (pi - b) cos(b)) / pi. Clipping keeps reflected
-    light nonnegative at new phase; it leaves interior values unchanged.
+    Phi(b) = (sin(b) + (pi - b) cos(b)) / pi. Near new phase, a series in
+    the distance from pi preserves the cubic crescent as the terms cancel.
+    Clipping keeps reflected light nonnegative at new phase.
 
     Args:
         phase_angle_rad: Star-planet-observer phase angle [rad], in [0, pi].
@@ -29,7 +30,31 @@ def lambert_phase(phase_angle_rad: Array) -> Array:
     """
     sin_b = jnp.sin(phase_angle_rad)
     cos_b = jnp.cos(phase_angle_rad)
-    return jnp.maximum((sin_b + (jnp.pi - phase_angle_rad) * cos_b) / jnp.pi, 0.0)
+    direct = sin_b + (jnp.pi - phase_angle_rad) * cos_b
+    # Trigonometric argument reduction preserves the distance from pi even
+    # when pi itself is not representable at the input dtype.
+    delta = jnp.arctan2(sin_b, -cos_b)
+    d2 = delta * delta
+    # sin(delta) - delta*cos(delta), through degree 13. At delta <= 1/4
+    # the first omitted term is smaller than one float64 epsilon of the sum.
+    series = (
+        delta
+        * d2
+        * (
+            1 / 3
+            + d2
+            * (
+                -1 / 30
+                + d2
+                * (1 / 840 + d2 * (-1 / 45360 + d2 * (1 / 3991680 - d2 / 518918400)))
+            )
+        )
+    )
+    near_new = (phase_angle_rad >= jnp.pi - 0.25) & (phase_angle_rad <= jnp.pi)
+    numerator = jnp.where(near_new, series, direct)
+    return jnp.where(
+        phase_angle_rad == jnp.pi, 0.0, jnp.maximum(numerator / jnp.pi, 0.0)
+    )
 
 
 def reflected_contrast(phase_angle_rad, star_planet_distance_AU, Ag, Rp_Rearth):
