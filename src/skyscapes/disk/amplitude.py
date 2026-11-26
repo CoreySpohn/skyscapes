@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 from hwoutils.constants import JOHNSON_V_VEGA_ZERO_POINT_JY, arcsec2rad, pc2AU
 from hwoutils.conversions import jy_to_photons_per_nm_per_m2, mag_to_flux_jy
+from hwoutils.precision import like
 from optixstuff.spectral import Band, same_wavelength
 from zodi import DensityDust, SurfaceBrightnessDust
 
@@ -175,11 +176,20 @@ def density_level(amplitude, profile, *, star, dist_pc, time_d=0.0):
     """
     check_amplitude(amplitude, profile)
     if isinstance(amplitude, DensityDust):
-        return jnp.asarray(amplitude.level)
-    wave = amplitude.passband.center_nm
+        level = amplitude.level
+        return (
+            jnp.asarray(level)
+            if hasattr(level, "dtype")
+            else like(level, profile.flux_scale)
+        )
+    dist_pc = jnp.asarray(dist_pc, dtype=jnp.result_type(dist_pc, profile.flux_scale))
+    wave = like(amplitude.passband.center_nm, dist_pc)
     band = calibration_band(amplitude, profile)
-    zero = zero_magnitude_photon_flux_density(
-        amplitude.passband, zero_point_jy=profile.zero_point_jy, band=band
+    zero = like(
+        zero_magnitude_photon_flux_density(
+            amplitude.passband, zero_point_jy=profile.zero_point_jy, band=band
+        ),
+        wave,
     )
     if amplitude.luminosity_rule == "bolometric":
         # The star's own mean over the calibration band, without its
@@ -190,13 +200,16 @@ def density_level(amplitude, profile, *, star, dist_pc, time_d=0.0):
     else:
         # The host magnitude is built from this same flux, which therefore
         # cancels from the level: the star is not read.
-        flux = 1.0
-        luminosity = 1.0
+        flux = luminosity = like(1.0, wave)
     absolute_mag = -2.5 * jnp.log10(flux / zero) - 5.0 * jnp.log10(dist_pc / 10.0)
     radius = amplitude.reference_radius_au
     if radius == "eeid":
-        radius = eeid_AU(amplitude.reference_star.luminosity_lsun)
-    integral = profile._scattered_integral(wave, radius, 0.0, 0.0, 0.0)
+        radius = eeid_AU(like(amplitude.reference_star.luminosity_lsun, wave))
+    radius = like(radius, wave)
+    zero_offset = like(0.0, wave)
+    integral = profile._scattered_integral(
+        wave, radius, zero_offset, zero_offset, zero_offset
+    )
     integral = eqx.error_if(
         integral,
         (integral <= 0) | ~jnp.isfinite(integral),

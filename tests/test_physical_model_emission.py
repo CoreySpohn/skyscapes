@@ -20,9 +20,12 @@ import pytest
 from exojax.database.multimol import database_path_hitran12
 from exojax.opacity import OpaPremodit
 from hwoutils import constants as const
-from hwoutils.testing import ulps
+from hwoutils.leaves import canonical
+from hwoutils.testing import assert_precision_closed, precision_pair, ulps
+from optixstuff.spectral import Band, Quadrature, Resolution
 from scipy.special import expn
 
+from skyscapes._tables import ProductTable
 from skyscapes.physical_model import AbstractPhysicalModel, ExoJaxEmissionModel
 from skyscapes.physical_model.exojax import (
     ConstantMmr,
@@ -697,3 +700,80 @@ def test_empty_cia_preserves_existing_absorbing_spectrum(engines):
     baseline = _model(engines, EARTH_TWIN_COEFFS, species=_species(1e-24))
     empty = _model(explicit, EARTH_TWIN_COEFFS, species=_species(1e-24))
     np.testing.assert_array_equal(empty.emergent_flux(), baseline.emergent_flux())
+
+
+@pytest.mark.float64_only(reason="trace float32 continuum inputs with x64 enabled")
+@pytest.mark.parametrize(
+    "reader",
+    [
+        "layer_temperature",
+        "emergent_flux",
+        "brightness_temperature",
+        "flux_density_jy",
+        "contrast_at_time",
+        "photon_flux_density",
+        "node_photon_flux_density",
+    ],
+)
+def test_real_continuum_closure(engines, reader):
+    """Allow 64 roundings for the polynomial, IR Planck exponent and angular sum."""
+    model = _model(engines, [280.0, 50.0])
+    if reader == "flux_density_jy":
+        fn = ExoJaxEmissionModel.flux_density_jy
+        args = (
+            model,
+            jnp.array([9000.0, 11000.0]),
+            jnp.array([1.0]),
+            jnp.asarray(10.0),
+        )
+    elif reader in {
+        "contrast_at_time",
+        "photon_flux_density",
+        "node_photon_flux_density",
+    }:
+        star, dist = FlatStar(4.0), jnp.asarray(10.0)
+        phase, separation, radius = (
+            jnp.array([[0.7, 1.1]]),
+            jnp.ones((1, 2)),
+            jnp.ones(1),
+        )
+        time, wave = jnp.array([0.0, 1.0]), jnp.asarray(10_000.0)
+        args = (model, wave, time, phase, separation, radius, star, dist)
+        if reader == "contrast_at_time":
+
+            def fn(m, w, t, p, s, r, star, d):
+                return m.contrast_at_time(p, s, w, r, time_d=t, star=star, dist_pc=d)
+        elif reader == "photon_flux_density":
+
+            def fn(m, w, t, p, s, r, star, d):
+                return m.photon_flux_density(
+                    w,
+                    t,
+                    phase_angle_rad=p,
+                    star_planet_distance_AU=s,
+                    Rp_Rearth=r,
+                    star=star,
+                    dist_pc=d,
+                )
+        else:
+            rule = Quadrature.build((Band(9500.0, 10_500.0),), order=2)
+            resolution = Resolution.build(rule, ProductTable(model, star))
+            args += (rule, resolution)
+
+            def fn(m, _w, t, p, s, r, star, d, q, res):
+                return m.node_photon_flux_density(
+                    q,
+                    res,
+                    t,
+                    phase_angle_rad=p,
+                    star_planet_distance_AU=s,
+                    Rp_Rearth=r,
+                    star=star,
+                    dist_pc=d,
+                    star_nodes=star.node_flux_density(q, res, t, dist_pc=d),
+                )
+    else:
+        fn = getattr(ExoJaxEmissionModel, reader)
+        args = (model,)
+    assert_precision_closed(fn, *canonical(args, precision="float32"))
+    precision_pair(fn, args, bound=float(ulps(64, np.float32(1.0))))

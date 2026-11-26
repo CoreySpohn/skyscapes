@@ -138,10 +138,11 @@ def _mask_dynamics(dynamics, chain_valid):
         ),
         dynamics.orbits,
     )
+    mass = dynamics.planets.mass_Msun
     return eqx.tree_at(
         lambda d: (d.planets.mass_Msun, d.orbits),
         dynamics,
-        (jnp.where(chain_valid, dynamics.planets.mass_Msun, 0.0), orbit),
+        (jnp.where(chain_valid, mass, jnp.zeros_like(mass)), orbit),
     )
 
 
@@ -218,10 +219,18 @@ class Scene(eqx.Module):
             Disk photon radiance [ph s^-1 m^-2 nm^-1 sr^-1], shape
             ``wavelength_nm.shape + grid.shape``.
         """
-        from ..disk.base import check_sky_grid, radiance_image
+        from .._dtype import _working_dtype
+        from ..disk.base import _sky_coordinates, radiance_image
 
-        check_sky_grid(grid)
-        east, north = grid.orientation.detector_to_sky(*grid.coordinates())
+        dtype = _working_dtype(
+            wavelength_nm,
+            time_d,
+            self.dist_pc,
+            self.midplane_inc_deg,
+            self.midplane_position_angle_deg,
+            *jax.tree.leaves((self.disk, self.star if star is None else star)),
+        )
+        east, north = _sky_coordinates(grid, dtype)
         return radiance_image(
             self.photon_radiance_at(wavelength_nm, time_d, east, north, star=star),
             grid,
@@ -254,7 +263,10 @@ class Scene(eqx.Module):
             sky_shape = jnp.broadcast_shapes(
                 jnp.shape(east_arcsec), jnp.shape(north_arcsec)
             )
-            return jnp.zeros(jnp.shape(wavelength_nm) + sky_shape)
+            return jnp.zeros(
+                jnp.shape(wavelength_nm) + sky_shape,
+                dtype=jnp.result_type(jnp.asarray(wavelength_nm), self.dist_pc),
+            )
         return self.disk.photon_radiance_at(
             wavelength_nm,
             time_d,
@@ -887,7 +899,11 @@ class Scene(eqx.Module):
             geometry = dict(
                 phase_angle_rad=phase[start:stop],
                 star_planet_distance_AU=distance[start:stop],
-                Rp_Rearth=jnp.where(self.valid[start:stop], planet.Rp_Rearth, 0.0),
+                Rp_Rearth=jnp.where(
+                    self.valid[start:stop],
+                    planet.Rp_Rearth,
+                    jnp.zeros_like(planet.Rp_Rearth),
+                ),
                 time_d=time_d,
                 star=self.star,
                 dist_pc=self.dynamics.frame.dist_pc,
@@ -927,9 +943,15 @@ class Scene(eqx.Module):
         result = (
             jnp.concatenate(values, axis=0)
             if values
-            else jnp.empty((0, jnp.size(time_d)))
+            else jnp.empty(
+                (0, jnp.size(time_d)),
+                dtype=jnp.result_type(jnp.asarray(wavelength_nm), self.dist_pc),
+            )
         )
-        return jnp.where(self.valid[:, None], result, 0.0) * self.valid[:, None]
+        return (
+            jnp.where(self.valid[:, None], result, jnp.zeros_like(result))
+            * self.valid[:, None]
+        )
 
     @_batch_method
     def contrasts(
@@ -1065,7 +1087,7 @@ class Scene(eqx.Module):
             ),
             star_luminosity_Lsun=None
             if luminosity is None
-            else jnp.asarray(luminosity),
+            else like(luminosity, dist_pc),
             calibration=self._calibration(resolution, bands, dist_pc),
             calibration_bands=bands,
         )
@@ -1095,10 +1117,10 @@ class Scene(eqx.Module):
         planets = (
             jnp.concatenate(values, axis=2)
             if values
-            else jnp.zeros((*nodes.shape, 0, jnp.size(time_d)))
+            else jnp.zeros((*nodes.shape, 0, jnp.size(time_d)), dtype=star.dtype)
         )
         valid = self.valid[:, None]
-        planets = jnp.where(valid, planets, 0.0) * valid
+        planets = jnp.where(valid, planets, jnp.zeros_like(planets)) * valid
         return unscaled, scale, planets
 
     def calibration_bands(self) -> tuple:
@@ -1125,7 +1147,7 @@ class Scene(eqx.Module):
         holds for the band, at the scene epoch, like every other star read.
         """
         if not bands:
-            return jnp.zeros((0,))
+            return jnp.zeros((0,), dtype=dist_pc.dtype)
         if not is_table(self.star):
             return jnp.stack(
                 [
@@ -1143,7 +1165,7 @@ class Scene(eqx.Module):
                     "Scene.calibration_bands() beside the exposure's quadrature"
                 )
             node_values = self.star._node_flux_density(
-                rule, resolution, jnp.zeros(1), dist_pc=dist_pc
+                rule, resolution, jnp.zeros(1, dtype=dist_pc.dtype), dist_pc=dist_pc
             )
             values.append(rule.mean(node_values)[0, 0])
         return jnp.stack(values)
@@ -1196,7 +1218,7 @@ class Scene(eqx.Module):
             if transmission is None:
                 return contrast
             response = jnp.broadcast_to(transmission(wave), wave.shape)[0, 0]
-            return jnp.where(response > 0, contrast, jnp.nan)
+            return jnp.where(response > 0, contrast, jnp.full_like(contrast, jnp.nan))
 
         unscaled, scale, planet = self._node_star_and_planets(
             quadrature, resolution, time_d, ephemeris
@@ -1251,8 +1273,8 @@ class Scene(eqx.Module):
         """
         eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
         alpha = eph.separation_arcsec(eph.scene_planet_indices, 0)
-        contrast = self.contrasts(jnp.asarray(wavelength_nm), time_d, ephemeris=eph)
-        safe = jnp.where(self.valid[:, None], contrast, 1.0)
+        contrast = self.contrasts(wavelength_nm, time_d, ephemeris=eph)
+        safe = jnp.where(self.valid[:, None], contrast, jnp.ones_like(contrast))
         dMag = contrast_to_delta_mag(safe + jnp.finfo(contrast.dtype).tiny)
         return alpha, dMag
 

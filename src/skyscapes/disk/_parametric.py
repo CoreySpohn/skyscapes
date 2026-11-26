@@ -108,7 +108,10 @@ class AbstractParametricDisk(AbstractDisk):
         """
         east, north = jnp.broadcast_arrays(east_arcsec, north_arcsec)
         east_AU, north_AU = arcsec_to_au(east, dist_pc), arcsec_to_au(north, dist_pc)
-        wave = jnp.asarray(wavelength_nm, dtype=float)
+        wave = jnp.asarray(
+            wavelength_nm,
+            dtype=jnp.result_type(jnp.asarray(wavelength_nm), self.flux_scale),
+        )
         level = density_level(self.amplitude, self, star=star, dist_pc=dist_pc)
         integral = jax.vmap(
             lambda w: self._scattered_integral(

@@ -32,6 +32,7 @@ import jax
 import jax.numpy as jnp
 import priorities
 from hwoutils.constants import AU2m, G, G_si, Mearth2kg, Msun2kg, d2s, deg2rad
+from hwoutils.precision import like
 from orbix.equations.orbit import state_vector_to_keplerian
 from orbix.system import FrameOrbit, IsotropicInclination, from_axis_angle, rotate
 
@@ -42,7 +43,6 @@ _ABSENT_A = 1.0e20  # sort key of an empty slot
 _EARTH_MASSES_PER_SUN = 333000.0  # the generator's mass ratio for the Hill criterion
 _NEW_PER_STAR = 48  # most planets one star can receive in one refill pass
 _ISOTROPIC_INCLINATION = IsotropicInclination()  # radians, density sin(i)/2
-_ANGLE = priorities.Uniform(0.0, 2 * math.pi)  # node, argument, anomaly [rad]
 
 
 class PopulationConfig(eqx.Module):
@@ -91,10 +91,28 @@ class PopulationConfig(eqx.Module):
             raise ValueError("inclination_rad must have support within [0, pi]")
 
 
-def _draw_tilt(config, key, shape):
+def _unit_uniform(key, shape, ref):
+    """Draw on [0, 1) with bounds in the same precision as the output."""
+    return jax.random.uniform(
+        key, shape, dtype=ref.dtype, minval=like(0.0, ref), maxval=like(1.0, ref)
+    )
+
+
+def _draw_angle(key, shape, ref):
+    """Draw an azimuth in radians at the working precision."""
+    return priorities.Uniform(like(0.0, ref), like(math.tau, ref)).sample(key, shape)
+
+
+def _draw_inclination(key, shape, ref):
+    """Draw an isotropic inclination in radians at the working precision."""
+    q = _unit_uniform(key, shape, ref)
+    return _ISOTROPIC_INCLINATION.icdf(q)
+
+
+def _draw_tilt(config, key, shape, ref):
     """Draw planet inclinations to the midplane [rad]; zero when coplanar."""
     if config.inclination_rad is None:
-        return jnp.zeros(shape)
+        return jnp.zeros(shape, dtype=ref.dtype)
     return config.inclination_rad.sample(key, shape)
 
 
@@ -180,7 +198,7 @@ def _earth_like(a_AU, radius_Rearth, luminosity_Lsun, *, xp):
 
 def _sort_by_a(fields, present):
     """Order every slot array of every star by semi-major axis, empty slots last."""
-    key = jnp.where(present, fields["a_AU"], _ABSENT_A)
+    key = jnp.where(present, fields["a_AU"], like(_ABSENT_A, fields["a_AU"]))
     order = jnp.argsort(key, axis=1)
     take = lambda x: jnp.take_along_axis(x, order, axis=1)  # noqa: E731
     return jax.tree_util.tree_map(take, fields), take(present)
@@ -199,7 +217,7 @@ def _remove_unstable(a_AU, mass_Mearth, present, three_star_mass_Mearth, hill_mi
         a_in, a_out = a[:-1], a[1:]
         m_in, m_out = m[:-1], m[1:]
         both = ok[:-1] & ok[1:]
-        safe_m = jnp.where(both, m_in + m_out, 1.0)
+        safe_m = jnp.where(both, m_in + m_out, like(1.0, m))
         hill = (
             2.0
             * (a_out - a_in)
@@ -235,9 +253,9 @@ def _type_weights(types, config, a_scaled, radius):
         & (a_scaled[..., None] < types.a_max_AU)
     )
     any_candidate = jnp.any(fits & types.earth_candidate, axis=-1, keepdims=True)
-    p_eec = config.earth_candidate_probability
+    p_eec = like(config.earth_candidate_probability, types.weight)
     scale = jnp.where(types.earth_candidate, p_eec, 1.0 - p_eec)
-    weight = types.weight * fits * jnp.where(any_candidate, scale, 1.0)
+    weight = types.weight * fits * jnp.where(any_candidate, scale, jnp.ones_like(scale))
     return weight
 
 
@@ -245,7 +263,7 @@ def _sample_types(key, types, config, a_scaled, radius, present):
     """Select types with the replica fallback and cumulative tie convention."""
     weight = _type_weights(types, config, a_scaled, radius)
     cum = jnp.cumsum(weight, axis=-1)
-    draw = jax.random.uniform(key, radius.shape) * cum[..., -1]
+    draw = _unit_uniform(key, radius.shape, cum) * cum[..., -1]
     type_index = jnp.sum(cum < draw[..., None], axis=-1)
     fallback = types.names.index("Mars") if "Mars" in types.names else 0
     type_index = jnp.where(cum[..., -1] > 0.0, type_index, fallback)
@@ -267,22 +285,31 @@ def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=N
     Returns:
         A `PlanetPopulation` with ``[n_stars, config.max_planets]`` planet leaves.
     """
-    config = PopulationConfig() if config is None else config
-    luminosity_Lsun = jnp.asarray(luminosity_Lsun, float)
+    luminosity_Lsun, mass_Msun = jnp.asarray(luminosity_Lsun), jnp.asarray(mass_Msun)
+    dtype = jnp.result_type(luminosity_Lsun, mass_Msun, occurrence.rate)
+    luminosity_Lsun = jnp.asarray(luminosity_Lsun, dtype=dtype)
+    if config is None:
+        config = PopulationConfig(
+            inclination_rad=priorities.Uniform(
+                like(0.0, luminosity_Lsun), like(5.0 * deg2rad, luminosity_Lsun)
+            )
+        )
     n_stars = luminosity_Lsun.shape[0]
     n_slots = config.max_planets
     n_a, n_m = occurrence.rate.shape
     cap = math.ceil(1.25 * occurrence.total_rate * n_stars) + 64
     sqrt_l = jnp.sqrt(luminosity_Lsun)
-    three_ms = 3.0 * jnp.asarray(mass_Msun, float) * _EARTH_MASSES_PER_SUN
+    three_ms = 3.0 * jnp.asarray(mass_Msun, dtype=dtype) * _EARTH_MASSES_PER_SUN
     a_edges = occurrence.a_edges_AU
     m_edges = occurrence.mass_edges_Mearth
 
     key, k_pa, k_inc, k_flip, k_bin = jax.random.split(key, 5)
-    midplane_pa = jnp.degrees(_ANGLE.sample(k_pa, (n_stars,)))
-    midplane_inc = jnp.degrees(_ISOTROPIC_INCLINATION.sample(k_inc, (n_stars,)))
+    midplane_pa = jnp.degrees(_draw_angle(k_pa, (n_stars,), luminosity_Lsun))
+    midplane_inc = jnp.degrees(_draw_inclination(k_inc, (n_stars,), luminosity_Lsun))
     midplane_inc = jnp.where(
-        jax.random.uniform(k_flip, (n_stars,)) < 0.5, midplane_inc - 180.0, midplane_inc
+        _unit_uniform(k_flip, (n_stars,), luminosity_Lsun) < 0.5,
+        midplane_inc - 180.0,
+        midplane_inc,
     )
 
     # Expected planets per cell. Each (cell, star) entry is a Bernoulli trial at the
@@ -295,45 +322,50 @@ def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=N
     bin_entry = jnp.broadcast_to(
         jnp.where(bin_flat >= 0, bin_flat, 0)[:, None], (n_cells, n_stars)
     )
-    rand = jax.random.uniform(k_bin, (n_cells, n_stars))
+    rand = _unit_uniform(k_bin, (n_cells, n_stars), luminosity_Lsun)
     hit = (rand < occurrence.rate.ravel()[:, None]) & covered
     per_bin = lambda x: jax.ops.segment_sum(  # noqa: E731
-        x.sum(axis=1).astype(float),
+        x.sum(axis=1).astype(dtype),
         jnp.where(bin_flat >= 0, bin_flat, 0),
         occurrence.n_bins,
     )
     target = jnp.round(
-        per_bin(covered * occurrence.rate.ravel()[:, None] * jnp.ones(n_stars))
+        per_bin(
+            covered * occurrence.rate.ravel()[:, None] * jnp.ones(n_stars, dtype=dtype)
+        )
     )
     hits_per_bin = per_bin(hit)
     diff = target - hits_per_bin
-    entries_per_bin = per_bin(covered * jnp.ones(n_stars))
+    entries_per_bin = per_bin(covered * jnp.ones(n_stars, dtype=dtype))
 
     def rank_in_bin(sort_key, per_bin_count):
         first = jnp.cumsum(per_bin_count) - per_bin_count
         order = jnp.argsort(sort_key.ravel())
         position = (
-            jnp.zeros(sort_key.size)
+            jnp.zeros(sort_key.size, dtype=dtype)
             .at[order]
-            .set(jnp.arange(sort_key.size, dtype=float))
+            .set(jnp.arange(sort_key.size, dtype=dtype))
         )
         return position.reshape(sort_key.shape) - first[bin_entry]
 
-    big = occurrence.n_bins + 1.0
+    big = like(occurrence.n_bins + 1.0, rand)
+    sort_bins = bin_entry.astype(dtype)
     add_rank = rank_in_bin(
-        jnp.where(covered, bin_entry + (1.0 - rand) * 0.5, big), entries_per_bin
+        jnp.where(covered, sort_bins + (1.0 - rand) * 0.5, big), entries_per_bin
     )
-    drop_rank = rank_in_bin(jnp.where(hit, bin_entry + rand * 0.5, big), hits_per_bin)
+    drop_rank = rank_in_bin(jnp.where(hit, sort_bins + rand * 0.5, big), hits_per_bin)
     n_add, n_drop = diff[bin_entry], -diff[bin_entry]
     hit = (hit | (covered & (n_add > 0) & (add_rank < n_add))) & ~(
         hit & (n_drop > 0) & (drop_rank < n_drop)
     )
-    expected = hit.sum(axis=1).astype(float)
+    expected = hit.sum(axis=1).astype(dtype)
     n_expected = jnp.sum(expected)
-    k = jnp.arange(cap)
+    k = jnp.arange(cap, dtype=jnp.int32)
 
-    empty = {name: jnp.zeros((n_stars, n_slots)) for name in _PLANET_FIELDS}
-    empty["a_AU"] = jnp.full((n_stars, n_slots), _ABSENT_A)
+    empty = {
+        name: jnp.zeros((n_stars, n_slots), dtype=dtype) for name in _PLANET_FIELDS
+    }
+    empty["a_AU"] = jnp.full((n_stars, n_slots), _ABSENT_A, dtype=dtype)
     empty["cell"] = jnp.full((n_stars, n_slots), -1, jnp.int32)
     present = jnp.zeros((n_stars, n_slots), bool)
 
@@ -343,17 +375,19 @@ def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=N
             key, 9
         )
         have = (
-            jnp.zeros(n_a * n_m)
+            jnp.zeros(n_a * n_m, dtype=dtype)
             .at[jnp.where(present, fields["cell"], 0).ravel()]
-            .add(present.ravel().astype(float))
+            .add(present.ravel().astype(dtype))
         )
-        deficit = jnp.clip(expected - have, 0.0, None)
+        deficit = jnp.maximum(expected - have, 0.0)
         cum_def = jnp.cumsum(deficit)
         valid = k < cum_def[-1]
         cell = jnp.clip(jnp.searchsorted(cum_def, k, side="right"), 0, n_a * n_m - 1)
         ia, im = cell // n_m, cell % n_m
         star = jnp.clip(
-            (jax.random.uniform(k_star, (cap,)) * n_stars).astype(jnp.int32),
+            (_unit_uniform(k_star, (cap,), luminosity_Lsun) * n_stars).astype(
+                jnp.int32
+            ),
             0,
             n_stars - 1,
         )
@@ -364,14 +398,16 @@ def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=N
             "mass_Mearth": mass,
             "radius_Rearth": mass_to_radius(mass),
             "e": (
-                jnp.zeros(cap)
+                jnp.zeros(cap, dtype=dtype)
                 if config.eccentricity is None
                 else config.eccentricity.sample(k_e, (cap,))
             ),
-            "inc_deg": jnp.degrees(_draw_tilt(config, k_i, (cap,))),
-            "node_deg": jnp.degrees(_ANGLE.sample(k_node, (cap,))),
-            "argperi_deg": jnp.degrees(_ANGLE.sample(k_peri, (cap,))),
-            "mean_anomaly_deg": jnp.degrees(_ANGLE.sample(k_anom, (cap,))),
+            "inc_deg": jnp.degrees(_draw_tilt(config, k_i, (cap,), luminosity_Lsun)),
+            "node_deg": jnp.degrees(_draw_angle(k_node, (cap,), luminosity_Lsun)),
+            "argperi_deg": jnp.degrees(_draw_angle(k_peri, (cap,), luminosity_Lsun)),
+            "mean_anomaly_deg": jnp.degrees(
+                _draw_angle(k_anom, (cap,), luminosity_Lsun)
+            ),
             "cell": cell.astype(jnp.int32),
         }
         # Rank of each new planet among those landing on the same star.
@@ -440,7 +476,7 @@ def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=N
     type_index = _sample_types(k_type, types, config, a_scaled, radius, present)
 
     def masked(name):
-        return jnp.where(present, fields[name], 0.0)
+        return jnp.where(present, fields[name], jnp.zeros_like(fields[name]))
 
     return PlanetPopulation(
         present=present,
@@ -454,7 +490,7 @@ def draw_population(key, occurrence, types, luminosity_Lsun, mass_Msun, config=N
         mean_anomaly_deg=masked("mean_anomaly_deg"),
         type_index=type_index,
         midplane_inc_deg=midplane_inc,
-        midplane_position_angle_deg=(90.0 + midplane_pa) % 360.0,
+        midplane_position_angle_deg=(90.0 + midplane_pa) % like(360.0, midplane_pa),
     )
 
 
@@ -489,16 +525,23 @@ def _sky_elements_one(
 ):
     total_mass = star_mass_Msun * Msun2kg + mass_Mearth * Mearth2kg
     orbit = FrameOrbit.from_classical(
-        a_AU, e, inc, node, peri, anom, mu_AU3_per_d2=G * total_mass
+        a_AU,
+        e,
+        inc,
+        node,
+        peri,
+        anom,
+        mu_AU3_per_d2=G * total_mass,
+        epoch_d=like(0.0, a_AU),
     )
     r, v = orbit.to_cartesian()
-    tilt = from_axis_angle(jnp.array([1.0, 0.0, 0.0]), mid_inc)
-    turn = from_axis_angle(jnp.array([0.0, 0.0, 1.0]), mid_pa)
+    tilt = from_axis_angle(like([1.0, 0.0, 0.0], mid_inc), mid_inc)
+    turn = from_axis_angle(like([0.0, 0.0, 1.0], mid_pa), mid_pa)
 
     def to_sky(vector):
         # The generator's midplane uses conventional Cartesian x/y ordering.
         vector = rotate(turn, rotate(tilt, vector[jnp.array([1, 0, 2])]))
-        return vector * jnp.array([-1.0, 1.0, -1.0])
+        return vector * like([-1.0, 1.0, -1.0], vector)
 
     _, e_sky, i, big_w, w, m = state_vector_to_keplerian(
         to_sky(r) * AU2m, to_sky(v) * (AU2m / d2s), G_si * total_mass
@@ -525,20 +568,23 @@ def sky_elements(population, star_mass_Msun):
         the period [d], each of shape ``[n_stars, max_planets]``.
     """
     present = population.present
-    safe = lambda x, fill: jnp.where(present, x, fill)  # noqa: E731
+    star_mass_Msun = jnp.asarray(star_mass_Msun)
+
     one = jax.vmap(
         jax.vmap(_sky_elements_one, in_axes=(0, 0, 0, 0, 0, 0, 0, None, None, None)),
         in_axes=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
     )
     e, i, big_w, w, m, period = one(
-        safe(population.a_AU, 1.0),
+        jnp.where(present, population.a_AU, jnp.ones_like(population.a_AU)),
         population.e,
         population.inc_deg * deg2rad,
         population.node_deg * deg2rad,
         population.argperi_deg * deg2rad,
         population.mean_anomaly_deg * deg2rad,
         population.mass_Mearth,
-        jnp.asarray(star_mass_Msun, float),
+        jnp.asarray(
+            star_mass_Msun, dtype=jnp.result_type(star_mass_Msun, population.a_AU)
+        ),
         population.midplane_inc_deg * deg2rad,
         (population.midplane_position_angle_deg - 90.0) * deg2rad,
     )

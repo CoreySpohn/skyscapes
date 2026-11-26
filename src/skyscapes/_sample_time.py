@@ -5,6 +5,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from hwoutils.leaves import as_float_leaf, is_traced
+from hwoutils.precision import like
 from jaxtyping import Array
 from orbix.kepler import Markley
 from orbix.system import System
@@ -55,14 +56,18 @@ class SampleOrigin(eqx.Module):
             origin = self.days
             if origin.ndim:
                 origin = origin[..., None]
-            return jnp.asarray(np.asarray(time_d, dtype=np.float64) - origin)
+            return like(np.asarray(time_d, dtype=np.float64) - origin, self.parts)
         high, middle, low = jnp.moveaxis(self.parts, -1, 0)
         if high.ndim:
             high, middle, low = high[..., None], middle[..., None], low[..., None]
         if host_dates:
             # Host dates can remain concrete while a transformed scene is traced.
             date_high, date_middle, date_low = _parts(time_d)
-            return (date_high - high) + (date_middle - middle) + (date_low - low)
+            return (
+                (like(date_high, high) - high)
+                + (like(date_middle, middle) - middle)
+                + (like(date_low, low) - low)
+            )
         return ((jnp.asarray(time_d) - high) - middle) - low
 
 

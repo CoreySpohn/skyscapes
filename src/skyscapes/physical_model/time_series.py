@@ -158,11 +158,9 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
         """
         if self.sample_origin is not None:
             time_d = self.sample_origin.relative(time_d)
-        grid = self.wavelengths_nm.array()
         dtype = jnp.result_type(
             wavelength_nm,
             time_d,
-            grid,
             self.times_d,
             self.contrast_grid,
             jnp.float32,
@@ -172,8 +170,10 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
             jnp.asarray(wavelength_nm, dtype=dtype), times.shape
         )
         time_grid = self.times_d.astype(dtype)
-        wavelength_grid = grid.astype(dtype)
+        wavelength_grid = self.wavelengths_nm.array(dtype)
         contrast_grid = self.contrast_grid.astype(dtype)
+
+        outside = jnp.asarray(jnp.nan, dtype=dtype)
 
         def per_planet(grid):
             if time_grid.size == 1:
@@ -181,10 +181,16 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
                     values = jnp.broadcast_to(grid[0, 0], times.shape)
                 else:
                     values = interpax.interp1d(
-                        wavelengths, wavelength_grid, grid[:, 0], method="linear"
+                        wavelengths,
+                        wavelength_grid,
+                        grid[:, 0],
+                        method="linear",
+                        extrap=outside,
                     )
             elif wavelength_grid.size == 1:
-                values = interpax.interp1d(times, time_grid, grid[0], method="linear")
+                values = interpax.interp1d(
+                    times, time_grid, grid[0], method="linear", extrap=outside
+                )
             else:
                 values = interpax.interp2d(
                     wavelengths,
@@ -193,10 +199,15 @@ class TimeSeriesPhysicalModel(AbstractPhysicalModel):
                     time_grid,
                     grid,
                     method="linear",
+                    extrap=outside,
                 )
             in_spectrum = (wavelengths >= wavelength_grid[0]) & (
                 wavelengths <= wavelength_grid[-1]
             )
-            return jnp.where(in_spectrum & jnp.isfinite(times), values, jnp.nan)
+            return jnp.where(
+                in_spectrum & jnp.isfinite(times),
+                values,
+                jnp.full_like(values, jnp.nan),
+            )
 
         return jax.vmap(per_planet)(contrast_grid)

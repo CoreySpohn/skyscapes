@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 from hwoutils.leaves import as_bulk_leaf, as_float_leaf
 from hwoutils.map_coordinates import map_coordinates
+from hwoutils.precision import like
 from jaxtyping import Array
 from optixstuff.grids import PixelGrid
 from optixstuff.spectral import Knots, as_knots
@@ -127,8 +128,9 @@ class ExovistaDisk(AbstractDisk):
         grid = self.native_grid
         pixels = grid.unit_to_pixel(*grid.orientation.sky_to_detector(east, north))
         cube = self.contrast_cube
-        knots = self.knots.array()
-        operator = jnp.asarray(_spline_operator(self.knots))
+        dtype = jnp.result_type(jnp.asarray(wavelength_nm), cube, self.flux_scale)
+        knots = self.knots.array(dtype)
+        operator = like(_spline_operator(self.knots), knots)
 
         def at_wavelength(wave):
             # A wavelength needs only the four planes from its spline segment.
@@ -138,12 +140,13 @@ class ExovistaDisk(AbstractDisk):
                 knots.size - 2,
             )
             segment = jax.lax.dynamic_slice_in_dim(knots, index, 2)
-            dtype = jnp.result_type(cube, wave)
-            rows = operator[:, index].astype(dtype)
+            rows = operator[:, index]
             planes = jnp.einsum("km,myx->kyx", rows, cube.astype(dtype))
 
             def sample(plane):
-                return map_coordinates(plane, (pixels.y, pixels.x), order=1)
+                return map_coordinates(
+                    plane, (pixels.y, pixels.x), order=1, cval=like(0.0, plane)
+                )
 
             # Spatial interpolation commutes with the spectral polynomial.
             coefficients = jax.vmap(sample)(planes)
@@ -152,7 +155,7 @@ class ExovistaDisk(AbstractDisk):
             )
             return sampled(wave)
 
-        wave = jnp.asarray(wavelength_nm, dtype=float)
+        wave = jnp.asarray(wavelength_nm, dtype=dtype)
         contrast = jax.vmap(at_wavelength)(wave.reshape(-1))
         contrast = contrast.reshape(wave.shape + east.shape)
         flux = star.photon_flux_density(wave, time_d, dist_pc=dist_pc)

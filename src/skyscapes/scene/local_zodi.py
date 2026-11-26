@@ -11,6 +11,7 @@ import numpy as np
 import zodi
 from hwoutils.conversions import um_to_nm
 from hwoutils.leaves import as_float_leaf
+from hwoutils.precision import like
 from jax import Array
 from optixstuff.spectral import Knots, as_knots, digest_knots
 from orbix.observatory import ecliptic_pointing
@@ -18,6 +19,7 @@ from orbix.system import SkyFrame
 from zodi.tables import TABLE19_WAVELENGTH_UM
 from zodi.units import intensity_from_ab_mag_arcsec2, power_to_photon_intensity
 
+from .._dtype import _working_dtype
 from .._flux_scale import check_flux_scale
 
 
@@ -135,8 +137,8 @@ class AYOZodi(AbstractLocalZodi):
         wave = jnp.asarray(wavelength_nm)
         mag = zodi.ayo_default_ab_mag(
             wave,
-            mag_v=self.surface_brightness_mag_arcsec2,
-            reference_wavelength_nm=self.reference_wavelength_nm,
+            mag_v=like(self.surface_brightness_mag_arcsec2, wave),
+            reference_wavelength_nm=like(self.reference_wavelength_nm, wave),
         )
         return (
             power_to_photon_intensity(intensity_from_ab_mag_arcsec2(mag, wave), wave)
@@ -260,13 +262,12 @@ class PrecomputedZodi(AbstractLocalZodi):
         self, wavelength_nm: Array, sky_frame: SkyFrame, time_d: Array
     ) -> Array:
         """Photon radiance per sr; the sightline is ignored, wavelength-shaped."""
-        wave = jnp.asarray(wavelength_nm)
+        radiance = self.radiance_phot_per_s_m2_nm_sr
+        dtype = _working_dtype(wavelength_nm, radiance, self.flux_scale)
+        wave = jnp.asarray(wavelength_nm, dtype=dtype)
+        outside = jnp.asarray(jnp.nan, dtype=dtype)
         return jnp.interp(
-            wave,
-            self.knots.array(),
-            self.radiance_phot_per_s_m2_nm_sr,
-            left=jnp.nan,
-            right=jnp.nan,
+            wave, self.knots.array(dtype), radiance, left=outside, right=outside
         )
 
     def spectral_interpolant(self):
@@ -279,7 +280,12 @@ class PrecomputedZodi(AbstractLocalZodi):
         knots = self.spectral_breaks_nm()
 
         def interpolant(values, wavelength_nm):
-            return jnp.interp(wavelength_nm, knots, values)
+            dtype = _working_dtype(wavelength_nm, values)
+            return jnp.interp(
+                jnp.asarray(wavelength_nm, dtype=dtype),
+                jnp.asarray(knots, dtype=dtype),
+                jnp.asarray(values, dtype=dtype),
+            )
 
         return interpolant
 

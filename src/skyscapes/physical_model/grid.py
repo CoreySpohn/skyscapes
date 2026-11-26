@@ -11,6 +11,7 @@ from hwoutils.leaves import as_bulk_leaf, as_float_leaf
 from jaxtyping import Array
 from optixstuff.spectral import Knots, as_knots
 
+from .._dtype import _working_dtype
 from .base import AbstractPhysicalModel
 
 
@@ -65,9 +66,6 @@ class GridPhysicalModel(AbstractPhysicalModel):
         Returns:
             Contrast, shape ``(K, T)``.
         """
-        wl_scalar = jnp.asarray(wavelength_nm)
-        phase_deg = jnp.rad2deg(phase_angle_rad) % 360.0
-
         # Promote all interp inputs to a common dtype. Loaded ExoVista
         # contrast cubes are float32; under ``with jax.enable_x64():``
         # the orbit propagator returns float64 phase angles, and
@@ -75,17 +73,18 @@ class GridPhysicalModel(AbstractPhysicalModel):
         # output types`` on the mismatch. Casting here keeps the load
         # representation cheap (float32) and pays the promotion only at
         # query time when needed.
-        knots = self.knots.array()
-        dtype = jnp.result_type(
-            wl_scalar,
-            phase_deg,
-            knots,
+        bounds = self.phase_bounds_deg
+        dtype = _working_dtype(
+            wavelength_nm,
+            phase_angle_rad,
             self.phase_angle_deg,
             self.contrast_grid,
+            bounds,
         )
-        wl_arr_scalar = wl_scalar.astype(dtype)
-        phase_deg_x = phase_deg.astype(dtype)
-        wavelengths_nm = knots.astype(dtype)
+        wl_arr_scalar = jnp.asarray(wavelength_nm, dtype=dtype)
+        phase_deg = jnp.rad2deg(jnp.asarray(phase_angle_rad, dtype=dtype))
+        phase_deg_x = phase_deg % jnp.asarray(360.0, dtype=phase_deg.dtype)
+        wavelengths_nm = self.knots.array(dtype)
         phase_angle_deg = self.phase_angle_deg.astype(dtype)
         contrast_grid = self.contrast_grid.astype(dtype)
 
@@ -111,7 +110,9 @@ class GridPhysicalModel(AbstractPhysicalModel):
                 extrap=True,
             )
 
-        return jax.vmap(per_planet)(contrast_grid, phase_deg_x, self.phase_bounds_deg)
+        return jax.vmap(per_planet)(
+            contrast_grid, phase_deg_x, None if bounds is None else bounds.astype(dtype)
+        )
 
     def __repr__(self) -> str:
         """One-line summary of grid shape (K, n_wl, n_phase) and wl range.

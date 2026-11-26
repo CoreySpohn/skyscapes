@@ -1,12 +1,16 @@
 """Scattered photon radiance on caller-owned sky grids."""
 
 from abc import abstractmethod
+from dataclasses import replace
 
 import equinox as eqx
+import jax
+import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array
 from optixstuff.grids import Image, Measure, PixelGrid
 
+from .._dtype import _working_dtype
 from .._flux_scale import check_flux_scale
 
 
@@ -19,6 +23,17 @@ def check_sky_grid(grid):
     """
     if grid.unit != "arcsec" or grid.orientation is None:
         raise ValueError("disk grid must be arcsec with a SkyOrientation")
+
+
+def _sky_coordinates(grid, dtype):
+    """Read the caller's sky grid at the radiance reader's working dtype."""
+    check_sky_grid(grid)
+    rows, columns = np.ogrid[: grid.shape[0], : grid.shape[1]]
+    x = jnp.asarray(columns - grid.center_x, dtype=dtype)
+    y = jnp.asarray(rows - grid.center_y, dtype=dtype)
+    # The host offsets are already centered. Let PixelGrid apply its basis.
+    centered = replace(grid, center_x=0.0, center_y=0.0)
+    return grid.orientation.detector_to_sky(*centered.pixel_to_unit(x, y))
 
 
 def radiance_image(data, grid):
@@ -121,8 +136,15 @@ class AbstractDisk(eqx.Module):
             Photon radiance [ph s^-1 m^-2 nm^-1 sr^-1] as an image of shape
             ``wavelength_nm.shape + grid.shape``.
         """
-        check_sky_grid(grid)
-        east, north = grid.orientation.detector_to_sky(*grid.coordinates())
+        dtype = _working_dtype(
+            wavelength_nm,
+            time_d,
+            dist_pc,
+            inclination_deg,
+            position_angle_deg,
+            *jax.tree.leaves((self, star)),
+        )
+        east, north = _sky_coordinates(grid, dtype)
         data = self.photon_radiance_at(
             wavelength_nm,
             time_d,

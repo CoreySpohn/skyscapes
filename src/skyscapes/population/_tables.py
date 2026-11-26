@@ -51,7 +51,7 @@ def mass_to_radius(mass_Mearth):
     """
     m = jnp.asarray(mass_Mearth)
     # Keep the inactive negative power away from zero (including padded mass).
-    giant = jnp.where(m > _M_BREAK_2, m, _M_BREAK_2)
+    giant = jnp.maximum(m, _M_BREAK_2)
     return jnp.where(
         m <= _M_BREAK_1,
         1.008 * m**0.279,

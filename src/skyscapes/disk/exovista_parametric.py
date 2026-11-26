@@ -47,6 +47,7 @@ References:
 
 from __future__ import annotations
 
+import math
 from typing import ClassVar
 
 import equinox as eqx
@@ -128,7 +129,7 @@ def exovista_density(
         squared distance to the star.
     """
     dr_AU = dror * r0_AU
-    sqrt_two_pi = jnp.sqrt(2.0 * jnp.pi)
+    sqrt_two_pi = math.sqrt(math.tau)
 
     # Vertical Gaussian with per-radius normalization so the column
     # (integrated over z) preserves the radial profile shape.
@@ -145,13 +146,13 @@ def exovista_density(
     inner_pr_drag = r < r0_AU - dr_AU
 
     ring_factor = jnp.exp(-0.5 * ((r - r0_AU) / dr_AU) ** 2)
-    halo_factor = jnp.exp(-0.5) * (r / (r0_AU + dr_AU)) ** -1.5
+    halo_factor = math.exp(-0.5) * (r / (r0_AU + dr_AU)) ** -1.5
 
     # inward-decay component. Guard the sqrt argument
     # against negative values (only relevant just outside r0-dr where
     # the boolean is False, but the formula is still evaluated).
     sqrt_arg = jnp.maximum(r / (r0_AU - dr_AU), 0.0)
-    pr_drag_factor = jnp.exp(-0.5) / (1.0 + 4.0 * eta * (1.0 - jnp.sqrt(sqrt_arg)))
+    pr_drag_factor = math.exp(-0.5) / (1.0 + 4.0 * eta * (1.0 - jnp.sqrt(sqrt_arg)))
 
     radial = jnp.where(
         outer_halo, halo_factor, jnp.where(inner_pr_drag, pr_drag_factor, ring_factor)
@@ -245,12 +246,13 @@ class ExovistaParametricDisk(AbstractParametricDisk):
         sky_offsets_arcsec=None,
     ):
         """Unit-density LOS integral times the spectral scattering coefficient."""
+        knots = self.wavelengths_nm.array(jnp.result_type(wavelength_nm, self.Ag_grid))
         Ag = interpax.interp1d(
             wavelength_nm,
-            self.wavelengths_nm.array(),
+            knots,
             self.Ag_grid,
             method="cubic",
-            extrap=False,
+            extrap=jnp.asarray(jnp.nan, dtype=knots.dtype),
         )
 
         def density_fn(r_AU: Array, z_AU: Array, valid: Array) -> Array:
