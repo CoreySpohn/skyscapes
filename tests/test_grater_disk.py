@@ -120,9 +120,8 @@ def test_supplementary_inclination_is_the_mirrored_physical_map(incl):
     the near half brighter, and the near half lies along ``+y`` (rows above the
     center row) below 90 degrees and along ``-y`` above it; so the pair is
     neither identical nor negated, and a sign error in either the path measure
-    or the geometry fails here. Tolerance basis: floating-point (the two
-    renders differ only by the rounding of ``cos(180 - incl)`` against
-    ``-cos(incl)``).
+    or the geometry fails here. Degree reduction gives identical trig
+    arguments, so the mirror is exact.
     """
     d = make_disk(g_HG=0.4)
     low = np.asarray(_render(d, position_angle_deg=90.0 - (0.0), inclination_deg=incl))
@@ -133,7 +132,7 @@ def test_supplementary_inclination_is_the_mirrored_physical_map(incl):
         assert np.all(np.isfinite(sb))
         assert np.all(sb >= 0.0), f"negative radiance, min {sb.min():.3g}"
         assert sb.sum() > 0.0
-    np.testing.assert_allclose(high, low[::-1], rtol=1e-9, atol=1e-12 * low.max())
+    np.testing.assert_array_equal(high, low[::-1])
     c = low.shape[0] // 2
     assert low[c + 1 :].sum() > low[:c].sum(), "near (+y) half not brighter"
     assert high[:c].sum() > high[c + 1 :].sum(), "near (-y) half not brighter"
@@ -145,7 +144,7 @@ def test_retrograde_orientation_is_the_same_midplane():
     Turning the line of nodes by 180 degrees and supplementing the inclination
     flips only the side of the disk the observer calls its normal; the dust
     distribution is symmetric about the midplane, so the image is unchanged,
-    pixel for pixel. Tolerance basis: floating-point.
+    pixel for pixel. The degree-reduced projections agree exactly.
     """
     d = make_disk(g_HG=0.4)
     ref = np.asarray(_render(d, position_angle_deg=90.0 - (30.0), inclination_deg=55.0))
@@ -153,7 +152,7 @@ def test_retrograde_orientation_is_the_same_midplane():
         _render(d, position_angle_deg=90.0 - (210.0), inclination_deg=125.0)
     )
     assert np.all(same >= 0.0)
-    np.testing.assert_allclose(same, ref, rtol=1e-9, atol=1e-12 * ref.max())
+    np.testing.assert_array_equal(same, ref)
 
 
 def test_jit_round_trip():

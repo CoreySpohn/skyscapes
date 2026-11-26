@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 from hwoutils.constants import Mearth2kg, Msun2kg
 from hwoutils.epoch import Epoch
+from hwoutils.testing import ulps
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -42,21 +43,19 @@ def _evaluate(model, time_d, wavelength_nm=500.0):
 
 
 @vv.case("planet-phase", "code-verification")
-@pytest.mark.float64_only(reason="float64 contrast table reference")
 def test_distinct_times_with_identical_phases_recover_table_knots():
-    """Equal phases retain distinct contrasts; tolerance is floating-point roundoff."""
+    """Equal phases retain distinct knots, within two roundings for table scaling."""
     result = _evaluate(_model(), jnp.array([0.0, 1.0, 4.0]))
     expected = np.array([[1.0, 3.0, 15.0], [4.0, 12.0, 60.0]]) * 1e-10
-    np.testing.assert_allclose(result, expected, rtol=1e-14, atol=0)
+    np.testing.assert_allclose(result, expected, rtol=float(ulps(2, 1.0)), atol=0)
 
 
 @vv.case("planet-phase", "code-verification")
-@pytest.mark.float64_only(reason="float64 contrast table reference")
 def test_interpolates_physical_time_and_wavelength():
-    """Uneven epochs have hand-computed bilinear midpoints, at roundoff tolerance."""
+    """Uneven epochs interpolate with two linear blends (eight roundings)."""
     result = _evaluate(_model(), jnp.array([0.5, 2.5]), 600.0)
     expected = np.array([[3.5, 11.0], [14.0, 44.0]]) * 1e-10
-    np.testing.assert_allclose(result, expected, rtol=1e-14, atol=0)
+    np.testing.assert_allclose(result, expected, rtol=float(ulps(8, 1.0)), atol=0)
 
 
 @vv.case("planet-phase", "code-verification")
@@ -87,16 +86,17 @@ def test_subday_offsets_remain_distinct():
 
 
 @vv.case("planet-phase", "code-verification")
-@pytest.mark.float64_only(reason="float64 contrast table reference")
 def test_single_epoch_is_constant_and_spectral_interpolation_remains_bounded():
-    """A snapshot has no invented evolution; spectral midpoints are exact algebra."""
+    """A snapshot is time-independent, with four roundings for one linear blend."""
     model = physical_model.TimeSeriesPhysicalModel(
         wavelengths_nm=[500.0, 700.0],
         times_d=[0.0],
         contrast_grid=[[[1e-10], [3e-10]]],
     )
     result = eqx.filter_jit(_evaluate)(model, jnp.array([-1545.0, 8455.0]), 600.0)
-    np.testing.assert_allclose(result, [[2e-10, 2e-10]], rtol=1e-14, atol=0)
+    np.testing.assert_allclose(
+        result, [[2e-10, 2e-10]], rtol=float(ulps(4, 1.0)), atol=0
+    )
     assert jnp.isnan(_evaluate(model, jnp.array([0.0]), 701.0)).all()
 
 
@@ -149,8 +149,8 @@ def test_contrast_without_time_raises_clear_error():
 def test_default_time_hook_preserves_existing_model_behavior(kind, request):
     """Fails if the flux hook rescales contrast or loses the planet/time axes.
 
-    Reflection is bitwise identical; thermal division allows 2e-15 relative
-    float64 roundoff. The legacy phase-only hook must stay exact too.
+    Thermal flux allows three roundings for stellar division, component
+    addition and stellar multiplication. Reflection is bitwise identical.
     """
     if kind == "lambertian":
         model = physical_model.LambertianPhysicalModel(Ag=jnp.array([0.3, 0.5]))
@@ -199,7 +199,7 @@ def test_default_time_hook_preserves_existing_model_behavior(kind, request):
     assert isinstance(model, physical_model.AbstractPhysicalModel)
     assert flux.shape == (count, 2)
     if kind in ("blackbody", "emission", "sum"):
-        np.testing.assert_allclose(flux, expected, rtol=2e-15, atol=0)
+        np.testing.assert_allclose(flux, expected, rtol=float(ulps(3, 1.0)), atol=0)
     else:
         np.testing.assert_array_equal(flux, expected)
     if kind in ("lambertian", "grid", "precomputed", "exojax"):
@@ -209,9 +209,8 @@ def test_default_time_hook_preserves_existing_model_behavior(kind, request):
 @vv.case("planet-phase", "code-verification")
 @settings(deadline=None, max_examples=30)
 @given(step=st.integers(min_value=0, max_value=1024))
-@pytest.mark.float64_only(reason="float64 contrast table reference")
 def test_linear_interpolation_preserves_nonnegative_contrast(step):
-    """Dyadic query coordinates isolate interpolation roundoff from input rounding."""
+    """Dyadic queries are exact. Two linear blends allow eight rounding operations."""
     fraction = step / 1024
     model = physical_model.TimeSeriesPhysicalModel(
         wavelengths_nm=[500.0, 700.0],
@@ -219,25 +218,28 @@ def test_linear_interpolation_preserves_nonnegative_contrast(step):
         contrast_grid=[[[0.0, 4e-10], [2e-10, 6e-10]]],
     )
     value = _evaluate(model, jnp.array([fraction]), 500.0 + 200.0 * fraction)
-    np.testing.assert_allclose(value, 6e-10 * fraction, rtol=1e-14, atol=0)
+    np.testing.assert_allclose(
+        value, 6e-10 * fraction, rtol=float(ulps(8, 1.0)), atol=0
+    )
     assert jnp.all(value >= 0.0)
 
 
 @vv.case("planet-phase", "code-verification")
-@pytest.mark.float64_only(reason="float64 contrast table reference")
 def test_time_derivative_matches_piecewise_linear_slope():
-    """Autodiff yields the table segment's known slope to roundoff tolerance."""
+    """The table slope allows four roundings for stored endpoints and differencing."""
     model = _model()
     derivative = jax.grad(lambda time: _evaluate(model, jnp.array([time]))[0, 0])(
-        jnp.float64(0.5)
+        jnp.asarray(0.5)
     )
-    np.testing.assert_allclose(derivative, 2e-10, rtol=1e-14, atol=0)
+    np.testing.assert_allclose(derivative, 2e-10, rtol=float(ulps(4, 1.0)), atol=0)
 
 
 @vv.case("planet-phase", "code-verification")
-@pytest.mark.float64_only(reason="float64 contrast table reference")
 def test_system_contrast_and_magnitude_forward_physical_time():
-    """Scene accessors recover tabulated ratios and magnitudes to roundoff."""
+    """Scene knots allow two roundings for table storage and photon normalization.
+
+    Magnitudes allow two additional operations for log10 and scaling.
+    """
     model = physical_model.TimeSeriesPhysicalModel(
         wavelengths_nm=[550.0],
         times_d=[0.0, 1.0],
@@ -264,11 +266,13 @@ def test_system_contrast_and_magnitude_forward_physical_time():
     np.testing.assert_allclose(
         system.contrasts(550.0, times),
         [[1e-10, 1e-8]],
-        rtol=1e-14,
+        rtol=float(ulps(2, 1.0)),
         atol=0,
     )
     _, magnitude = system.alpha_dMag(times, wavelength_nm=550.0)
-    np.testing.assert_allclose(magnitude, [[25.0, 20.0]], rtol=1e-14, atol=0)
+    np.testing.assert_allclose(
+        magnitude, [[25.0, 20.0]], rtol=float(ulps(4, 1.0)), atol=0
+    )
 
 
 @pytest.mark.parametrize(

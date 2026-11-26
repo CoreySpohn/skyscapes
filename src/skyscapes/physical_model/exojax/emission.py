@@ -60,6 +60,7 @@ from hwoutils.conversions import (
 )
 from hwoutils.leaves import HostGrid
 from hwoutils.planck import brightness_temperature, planck_photon_radiance
+from hwoutils.precision import require_float64
 from jaxtyping import Array
 from optixstuff.spectral import Knots
 
@@ -141,8 +142,9 @@ def build_exojax_emission_engines(
     with an ``ArtEmisPure`` engine and HITRAN line lists for every
     molecule (including O3 and SO2, whose reflected-light recipes use
     ultraviolet/visible cross-section tables that do not extend to the
-    infrared). Log-spaced layer boundaries end at ``surface_pressure_bar``;
-    the opacity and T-P profile are evaluated at geometric layer centers.
+    infrared). Line opacity requires float64. Log-spaced layer boundaries end at
+    ``surface_pressure_bar``. Opacity and temperature are evaluated at the
+    geometric layer centers.
 
     Args:
         molecules: Molecule names, keys of ``MOLECULE_RECIPES``.
@@ -169,6 +171,8 @@ def build_exojax_emission_engines(
         ``species_prebuilt`` (name to ``{molmass, opa, rayleigh_xs}``),
         and ``cia_prebuilt`` (tuple of tabulated continua).
     """
+    if molecules:
+        require_float64("ExoJAX PreMODIT line opacity")
     if len(set(cia_pairs)) != len(cia_pairs):
         raise ValueError("cia_pairs must not contain duplicates")
     # Fail before building line engines, which may otherwise fetch line lists.
@@ -492,7 +496,7 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         )
 
     def _cia_optical_depth(self, k: int) -> Array:
-        """CIA layer depth: k_CIA n_a n_b dz in ExoJAX's cgs convention.
+        """CIA layer depth: k_CIA n_a n_b dz, with lengths in nanometers.
 
         Hydrostatic dz = k_B T / (mean_mass m_u g) * Delta P / P.
         Identical partners use n_a squared, without an extra factor of two.
@@ -502,11 +506,11 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         temperature = self.layer_temperature(k)
         gravity = 10.0 ** self.log_gravity_cgs[k]
         k_cgs = const.k_B * const.J2erg
-        density = pressure * 1.0e6 / (k_cgs * temperature)
-        dz = (
-            k_cgs
+        density_per_nm3 = pressure * (1.0e6 * const.nm2cm**3 / k_cgs) / temperature
+        dz_nm = (
+            (k_cgs * const.cm2nm / m_u)
             * temperature
-            / (self.mean_molecular_weight * m_u * gravity)
+            / (self.mean_molecular_weight * gravity)
             * self.rt_engine.dParr
             / pressure
         )
@@ -520,8 +524,10 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         dtau = jnp.zeros((pressure.shape[0], self.n_nu))
         for continuum in self.cia:
             a, b = continuum.partners
-            column = vmrs[a] * vmrs[b] * density**2 * dz
-            dtau = dtau + continuum.coefficient_matrix(temperature) * column[:, None]
+            column = vmrs[a] * vmrs[b] * density_per_nm3**2 * dz_nm
+            dtau = (
+                dtau + continuum.coefficient_matrix_nm5(temperature) * column[:, None]
+            )
         return dtau
 
     def layer_temperature(self, k: int = 0) -> Array:

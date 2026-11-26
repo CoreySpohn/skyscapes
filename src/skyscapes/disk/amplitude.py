@@ -1,6 +1,5 @@
 """Profile-dependent calibration of scattered dust amplitudes."""
 
-import math
 from dataclasses import replace
 
 import equinox as eqx
@@ -8,7 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 from hwoutils.constants import JOHNSON_V_VEGA_ZERO_POINT_JY, arcsec2rad, pc2AU
 from hwoutils.conversions import jy_to_photons_per_nm_per_m2, mag_to_flux_jy
-from optixstuff.spectral import Band
+from optixstuff.spectral import Band, same_wavelength
 from zodi import DensityDust, SurfaceBrightnessDust
 
 from skyscapes.habitable_zone import eeid_AU
@@ -28,7 +27,7 @@ def default_calibration_band(passband):
         A top hat from 506 to 594 nm for Johnson V centred on 550.0 nm, else
         None: no other passband has a default band.
     """
-    if passband.name == "V" and passband.center_nm == 550.0:
+    if passband.name == "V" and same_wavelength(passband.center_nm, 550.0):
         return Band(
             passband.center_nm - _V_HALF_WIDTH_NM, passband.center_nm + _V_HALF_WIDTH_NM
         )
@@ -79,7 +78,7 @@ def zero_magnitude_photon_flux_density(passband, *, zero_point_jy=None, band=Non
     if zero_point_jy is None:
         if passband.magnitude_system == "ab":
             zero_point_jy = mag_to_flux_jy(0.0)
-        elif passband.name == "V" and passband.center_nm == 550.0:
+        elif passband.name == "V" and same_wavelength(passband.center_nm, 550.0):
             zero_point_jy = JOHNSON_V_VEGA_ZERO_POINT_JY
         else:
             raise ValueError("a non-V Vega calibration requires zero_point_jy")
@@ -115,9 +114,7 @@ def check_amplitude(amplitude, profile):
         if band is not None:
             if not isinstance(band, Band):
                 raise TypeError("calibration_band must be an optixstuff Band")
-            if not math.isclose(
-                band.center_nm, amplitude.passband.center_nm, rel_tol=0, abs_tol=1e-9
-            ):
+            if not same_wavelength(band.center_nm, amplitude.passband.center_nm):
                 raise ValueError(
                     f"calibration_band is centred on {band.center_nm} nm but the "
                     f"passband center is {amplitude.passband.center_nm} nm"

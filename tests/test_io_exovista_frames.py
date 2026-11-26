@@ -5,26 +5,28 @@ import numpy as np
 import pytest
 from astropy.io import fits
 from hwoutils.constants import J2000_JD, G, Mearth2kg, Msun2kg, d2s, yr2s
-from orbix.system import FrameOrbit, enclosed_mu
+from hwoutils.testing import ulps
 
 from skyscapes.io import from_exovista
 from skyscapes.io.exovista import _exovista_to_orbix
+from tests.conftest import two_body_reference
 
 
 def _relative_state(elements, planet_mass_Msun, elapsed_days):
     """Star-relative (3, T) position [AU] and velocity [AU/day] from elements."""
-    a, e, inc, node, peri, anomaly = (jnp.atleast_1d(x) for x in elements)
-    orbit = FrameOrbit.from_classical(
-        a,
-        e,
-        inc,
-        node,
-        peri,
-        anomaly,
-        mu_AU3_per_d2=enclosed_mu(1.0, jnp.atleast_1d(planet_mass_Msun)),
+    a, e, inc, node, peri, anomaly = elements
+    ref = two_body_reference(
+        elapsed_days,
+        a_AU=a,
+        e=e,
+        i_rad=inc,
+        W_rad=node,
+        w_rad=peri,
+        M0_rad=anomaly,
+        star_mass_kg=Msun2kg,
+        planet_mass_kg=planet_mass_Msun * Msun2kg,
     )
-    r, v = orbit.at(elapsed_days)
-    return np.asarray(r[0]).T, np.asarray(v[0]).T
+    return ref.position_AU[0], ref.velocity_AU_per_d[0]
 
 
 @pytest.fixture(params=[(38.0, 63.0, 41.0, 27.0), (127.0, 213.0, 302.0, 231.0)])
@@ -38,7 +40,7 @@ def known_orbit_file(tmp_path, request):
     a, e = 1.3, 0.23
     inc, node, peri, anomaly = np.deg2rad(request.param)
     elapsed_years = np.array([0.0, 0.125, 0.25, 0.5, 0.75], dtype=np.float32)
-    elapsed_days = jnp.asarray(elapsed_years.astype(np.float64)) * (yr2s / d2s)
+    elapsed_days = elapsed_years.astype(np.float64) * (yr2s / d2s)
     r, v = _relative_state((a, e, inc, node, peri, anomaly), 0.0, elapsed_days)
 
     wavelengths = np.array([0.5, 0.6, 0.7], dtype=np.float32)
@@ -85,7 +87,12 @@ def known_orbit_file(tmp_path, request):
 
 
 def test_exovista_sky_positions_round_trip(known_orbit_file):
-    """FITS west/north positions load as east/north at every recorded epoch."""
+    """FITS west/north positions load as east/north at every recorded epoch.
+
+    Allow five float32 roundings for storage and 32 working-precision
+    roundings at orbit scale for Cartesian conversion, propagation within
+    one period, frame rotation and projection.
+    """
     path, _ = known_orbit_file
     system = from_exovista(path, load_disk=False)
     with fits.open(path) as hdul:
@@ -93,12 +100,10 @@ def test_exovista_sky_positions_round_trip(known_orbit_file):
         star_rows = hdul[5].data.astype(np.float64)
     times = system.epoch.days(jd=J2000_JD + rows[:, 0] * (yr2s / d2s))
     relative = rows[:, 9:12] - star_rows[:, 9:12]
-    expected = np.stack([-relative[:, 0], relative[:, 1]]) / system.dist_pc
+    expected = np.stack([-relative[:, 0], relative[:, 1]]) / float(system.dist_pc)
     positions = system.positions(times)
-    # Use the exact Kepler solver to isolate float32 FITS storage error from
-    # grid interpolation error. Allow five float32 epsilons at the orbit scale.
     orbit_scale = float(system.dynamics.orbits.a_AU[0]) / system.dist_pc
-    tolerance = 5 * np.finfo(np.float32).eps * orbit_scale
+    tolerance = ulps(5, np.float32(orbit_scale)) + ulps(32, orbit_scale)
     np.testing.assert_allclose(positions[:, 0], expected, rtol=0, atol=tolerance)
 
 
@@ -115,7 +120,11 @@ def _stored_a_e(path):
 
 
 def test_exovista_recovers_known_elements(known_orbit_file):
-    """Recover the stored ellipse and the known sky orientation and anomaly."""
+    """Recover the stored ellipse and the known sky orientation and anomaly.
+
+    For a and e allow 16 roundings at their natural scales (a and unity)
+    for the norms, cross products, vis-viva inversion and basis projection.
+    """
     path, expected = known_orbit_file
     orbit = from_exovista(path, load_disk=False).dynamics.orbits.to_classical()
     actual = np.array(
@@ -128,7 +137,9 @@ def test_exovista_recovers_known_elements(known_orbit_file):
             orbit["M0_rad"][0],
         ]
     )
-    np.testing.assert_allclose(actual[:2], _stored_a_e(path), rtol=1e-7)
+    axis, ecc = _stored_a_e(path)
+    np.testing.assert_allclose(actual[0], axis, rtol=0, atol=float(ulps(16, axis)))
+    np.testing.assert_allclose(actual[1], ecc, rtol=0, atol=float(ulps(16, 1.0)))
     # Compare periodic angles modulo a full turn, including negative atan2 output.
     difference = np.angle(np.exp(1j * (actual[2:] - expected[2:])))
     np.testing.assert_allclose(difference, 0.0, atol=2e-6)
@@ -141,13 +152,15 @@ def test_exovista_recovers_known_elements_with_stellar_reflex(
     """Recover the stored ellipse and known angles in the presence of stellar reflex.
 
     Both layouts store float32 barycentric positions and velocities.
+    For a and e allow 16 roundings at their natural scales (a and unity)
+    for the norms, cross products, vis-viva inversion and basis projection.
     """
     path, expected = known_orbit_file
     mass_earth = 317.8
     mass_ratio = mass_earth * Mearth2kg / Msun2kg
     with fits.open(path, mode="update") as hdul:
         star, planet = hdul[5].data, hdul[6].data
-        elapsed_days = jnp.asarray(planet[:, 0].astype(np.float64)) * (yr2s / d2s)
+        elapsed_days = planet[:, 0].astype(np.float64) * (yr2s / d2s)
         r, v = _relative_state(expected, mass_ratio, elapsed_days)
         # ExoVista's generate_scene.py writes barycentric west/north/toward
         # states for both bodies, including the star's reflex motion.
@@ -177,7 +190,9 @@ def test_exovista_recovers_known_elements_with_stellar_reflex(
             orbit["M0_rad"][0],
         ]
     )
-    np.testing.assert_allclose(actual[:2], _stored_a_e(path), rtol=1e-7)
+    axis, ecc = _stored_a_e(path)
+    np.testing.assert_allclose(actual[0], axis, rtol=0, atol=float(ulps(16, axis)))
+    np.testing.assert_allclose(actual[1], ecc, rtol=0, atol=float(ulps(16, 1.0)))
     # Float32 state storage limits angle recovery; wrap atan2's signed angles.
     difference = np.angle(np.exp(1j * (actual[2:] - expected[2:])))
     np.testing.assert_allclose(difference, 0.0, rtol=0, atol=2e-6)

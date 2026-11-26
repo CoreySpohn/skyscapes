@@ -208,11 +208,16 @@ first principles given molecular mass mixing ratios (H2O, CO2, CH4,
 O2, O3, ...). The full constructor exposes a lot of knobs; the
 ergonomic entry point is `ExoJaxPhysicalModel.from_default_setup`:
 
-Requires locally configured HITRAN line lists for the opacity engines.
+Building HITRAN line-opacity engines requires float64 and locally configured
+line lists. A model using only tabulated cross sections supports either
+precision.
 
 ```python notest
 import jax.numpy as jnp
+from hwoutils.precision import enable_x64
 from skyscapes.physical_model import ExoJaxPhysicalModel
+
+enable_x64()
 
 model = ExoJaxPhysicalModel.from_default_setup(
     log_mmrs={"H2O": jnp.array([-4.0]), "CO2": jnp.array([-3.5])},

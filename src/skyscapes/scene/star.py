@@ -38,6 +38,7 @@ from jaxtyping import Array
 from optixstuff.spectral import Knots, digest_knots
 
 from .._flux_scale import check_flux_scale
+from .._sample_time import SampleOrigin
 from .spots import StarSpots
 
 # Digest names of the interpolations a Star offers; a linear interpolant is
@@ -312,8 +313,9 @@ class BlackbodyStar(AbstractStar):
 class Star(AbstractStar):
     """Tabulated stellar flux with optional imported spot records.
 
-    ``times_d`` stores days from the scene epoch, whose metadata belongs to
-    the owning scene. A single epoch represents a static spectrum. Spot
+    ``times_d`` stores days from the scene epoch on construction. Shared-epoch
+    imports keep knots relative to the first sample, at ``sample_origin.days``
+    on the scene clock. A single epoch represents a static spectrum. Spot
     records are retained for later surface modeling; they do not alter the
     tabulated flux or automatically add spatially resolved stellar emission.
     ``flux_scale`` is a dimensionless factor on the tabulated flux, default one;
@@ -333,6 +335,7 @@ class Star(AbstractStar):
             point star.
         luminosity_Lsun: Stellar luminosity [solar luminosities].
         spots: Imported spot history, or None.
+        sample_origin: First-sample offset of a shared-epoch import, or None.
     """
 
     knots: Knots = eqx.field(static=True)
@@ -340,6 +343,7 @@ class Star(AbstractStar):
     fixed_diameter_arcsec: Array = eqx.field(converter=as_float_leaf)
     luminosity_Lsun: Array = eqx.field(converter=as_float_leaf)
     spots: StarSpots | None
+    sample_origin: SampleOrigin | None
 
     _interpolation_method: str = eqx.field(static=True)
     _times_d: Array = eqx.field(converter=as_float_leaf)
@@ -387,6 +391,7 @@ class Star(AbstractStar):
         self.flux_scale = flux_scale
         self.fixed_diameter_arcsec = fixed_diameter_arcsec
         self.luminosity_Lsun = luminosity_Lsun
+        self.sample_origin = None
         self.spots = spots
         self.knots = (
             wavelengths_nm
@@ -444,6 +449,12 @@ class Star(AbstractStar):
         Interpolate photon density, broadcasting wavelength and time shapes.
         ``time_d`` is days from the scene epoch.
         """
+        if self.sample_origin is not None:
+            time_d = self.sample_origin.relative(time_d)
+        return self._interpolate(wavelength_nm, time_d)
+
+    def _interpolate(self, wavelength_nm, time_d):
+        """Read the photon table at times relative to its first-sample origin."""
         method = self._interpolation_method
         if self._times_d.size == 1:
             # A single-epoch source is a static spectrum, not a degenerate spline.
@@ -530,13 +541,13 @@ class Star(AbstractStar):
     def _node_flux_density(self, quadrature, resolution, time_d, *, dist_pc):
         """Unscaled node-effective values from the operator for this table."""
         rule = resolution.rule(quadrature, self)
+        if self.sample_origin is not None:
+            time_d = self.sample_origin.relative(time_d)
         time = jnp.atleast_1d(jnp.asarray(time_d))
         if rule.kind == "table":
             return rule.apply(self._table_at(time))
         points = quadrature.nodes_nm if rule.kind == "identity" else rule.fine_nm
-        return rule.apply(
-            self._photon_flux_density(points[..., None], time, dist_pc=dist_pc)
-        )
+        return rule.apply(self._interpolate(points[..., None], time))
 
     def spectral_breaks_nm(self) -> np.ndarray:
         """Return table breakpoints [nm] for consumer quadrature.

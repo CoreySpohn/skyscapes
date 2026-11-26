@@ -20,6 +20,7 @@ import pytest
 from exojax.database.multimol import database_path_hitran12
 from exojax.opacity import OpaPremodit
 from hwoutils import constants as const
+from hwoutils.testing import ulps
 from scipy.special import expn
 
 from skyscapes.physical_model import AbstractPhysicalModel, ExoJaxEmissionModel
@@ -77,6 +78,12 @@ def _blackbody_flux_cgs(nu_cm, temperature_K):
         * nu_cm**3
         / np.expm1(h * c * nu_cm / (k * temperature_K))
     )
+
+
+def _planck_rtol(nu_cm, temperature_K, extra_ops=0):
+    """Four exponent roundings amplified by x/(1-exp(-x)), plus 16 source operations."""
+    x = H_J_S * C_M_S * 100 * np.max(nu_cm) / (K_B_J_K * temperature_K)
+    return float(ulps(4 * int(np.ceil(x / -np.expm1(-x))) + 16 + extra_ops, 1.0))
 
 
 class _ConstantOpa:
@@ -145,11 +152,12 @@ def test_constants_parity_with_hwoutils():
 
 
 @vv.case("planet-thermal-emission", "code-verification")
-@pytest.mark.float64_only(reason="float64 temperature-profile reference")
 def test_polynomial_tp_evaluates_the_given_coefficients():
     """T(P) equals the hand-summed polynomial in log10 P.
 
-    Tolerance basis: floating-point.
+    Floating-point bound: one logarithm propagated into a fourth power,
+    four multiplications and four additions, at the sum of absolute term
+    magnitudes to account for cancellation. At 1 bar only storage rounds.
     """
     profile = PolynomialTPProfile(coefficients=jnp.asarray([EARTH_TWIN_COEFFS]))
     pressure = np.array([1.0e-4, 1.0e-2, 1.0, 10**EARTH_TWIN_LOG_P0])
@@ -159,12 +167,16 @@ def test_polynomial_tp_evaluates_the_given_coefficients():
             for p in pressure
         ]
     )
-    np.testing.assert_allclose(
-        profile.temperature(jnp.asarray(pressure)), expected, rtol=1e-12
+    scale = sum(
+        abs(a * np.log10(pressure) ** i) for i, a in enumerate(EARTH_TWIN_COEFFS)
     )
+    actual = np.asarray(profile.temperature(jnp.asarray(pressure)))
+    np.testing.assert_array_less(np.abs(actual - expected), np.asarray(ulps(12, scale)))
     # 1 bar has log10 P = 0, so only a_0 survives.
     np.testing.assert_allclose(
-        profile.temperature(jnp.asarray(1.0)), EARTH_TWIN_COEFFS[0], rtol=1e-12
+        profile.temperature(jnp.asarray(1.0)),
+        EARTH_TWIN_COEFFS[0],
+        rtol=float(ulps(1, 1.0)),
     )
 
 
@@ -220,13 +232,15 @@ def test_compute_tarr_matches_temperature(engines):
 
 @vv.case("planet-thermal-emission", "code-verification")
 @pytest.mark.parametrize("ground_K", [180.0, 300.0])
-@pytest.mark.float64_only(reason="float64 thermal emission reference")
 def test_zero_opacity_emits_the_ground_blackbody(engines, ground_K):
     """With no gas opacity the planet is a blackbody at the ground temperature.
 
     The atmosphere is set to 200 K so a solver that leaked atmospheric
     emission or ignored the ground would miss. Tolerance basis:
-    exact-algebra (the quadrature integrates 2 mu exactly).
+    exact-algebra (the quadrature integrates 2 mu exactly). Allow four
+    conditioned exponent operations and 16 Planck/source operations. The
+    inverse uses two logarithms of photon-scale quantities (up to 50 in
+    natural logarithm), a difference and a division.
     """
     model = _model(
         engines,
@@ -235,15 +249,24 @@ def test_zero_opacity_emits_the_ground_blackbody(engines, ground_K):
     )
     nu = np.asarray(model.nu_grid)
     np.testing.assert_allclose(
-        model.emergent_flux()[0], _blackbody_flux_cgs(nu, ground_K), rtol=1e-10
+        model.emergent_flux()[0],
+        _blackbody_flux_cgs(nu, ground_K),
+        rtol=_planck_rtol(nu, ground_K),
     )
-    np.testing.assert_allclose(model.brightness_temperature()[0], ground_K, rtol=1e-9)
+    np.testing.assert_allclose(
+        model.brightness_temperature()[0],
+        ground_K,
+        rtol=_planck_rtol(nu, ground_K, extra_ops=2 * 50 + 2),
+    )
 
 
 @vv.case("planet-thermal-emission", "code-verification")
-@pytest.mark.float64_only(reason="float64 thermal emission reference")
 def test_emissivity_scales_the_ground_emission(engines):
-    """A gray ground of emissivity e emits e times the blackbody flux."""
+    """A gray ground emits e times the Planck flux.
+
+    Allow four conditioned exponent operations, 16 for the Planck source
+    and angular quadrature, and one for multiplication by emissivity.
+    """
     model = _model(
         engines,
         (200.0,),
@@ -252,19 +275,22 @@ def test_emissivity_scales_the_ground_emission(engines):
     )
     nu = np.asarray(model.nu_grid)
     np.testing.assert_allclose(
-        model.emergent_flux()[0], 0.7 * _blackbody_flux_cgs(nu, 290.0), rtol=1e-10
+        model.emergent_flux()[0],
+        0.7 * _blackbody_flux_cgs(nu, 290.0),
+        rtol=_planck_rtol(nu, 290.0, extra_ops=1),
     )
 
 
 @vv.case("planet-thermal-emission", "code-verification")
 @pytest.mark.parametrize("xs", [0.0, 1.0e-30, 1.0e-24, 1.0e-20])
-@pytest.mark.float64_only(reason="float64 thermal emission reference")
 def test_isothermal_atmosphere_is_a_blackbody_at_any_opacity(engines, xs):
     """An isothermal column over a ground at the same temperature is Planck.
 
     Holds for every optical depth from transparent to thick, so it checks
     the layer weighting rather than any one limit. Tolerance basis:
-    exact-algebra (the layer shares sum to one).
+    exact-algebra (the layer shares sum to one). In addition to four
+    conditioned exponent operations and 16 source operations allow one
+    subtraction and multiplication per layer along the transfer sum.
     """
     temperature = 250.0
     model = _model(
@@ -275,14 +301,19 @@ def test_isothermal_atmosphere_is_a_blackbody_at_any_opacity(engines, xs):
     )
     nu = np.asarray(model.nu_grid)
     np.testing.assert_allclose(
-        model.emergent_flux()[0], _blackbody_flux_cgs(nu, temperature), rtol=1e-9
+        model.emergent_flux()[0],
+        _blackbody_flux_cgs(nu, temperature),
+        rtol=_planck_rtol(nu, temperature, extra_ops=2 * len(model.rt_engine.pressure)),
     )
 
 
 @vv.case("planet-thermal-emission", "code-verification")
-@pytest.mark.float64_only(reason="float64 thermal emission reference")
 def test_thick_atmosphere_hides_a_hotter_ground(engines):
-    """An optically thick isothermal column emits at its own temperature."""
+    """An optically thick isothermal column emits at its own temperature.
+
+    Only the top layer contributes: four conditioned exponent operations
+    and 16 Planck source and angular quadrature operations.
+    """
     model = _model(
         engines,
         (250.0,),
@@ -291,7 +322,9 @@ def test_thick_atmosphere_hides_a_hotter_ground(engines):
     )
     nu = np.asarray(model.nu_grid)
     np.testing.assert_allclose(
-        model.emergent_flux()[0], _blackbody_flux_cgs(nu, 250.0), rtol=1e-9
+        model.emergent_flux()[0],
+        _blackbody_flux_cgs(nu, 250.0),
+        rtol=_planck_rtol(nu, 250.0),
     )
 
 
@@ -353,14 +386,14 @@ def test_two_temperature_layers_keep_top_to_bottom_order(upper_K, lower_K):
 
 
 @vv.case("planet-thermal-emission", "code-verification")
-@pytest.mark.float64_only(reason="float64 hydrostatic optical-depth reference")
 def test_gray_species_column_opacity_has_independent_cgs_normalization():
     """Hydrostatic tau = sigma q P / (m_mol m_u g), with negligible top P.
 
     Reference: Pierrehumbert (2010), Principles of Planetary Climate,
     Ch. 4 (hydrostatic pressure-coordinate optical depth).
     Tolerance basis: 3e-8 allows ExoJAX's older atomic-mass constant;
-    the omitted 1e-12 bar top contributes only one part in 1e12.
+    the omitted 1e-12 bar top contributes only one part in 1e12. Eight
+    roundings cover layer column construction and one per pairwise sum level.
     """
     built = build_exojax_emission_engines(
         molecules=(), n_wavenumbers=N_NU, pressure_top_bar=1.0e-12
@@ -374,7 +407,11 @@ def test_gray_species_column_opacity_has_independent_cgs_normalization():
         model.rt_engine,
     ).dtau_total
     expected = 1.0e-24 * 0.01 * 1.0e6 / (44.0 * ATOMIC_MASS_G * 10**2.99)
-    np.testing.assert_allclose(np.sum(dtau, axis=0), expected, rtol=3e-8)
+    np.testing.assert_allclose(
+        np.sum(dtau, axis=0),
+        expected,
+        rtol=3e-8 + float(ulps(8 + int(np.ceil(np.log2(dtau.shape[0]))), 1.0)),
+    )
 
 
 @vv.case("planet-thermal-emission", "code-verification")
@@ -489,7 +526,12 @@ def test_jit_equals_eager_and_gradient_matches_finite_difference(engines):
 
 
 def test_from_engines_constructs_and_emits_inside_jit(engines):
-    """Default ground pressure remains static when model assembly is traced."""
+    """Default ground pressure remains static when model assembly is traced.
+
+    The fused/eager bound includes the coldest layer's conditioned Planck
+    exponent, 16 source operations, and a subtraction and product for each
+    layer's contribution to the emergent flux.
+    """
 
     def construct_and_emit(coefficients):
         return _model(engines, coefficients, species=_species(1.0e-24)).emergent_flux()
@@ -497,7 +539,12 @@ def test_from_engines_constructs_and_emits_inside_jit(engines):
     coefficients = jnp.array([280.0, 20.0])
     expected = construct_and_emit(coefficients)
     actual = jax.jit(construct_and_emit)(coefficients)
-    np.testing.assert_allclose(actual, expected, rtol=1e-12)
+    pressure = engines["rt_engine"].pressure
+    min_temperature = 280.0 + 20.0 * np.log10(pressure[0])
+    rtol = _planck_rtol(
+        engines["nu_grid"], min_temperature, extra_ops=2 * len(pressure)
+    )
+    np.testing.assert_allclose(actual, expected, rtol=rtol)
     assert np.all(np.isfinite(actual))
 
 

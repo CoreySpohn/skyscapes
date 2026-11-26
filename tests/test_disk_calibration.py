@@ -19,6 +19,7 @@ import numpy as np
 import pytest
 from hwoutils.constants import c, h, k_B, pc2m
 from hwoutils.conversions import jy_to_photons_per_nm_per_m2
+from hwoutils.numerics import eps
 from numpy.polynomial.legendre import leggauss
 from optixstuff.grids import PixelGrid, SkyOrientation
 from optixstuff.spectral import Band, Quadrature, Resolution
@@ -225,7 +226,6 @@ def test_band_rule_level_does_not_read_the_star():
 
 
 @vv.case("stellar-photometry", "code-verification")
-@pytest.mark.float64_only(reason="float64 photometry reference")
 def test_a_band_rule_disk_carries_the_node_effective_star():
     """Fails if the disk is read against a point sample of the star at the nodes.
 
@@ -233,10 +233,10 @@ def test_a_band_rule_disk_carries_the_node_effective_star():
     that raised, because the level read the star at one wavelength): the disk
     at every node equals the disk against the star divided by the star's point
     value and multiplied by its node-effective value, since the level does not
-    depend on the star. The check is 1e-12 relative, basis floating-point, on
-    all nodes at once and on node (0, 2) alone (a transposed index reads
-    another node). A disk at a node differs from its point sample by up to
-    8e-2 on this fixture, so a point read fails by far more than the tolerance.
+    depend on the star. The ratio allows 16 rounded operations for the
+    spectral interpolation, node weights and flux scaling on all nodes at once
+    and on node (0, 2) alone (a transposed index reads another node). A node differs
+    from its point sample by up to 8e-2 on this fixture.
     """
     star = _phoenix()
     scene = _scene_with(star, profile("grater", _dust("band")))
@@ -251,12 +251,12 @@ def test_a_band_rule_disk_carries_the_node_effective_star():
     point_star = star.photon_flux_density(nodes, jnp.zeros(()), dist_pc=DIST_PC)
     expected = point * (sources.unscaled_star[..., 0] / point_star)[..., None, None]
     # The first band only: the disk's scattering table ends at 650 nm.
-    np.testing.assert_allclose(every[0], expected[0], rtol=1e-12)
+    np.testing.assert_allclose(every[0], expected[0], rtol=16 * eps(every), atol=0)
     assert np.max(np.abs(every[0] / point[0] - 1)) > 1e-2
     one = scene.photon_radiance_at(
         nodes[0, 2], 0.0, east, north, star=sources.node_star(0, 2)
     )
-    np.testing.assert_allclose(one, every[0, 2], rtol=1e-12)
+    np.testing.assert_allclose(one, every[0, 2], rtol=16 * eps(every), atol=0)
 
 
 def test_calibration_without_the_band_quadrature_is_refused():
@@ -306,6 +306,13 @@ def test_calibration_band_declaration_is_checked():
         "grater", _dust("bolometric", passband=ab), calibration_band=Band(440.0, 520.0)
     )
     assert centred.calibration_bands() == (Band(440.0, 520.0),)
+    # A passband read in float32 still identifies its host-defined band.
+    host_center = 480.123456
+    rounded = Passband("g", float(np.float32(host_center)), "ab")
+    band = Band(host_center - 40.0, host_center + 40.0)
+    assert profile(
+        "grater", _dust("bolometric", passband=rounded), calibration_band=band
+    ).calibration_bands() == (band,)
     with pytest.raises(TypeError, match="Band"):
         profile("grater", _dust("bolometric"), calibration_band=(506.0, 594.0))
 

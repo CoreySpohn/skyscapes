@@ -14,6 +14,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from exojax.database.cia.io import read_cia
+from hwoutils.constants import cm2nm
+from hwoutils.leaves import as_float_leaf
 from jaxtyping import Array
 
 CIA_FILES = {
@@ -26,7 +28,7 @@ CIA_FILES = {
 
 
 class TabulatedCIA(eqx.Module):
-    """CIA coefficients [cm^5 molecule^-2] on the emission spectral grid.
+    """CIA coefficients [nm^5 molecule^-2] on the emission spectral grid.
 
     Bands carry independent temperature grids. Outside each spectral block
     the coefficient is zero; temperatures clamp to each band's endpoints.
@@ -36,29 +38,32 @@ class TabulatedCIA(eqx.Module):
             ``("N2", "N2")``.
         temperatures: One ascending temperature grid [K] per spectral band,
             each of shape ``(n_T,)``.
-        coefficients: One coefficient table [cm^5 molecule^-2] per band, each
+        coefficients_nm5: One coefficient table [nm^5 molecule^-2] per band, each
             of shape ``(n_T, n_nu)`` on the model wavenumber grid.
         n_nu: Number of points of the wavenumber grid.
     """
 
     partners: tuple[str, str] = eqx.field(static=True)
     temperatures: tuple[Array, ...]
-    coefficients: tuple[Array, ...]
+    coefficients_nm5: tuple[Array, ...]
     n_nu: int = eqx.field(static=True)
 
-    def coefficient_matrix(self, temperature_K: Array) -> Array:
+    def coefficient_matrix_nm5(self, temperature_K: Array) -> Array:
         """Interpolate layer temperatures, returning shape (n_layers, n_nu).
 
         Args:
             temperature_K: Layer temperatures [K], shape ``(n_layers,)``.
 
         Returns:
-            CIA coefficients [cm^5 molecule^-2], shape ``(n_layers, n_nu)``,
+            CIA coefficients [nm^5 molecule^-2], shape ``(n_layers, n_nu)``,
             summed over bands.
         """
-        result = jnp.zeros((temperature_K.shape[0], self.n_nu))
+        result = jnp.zeros(
+            (temperature_K.shape[0], self.n_nu),
+            dtype=jnp.result_type(temperature_K, jnp.float32),
+        )
         for temperatures, coefficients in zip(
-            self.temperatures, self.coefficients, strict=True
+            self.temperatures, self.coefficients_nm5, strict=True
         ):
             result = result + jax.vmap(
                 lambda column, ts=temperatures: jnp.interp(temperature_K, ts, column),
@@ -143,7 +148,7 @@ def load_cia(pair: str, directory: str | Path | None, nu_grid: Array) -> Tabulat
             the coefficients onto.
 
     Returns:
-        A :class:`TabulatedCIA` with coefficients [cm^5 molecule^-2] on
+        A :class:`TabulatedCIA` with coefficients [nm^5 molecule^-2] on
         ``nu_grid``.
     """
     path = cia_path(pair, directory)
@@ -177,11 +182,14 @@ def load_cia(pair: str, directory: str | Path | None, nu_grid: Array) -> Tabulat
         if not any(np.any(row) for row in rows.values()):
             continue
         ordered = sorted(rows)
-        temperatures.append(jnp.asarray(ordered))
-        coefficients.append(jnp.asarray(np.stack([rows[t] for t in ordered])))
+        temperatures.append(as_float_leaf(ordered))
+        # HITRAN uses cm^5; many molecular coefficients underflow in float32.
+        coefficients.append(
+            as_float_leaf(np.stack([rows[t] for t in ordered]) * cm2nm**5)
+        )
     return TabulatedCIA(
         partners=tuple(pair.split("-")),
         temperatures=tuple(temperatures),
-        coefficients=tuple(coefficients),
+        coefficients_nm5=tuple(coefficients),
         n_nu=len(nu_grid),
     )

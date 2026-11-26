@@ -36,11 +36,15 @@ from hwoutils.conversions import (
     mag_to_flux_jy,
 )
 from hwoutils.epoch import Epoch
+from hwoutils.leaves import canonical, is_traced
+from hwoutils.numerics import same
+from hwoutils.precision import float_dtype
 from optixstuff.grids import PixelGrid, SkyOrientation
 
+from .._sample_time import SampleOrigin, with_sample_origin
 from ..disk import ExovistaDisk
 from ..physical_model import GridPhysicalModel, TimeSeriesPhysicalModel
-from ..population import earth_like
+from ..population._draw import _earth_like
 from ..scene import AbstractLocalZodi, AYOZodi, Planet, Scene, Star, StarSpots
 
 # Area of the quiet-disk limb-darkening mask that the ExoVista v2.5 and v2.6
@@ -58,6 +62,9 @@ EXOVISTA_LD_MASK_AREA = 0.9109100
 _V_BAND_UM = 0.55
 _V_BAND_TOLERANCE_UM = 0.06
 _V_BAND_FACTOR = 3.0
+
+# Unresolved phase separation in the imported grid [deg].
+_PHASE_MERGE_DEG = 1e-6  # tol: physical, one microdegree of orbital phase
 
 
 def _finite_header_number(header, key):
@@ -167,10 +174,10 @@ def _angular_diameter_arcsec(header) -> float:
     return angular_diameter_arcsec(rstar * R_sun.to_value(u.m), dist)
 
 
-def _simulation_times_d(elapsed_years, epoch: Epoch) -> np.ndarray:
-    """Convert simulation years to days from the scene epoch on the host."""
-    elapsed_d = np.asarray(elapsed_years, dtype=np.float64) * (yr2s / d2s)
-    return elapsed_d + Epoch(J2000_JD, scale=epoch.scale).days_between(epoch)
+def _simulation_times_d(elapsed_years) -> np.ndarray:
+    """Difference the stored years before scaling to days from the first sample."""
+    years = np.asarray(elapsed_years, dtype=np.float64)
+    return (years - years[0]) * (yr2s / d2s)
 
 
 def _star_extension(hdul: fits.HDUList) -> int:
@@ -197,7 +204,7 @@ def _body_extensions(hdul: fits.HDUList, star_ext: int) -> list[int]:
 def _load_spots(hdul: fits.HDUList, star_ext: int, times_d) -> StarSpots | None:
     """Preserve the optional v2.5+ spot extension without inventing evolution.
 
-    ``times_d`` is days from the scene epoch.
+    ``times_d`` is days from the first stellar sample.
     """
     if star_ext == 4:
         return None
@@ -223,7 +230,7 @@ def _load_spots(hdul: fits.HDUList, star_ext: int, times_d) -> StarSpots | None:
     )
 
 
-def _load_star(hdul: fits.HDUList, epoch: Epoch, fits_ext: int = 4) -> Star:
+def _load_star(hdul: fits.HDUList, fits_ext: int = 4) -> Star:
     """Load the FITS star extension into a Star."""
     obj_data = hdul[fits_ext].data
     obj_header = hdul[fits_ext].header
@@ -235,7 +242,7 @@ def _load_star(hdul: fits.HDUList, epoch: Epoch, fits_ext: int = 4) -> Star:
 
     # File knots stay host float64: widened from the stored microns first.
     wavelengths_nm = np.asarray(wavelengths_um, dtype=np.float64) * um2nm
-    times_d = jnp.asarray(_simulation_times_d(obj_data[:, 0], epoch))
+    times_d = jnp.asarray(_simulation_times_d(obj_data[:, 0]))
     spectra = obj_data[:, 16:]
     if fits_ext == 5 and spectral_unit is None:
         spectra = _phoenix_surface_to_observer_jy(spectra, wavelengths_um, obj_header)
@@ -294,9 +301,8 @@ def _load_single_planet(
     wavelengths_nm: np.ndarray,
     *,
     first_year: float,
-    epoch: Epoch,
-) -> tuple[Planet, np.ndarray, np.ndarray, float]:
-    """Read a selected planet's appearance, barycentric state and solar mass.
+) -> tuple[Planet, np.ndarray, np.ndarray, float, np.ndarray]:
+    """Read the appearance, barycentric state, solar mass and host day offsets.
 
     The Jacobi chain contains the star and selected planets only. Each
     planet's position and velocity relative to the star reproduce the file
@@ -309,32 +315,36 @@ def _load_single_planet(
             f"Planet extension {fits_ext} and star have different first epochs"
         )
     position, velocity = _first_state(data[0])
+    times_d = _simulation_times_d(data[:, 0])
     model = TimeSeriesPhysicalModel(
         wavelengths_nm=wavelengths_nm,
-        times_d=_simulation_times_d(data[:, 0], epoch),
+        times_d=times_d,
         contrast_grid=data[:, 16:].T.astype(np.float32)[None, ...],
     )
     planet = Planet(Rp_Rearth=jnp.array([float(header["R"])]), physical_model=model)
-    return planet, position, velocity, float(header["M"]) * Mearth2kg / Msun2kg
+    return planet, position, velocity, float(header["M"]) * Mearth2kg / Msun2kg, times_d
 
 
 def _phase_model(model: TimeSeriesPhysicalModel, beta_rad) -> GridPhysicalModel:
     """Regrid stored contrasts at their ephemeris phase angles [rad]."""
     wavelengths_nm = model.wavelengths_nm.values
-    beta_deg = np.rad2deg(np.asarray(beta_rad))
+    beta_deg = np.rad2deg(np.asarray(beta_rad, dtype=np.float64))
     order = np.argsort(beta_deg)
     beta = beta_deg[order]
     spectra = np.asarray(model.contrast_grid[0])[:, order]
-    regular_grid = np.linspace(0.0, 180.0, 100)
+    host_grid = np.linspace(0.0, 180.0, 100)
+    regular_grid = host_grid.astype(model.times_d.dtype)
 
-    # Merge phases to a microdegree, far below the regrid resolution.
+    # Merge phases indistinguishable at the coarsest supported precision.
     starts = [0]
     for i in range(1, beta.size):
-        if beta[i] - beta[starts[-1]] > 1e-6:
+        if not same(beta[i], beta[starts[-1]], floor=_PHASE_MERGE_DEG):
             starts.append(i)
     counts = np.diff(np.r_[starts, beta.size])
     phases = np.add.reduceat(beta, starts) / counts
-    if np.ptp(phases) < regular_grid[1] - regular_grid[0]:
+    # A span of one interpolation interval is resolved in either lane.
+    one_interval = phases[0] + (host_grid[1] - host_grid[0])
+    if phases[-1] < one_interval and not same(phases[-1], one_interval):
         # Each stored epoch contributes equally to an unresolved spectrum.
         contrast_grid = np.broadcast_to(
             spectra.mean(axis=1, dtype=np.float64, keepdims=True).astype(spectra.dtype),
@@ -391,9 +401,8 @@ def _load_disk(hdul: fits.HDUList, fits_ext: int) -> ExovistaDisk:
     # The cube keeps its float32-rounded stored values but is carried in the
     # active float dtype, so wavelength interpolation never casts float64
     # values into a float32 buffer when x64 is enabled.
-    active = jnp.result_type(float)
     wavelengths_nm = np.asarray(wavelengths_um, dtype=np.float64) * um2nm
-    contrast_cube = jnp.asarray(obj_data[:-1].astype(np.float32), dtype=active)
+    contrast_cube = jnp.asarray(obj_data[:-1].astype(np.float32), dtype=float_dtype())
     pixel_scale_arcsec = header["PXSCLMAS"] * mas2arcsec
 
     return ExovistaDisk(
@@ -417,7 +426,7 @@ def _earth_like_planet_indices_from_hdul(hdul: fits.HDUList) -> list[int]:
     headers = [hdul[ext].header for ext in planet_extensions]
     a_AU = np.array([h.get("A", 1.0) for h in headers], dtype=float)
     radius_Rearth = np.array([h.get("R", 1.0) for h in headers], dtype=float)
-    mask = np.asarray(earth_like(a_AU, radius_Rearth, star_luminosity_Lsun))
+    mask = _earth_like(a_AU, radius_Rearth, star_luminosity_Lsun, xp=np)
     return [int(i) for i in np.flatnonzero(mask)]
 
 
@@ -463,9 +472,10 @@ def from_exovista(
     assigned J2000 origin. By default the first stellar timestamp sets the
     scene epoch, split into whole and fractional days. The file states no
     time scale; the epoch's label is used without a scale conversion.
-    Every stored time and orbit reference is converted in NumPy float64
-    to days from the scene epoch before transfer to JAX. Enable
-    ``jax_enable_x64`` before loading to preserve orbital-state precision.
+    The tables and orbital elements use days from the first sample. With
+    a shared scene epoch, pass host float64 day offsets to the scene reads:
+    the first-sample offset is subtracted before transfer to JAX. Positions and
+    velocities are referenced to the star before casting to the working precision.
 
     Args:
         fits_file: Path to ExoVista FITS file.
@@ -484,9 +494,9 @@ def from_exovista(
             angles come from the assembled scene at the stored epochs. A span
             narrower than one phase-grid interval gives the epoch-mean spectrum.
             Resolved curves hold their endpoint spectra outside the sampled span.
-        epoch: Scene epoch that stored and observation times are measured
-            from. ``None`` uses the first stellar timestamp. Pass a shared
-            epoch to place several scenes on one clock.
+        epoch: Scene epoch that observation times are measured from. ``None`` uses
+            the first stellar timestamp. Pass a shared epoch to place several
+            scenes on one clock.
         local_zodi: Local zodi model stored on the scene. The default is
             :class:`~skyscapes.scene.AYOZodi` (22 mag per square arcsecond); ``None``
             stores no zodi.
@@ -497,16 +507,11 @@ def from_exovista(
         ``DEC`` (degrees); a header without them gives an unplaced scene.
 
     Raises:
-        ValueError: JAX float64 is disabled, the FITS layout or spot records
+        ValueError: The FITS layout or spot records
             are invalid, the stellar header lacks a finite ``RSTAR >= 0`` or
             a finite positive ``DIST``, a planet selection or spectra mode is
             invalid, or a selected planet and the star have different first epochs.
     """
-    if not jax.config.read("jax_enable_x64"):
-        raise ValueError(
-            "ExoVista import requires jax_enable_x64 for orbital-state precision. "
-            'Set jax.config.update("jax_enable_x64", True) before loading.'
-        )
     disk_ext = 2
 
     with fits.open(fits_file, memmap=False) as hdul:
@@ -539,11 +544,17 @@ def from_exovista(
         first_row = hdul[star_ext].data[0]
         star_position, star_velocity = _first_state(first_row)
         first_year = float(first_row[0])
-        first_d = first_year * (yr2s / d2s)
-        whole_d = np.floor(first_d)
+        elapsed_d = first_year * (yr2s / d2s)
+        whole_d = np.floor(elapsed_d)
+        first_epoch = Epoch(
+            J2000_JD + whole_d,
+            elapsed_d - whole_d,
+            scale=epoch.scale if epoch is not None else "tdb",
+        )
         if epoch is None:
-            epoch = Epoch(J2000_JD + whole_d, first_d - whole_d)
-        star = _load_star(hdul, epoch, fits_ext=star_ext)
+            epoch = first_epoch
+        first_d = first_epoch.days_between(epoch)
+        star = _load_star(hdul, fits_ext=star_ext)
         star_mass_Msun = float(star_header["MASS"])
         dist_pc = float(star_header["DIST"])
         loaded = tuple(
@@ -552,40 +563,62 @@ def from_exovista(
                 planet_extensions[i],
                 wavelengths_nm,
                 first_year=first_year,
-                epoch=epoch,
             )
             for i in planet_indices
         )
         disk = _load_disk(hdul, disk_ext) if load_disk else None
 
-    scene = Scene.from_cartesian(
-        star=star,
-        planets=tuple(item[0] for item in loaded),
-        star_mass_Msun=star_mass_Msun,
-        planet_mass_Msun=np.asarray([item[3] for item in loaded]),
-        dist_pc=dist_pc,
-        epoch=epoch,
-        epoch_d=_simulation_times_d(first_year, epoch),
-        position_AU=np.stack([star_position, *(item[1] for item in loaded)]),
-        velocity_AU_per_d=np.stack([star_velocity, *(item[2] for item in loaded)]),
-        disk=disk,
-        midplane_inc_deg=midplane_inc_deg,
-        midplane_position_angle_deg=midplane_position_angle_deg,
-        local_zodi=local_zodi,
-        ra_deg=star_header.get("RA"),
-        dec_deg=star_header.get("DEC"),
-    )
-    if planet_spectra == "phase" and scene.planets:
-        # Solve once even when selected planets have different sampling times.
-        tables = [planet.physical_model for planet in scene.planets]
-        times = np.unique(np.concatenate([table.times_d for table in tables]))
-        eph = scene.ephemeris(times)
-        beta = eph.phase_angle_rad(eph.scene_planet_indices, 0)
+    dtype = float_dtype()
+    if any(is_traced(x) for x in jax.tree.leaves((star, local_zodi))):
+        raise ValueError("Load the ExoVista file outside JAX transformations.")
+    # Phase-table grouping must use the original FITS states and timestamps.
+    # Orbix owns the state conversion and solve; build on the CPU in float64.
+    with (
+        jax.default_device(jax.devices("cpu")[0]),
+        jax.enable_x64(),  # precision-ok: concrete FITS host build
+    ):
+        scene = Scene.from_cartesian(
+            star=star,
+            planets=tuple(item[0] for item in loaded),
+            star_mass_Msun=star_mass_Msun,
+            planet_mass_Msun=np.asarray([item[3] for item in loaded]),
+            dist_pc=dist_pc,
+            epoch=epoch,
+            epoch_d=0.0,
+            position_AU=np.stack([star_position, *(item[1] for item in loaded)]),
+            velocity_AU_per_d=np.stack([star_velocity, *(item[2] for item in loaded)]),
+            disk=disk,
+            midplane_inc_deg=midplane_inc_deg,
+            midplane_position_angle_deg=midplane_position_angle_deg,
+            local_zodi=local_zodi,
+            ra_deg=star_header.get("RA"),
+            dec_deg=star_header.get("DEC"),
+        )
+        phase_samples = []
+        if planet_spectra == "phase" and loaded:
+            table_times = [item[4] for item in loaded]
+            times = np.unique(np.concatenate(table_times))
+            eph = scene.ephemeris(times)
+            beta = np.asarray(eph.phase_angle_rad(eph.scene_planet_indices, 0))
+            phase_samples = [
+                row[np.searchsorted(times, samples)]
+                for row, samples in zip(beta, table_times, strict=True)
+            ]
+
+    # Move only fields constructed on the CPU to the caller's device and dtype.
+    def built_fields(s):
+        return s.dynamics, s.valid, s.midplane_inc_deg, s.midplane_position_angle_deg
+
+    host_fields = jax.tree.map(np.asarray, built_fields(scene))
+    scene = eqx.tree_at(built_fields, scene, canonical(host_fields, precision=dtype))
+    if phase_samples:
         models = tuple(
-            _phase_model(table, angles[np.searchsorted(times, table.times_d)])
-            for table, angles in zip(tables, beta, strict=True)
+            _phase_model(planet.physical_model, angles)
+            for planet, angles in zip(scene.planets, phase_samples, strict=True)
         )
         scene = eqx.tree_at(
             lambda s: tuple(p.physical_model for p in s.planets), scene, models
         )
+    if first_d != 0.0:
+        scene = with_sample_origin(scene, SampleOrigin(first_d))
     return scene

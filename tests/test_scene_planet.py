@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from hwoutils.constants import G, Mearth2kg, Msun2kg, Rearth2AU, pc2AU, rad2arcsec
+from hwoutils.numerics import roundoff
 from orbix.equations.orbit import mean_motion, period_n
 
 from skyscapes.physical_model import LambertianPhysicalModel, lambert_phase
@@ -112,14 +113,14 @@ def test_planet_contrast_wavelength_agnostic_for_lambertian():
     assert jnp.allclose(c_blue, c_red, rtol=1e-6)
 
 
-@pytest.mark.float64_only(reason="float64 orbital reference values")
 def test_planet_photon_flux_density_formula_phase_and_jax():
     """Fails on inverted phase, photon units, or dropped quadrature-node axes.
 
     Brown (2005) Eq. 4 gives Ag*(Rp/r)^2*(sin b+(pi-b)*cos b)/pi.
     At M=90 deg, i=60 deg the planet is on the far (superior) side with
-    phase 30 deg; M=0 is quadrature. 3e-13 relative bounds float64 orbit
-    rotation and photon algebra, with atol=0 for tiny planetary fluxes.
+    phase 30 deg; M=0 is quadrature. 32 relative roundings cover the orbit
+    rotation, Lambert phase, radius ratio and photon products, with atol=0 for tiny
+    planetary fluxes.
     """
     p = _circular_scene(jnp.pi / 3)
     times = jnp.array([0.0, _quarter_period_times(p)[0]])
@@ -143,17 +144,27 @@ def test_planet_photon_flux_density_formula_phase_and_jax():
     contrast = 0.3 * (6.3781e6 / 1.495978707e11) ** 2 * phase
     expected = np.broadcast_to(contrast[None, :, None, None] * 1e9, (1, 2, 2, 2))
     actual = evaluate(wave)
-    np.testing.assert_allclose(actual, expected, rtol=3e-13, atol=0)
+    tol = float(roundoff(1.0, n_ops=32, dtype=wave.dtype))
+    np.testing.assert_allclose(actual, expected, rtol=tol, atol=0)
     assert np.all(np.asarray(actual[:, 1]) > np.asarray(actual[:, 0]))
     np.testing.assert_allclose(
-        eqx.filter_jit(evaluate)(wave), actual, rtol=3e-13, atol=0
+        eqx.filter_jit(evaluate)(wave),
+        actual,
+        rtol=tol,
+        atol=0,
     )
     loop = jnp.stack([evaluate(w) for w in wave.ravel()])
     np.testing.assert_allclose(
-        jax.vmap(evaluate)(wave.ravel()), loop, rtol=3e-13, atol=0
+        jax.vmap(evaluate)(wave.ravel()),
+        loop,
+        rtol=tol,
+        atol=0,
     )
     np.testing.assert_allclose(
-        p.planet_flux_densities(550.0, times), expected[:, :, 0, 0], rtol=3e-13, atol=0
+        p.planet_flux_densities(550.0, times),
+        expected[:, :, 0, 0],
+        rtol=tol,
+        atol=0,
     )
 
 
@@ -199,17 +210,32 @@ def test_phase_angle_and_sky_position_at_known_anomalies():
     Green (1985), Spherical Astronomy, ch. 17, and Brandt et al. (2021),
     AJ 162, 186 give (north, east, away); the right-handed sky chart is (east, north,
     away). Brown (2005), ApJ 624, 1010, Eq. 4 uses zero at full phase.
+
+    Sixteen roundings cover period-to-phase conversion, quaternion rotation,
+    norm and atan2 at scales of one orbit radius, one cosine or 180 degrees.
     """
     p = _circular_scene(jnp.deg2rad(60.0))
     r, beta, dist = _geometry(p, _quarter_period_times(p))
-    np.testing.assert_allclose(jnp.rad2deg(beta[0]), [30.0, 150.0], atol=1e-6)
+    np.testing.assert_allclose(
+        jnp.rad2deg(beta[0]),
+        [30.0, 150.0],
+        rtol=0,
+        atol=float(roundoff(180.0, n_ops=16, dtype=beta.dtype)),
+    )
+    atol = float(roundoff(1.0, n_ops=16, dtype=r.dtype))
     np.testing.assert_allclose(
         r[0],
         [[0.5, -0.5], [0.0, 0.0], [np.sqrt(3) / 2, -np.sqrt(3) / 2]],
-        atol=1e-6,
+        rtol=0,
+        atol=atol,
     )
-    np.testing.assert_allclose(dist, 1.0, atol=1e-8)
-    np.testing.assert_allclose(jnp.cos(beta), r[:, 2, :] / dist, atol=1e-8)
+    np.testing.assert_allclose(dist, 1.0, rtol=0, atol=atol)
+    np.testing.assert_allclose(
+        jnp.cos(beta),
+        r[:, 2, :] / dist,
+        rtol=0,
+        atol=atol,
+    )
 
 
 @pytest.mark.parametrize("observable", ["contrast", "dMag", "flux"])
@@ -246,17 +272,27 @@ def test_position_arcsec_is_east_then_north(node_deg, mean_anomaly_deg, east_nor
 
     Green (1985), Spherical Astronomy, ch. 17; Brandt et al. (2021),
     AJ 162, 186: Omega is measured north through east.
+
+    Sixteen roundings at the angular orbital radius cover mean motion,
+    quarter-turn evaluation, quaternion rotation and angular scaling.
     """
     p = _circular_scene(jnp.deg2rad(60.0), W_rad=jnp.deg2rad(node_deg))
     times = _quarter_period_times(p)[:1] * (mean_anomaly_deg / 90.0)
     expected = np.asarray(east_north_AU) / float(p.dist_pc)
+    atol = float(roundoff(1.0 / p.dist_pc, n_ops=16))
     np.testing.assert_allclose(
         p.positions(times)[:, 0, 0],
         expected,
-        atol=1e-8,
+        rtol=0,
+        atol=atol,
     )
     system = Scene(p.star, p.planets, p.dynamics)
-    np.testing.assert_allclose(system.positions(times)[:, 0, 0], expected, atol=1e-8)
+    np.testing.assert_allclose(
+        system.positions(times)[:, 0, 0],
+        expected,
+        rtol=0,
+        atol=atol,
+    )
 
 
 def test_edge_on_superior_conjunction_is_brightest():
@@ -265,12 +301,20 @@ def test_edge_on_superior_conjunction_is_brightest():
     Green (1985), Spherical Astronomy, ch. 17; Brandt et al. (2021),
     AJ 162, 186: positive raw away-z at M = 90 deg for Omega = omega = 0.
     Brown (2005), ApJ 624, 1010, Eq. 4: full phase is brightest.
+
+    Sixteen roundings at half a turn cover mean motion, trigonometric
+    evaluation, quaternion rotation, atan2 and conversion to degrees.
     """
     p = _circular_scene(jnp.deg2rad(89.0))
     times = _quarter_period_times(p)
     r, beta, _ = _geometry(p, times)
     _, dMag = p.alpha_dMag(times)
-    np.testing.assert_allclose(jnp.rad2deg(beta[0]), [1.0, 179.0], atol=1e-6)
+    np.testing.assert_allclose(
+        jnp.rad2deg(beta[0]),
+        [1.0, 179.0],
+        rtol=0,
+        atol=float(roundoff(180.0, n_ops=16, dtype=beta.dtype)),
+    )
     # Positive z is behind the star in the away chart.
     assert r[0, 2, 0] > 0 > r[0, 2, 1]
     assert dMag[0, 0] < 23.5
@@ -320,13 +364,13 @@ def test_scene_ephemeris_passes_orbix_through_exactly(precision):
 
 
 @pytest.mark.parametrize("mass", [1.0, float("nan"), -1.0, float("inf"), 0.0])
-@pytest.mark.float64_only(reason="float64 orbital reference values")
 def test_scene_mass_and_observables(mass):
     """Fails if mass sanitization changes existing positions or contrasts.
 
     Truth is the independent NumPy two-body reference with Newton iteration.
-    Mass sanitization remains exact; positions and contrast allow 3e-13
-    relative float64 basis/epoch roundoff (3e-13 arcsec absolute for position).
+    Sanitization zeros are exact. Two roundings cover the mass unit conversion.
+    Thirty-two roundings at the orbital radius cover Kepler propagation,
+    rotation and the angular conversion, with relative-only Lambert photometry.
     The system no longer includes grid interpolation error.
     """
     p = _single_scene(mass=mass)
@@ -335,13 +379,15 @@ def test_scene_mass_and_observables(mass):
     old_mass = (p.star_mass_Msun * Msun2kg) + jnp.where(
         jnp.isfinite(mp) & (mp > 0), mp, 0.0
     )
-    np.testing.assert_array_equal(
+    expected_mass = Mearth2kg / Msun2kg if mass == 1 else 0.0
+    rtol = float(roundoff(1.0, n_ops=2, dtype=p.planet_mass_Msun.dtype))
+    np.testing.assert_allclose(
         p.star_mass_Msun + p.planet_mass_Msun,
-        [1.989e30 / Msun2kg + (Mearth2kg / Msun2kg if mass == 1 else 0.0)],
+        [1.989e30 / Msun2kg + expected_mass],
+        rtol=rtol,
+        atol=0,
     )
-    np.testing.assert_array_equal(
-        p.planet_mass_Msun, [Mearth2kg / Msun2kg if mass == 1 else 0]
-    )
+    np.testing.assert_allclose(p.planet_mass_Msun, [expected_mass], rtol=rtol, atol=0)
     reference = two_body_reference(
         times, **_reference_elements(p), star_mass_kg=old_mass
     )
@@ -363,10 +409,16 @@ def test_scene_mass_and_observables(mass):
     )
     system = Scene(p.star, p.planets, p.dynamics)
     np.testing.assert_allclose(
-        system.positions(times), old_position, rtol=3e-13, atol=3e-13
+        system.positions(times),
+        old_position,
+        rtol=0,
+        atol=float(roundoff(1.0 / p.dist_pc, n_ops=32)),
     )
     np.testing.assert_allclose(
-        system.contrasts(jnp.asarray(600.0), times), old_contrast, rtol=3e-13, atol=0
+        system.contrasts(jnp.asarray(600.0), times),
+        old_contrast,
+        rtol=float(roundoff(1.0, n_ops=32, dtype=times.dtype)),
+        atol=0,
     )
 
 

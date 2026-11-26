@@ -10,6 +10,7 @@ from hwoutils.epoch import Epoch
 from hwoutils.leaves import as_float_leaf, canonical
 from optixstuff.spectral import same_wavelength
 
+from .._sample_time import SampledSystem, SampleOrigin, with_sample_origin
 from .planet import Planet
 
 # One circular, face-on 1 AU orbit, with zero phase and a fixed solar rate.
@@ -26,6 +27,7 @@ _SHARED_GRIDS = frozenset(
         "wavelengths_nm",
         "phase_angle_deg",
         "times_d",
+        "sample_origin",
         "spectrum",
         "rayleigh_xs",
         "xsmatrix_per_species",
@@ -196,6 +198,13 @@ def from_scenes(cls, scenes, *, capacity=None, batch_shape=None, device=None):
     model_classes = {type(p.physical_model) for s in scenes for p in s.planets}
     if len(star_classes) != 1 or len(model_classes) != 1:
         raise ValueError("Scenes must share one star class and physical-model class")
+    if any(isinstance(s.dynamics, SampledSystem) for s in scenes):
+        scenes = [
+            s
+            if isinstance(s.dynamics, SampledSystem)
+            else with_sample_origin(s, SampleOrigin(0.0))
+            for s in scenes
+        ]
     _check_star_knots(scenes)
     model_template = max(
         (p for s in scenes for p in s.planets), key=lambda p: p.n_planets
@@ -480,6 +489,11 @@ def from_table(cls, table, *, template, device=None):
         template.planets[min(i, len(template.planets) - 1)] for i in range(n_groups)
     )
     skeleton = eqx.tree_at(lambda s: s.planets, template, groups)
+    has_origin = "dynamics.sample_origin.parts" in table
+    if has_origin != isinstance(skeleton.dynamics, SampledSystem):
+        skeleton = with_sample_origin(
+            skeleton, SampleOrigin(0.0) if has_origin else None
+        )
     skeleton = eqx.tree_at(
         lambda s: s._source_layout,
         skeleton,

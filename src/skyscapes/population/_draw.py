@@ -163,8 +163,13 @@ def earth_like(a_AU, radius_Rearth, luminosity_Lsun):
     Returns:
         Boolean flag, true for an exoEarth candidate, broadcast over the inputs.
     """
-    a_scaled = a_AU / jnp.sqrt(luminosity_Lsun)
-    lower_r = 0.8 / jnp.sqrt(a_scaled)
+    return _earth_like(a_AU, radius_Rearth, luminosity_Lsun, xp=jnp)
+
+
+def _earth_like(a_AU, radius_Rearth, luminosity_Lsun, *, xp):
+    """Evaluate the candidate box on host FITS values or traced population arrays."""
+    a_scaled = a_AU / xp.sqrt(luminosity_Lsun)
+    lower_r = 0.8 / xp.sqrt(a_scaled)
     return (
         (a_scaled >= HZ_INNER_EEID)
         & (a_scaled < HZ_OUTER_EEID)

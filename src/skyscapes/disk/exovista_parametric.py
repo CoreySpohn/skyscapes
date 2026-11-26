@@ -141,7 +141,6 @@ def exovista_density(
     # Piecewise radial profile. The ring owns its two edges, where it equals
     # the neighboring branch; a strict comparison would leave r = r0 +- dr in
     # no branch and return the fallback value of one there.
-    in_ring = jnp.abs(r - r0_AU) <= dr_AU
     outer_halo = r > r0_AU + dr_AU
     inner_pr_drag = r < r0_AU - dr_AU
 
@@ -155,13 +154,7 @@ def exovista_density(
     pr_drag_factor = jnp.exp(-0.5) / (1.0 + 4.0 * eta * (1.0 - jnp.sqrt(sqrt_arg)))
 
     radial = jnp.where(
-        in_ring,
-        ring_factor,
-        jnp.where(
-            outer_halo,
-            halo_factor,
-            jnp.where(inner_pr_drag, pr_drag_factor, 1.0),
-        ),
+        outer_halo, halo_factor, jnp.where(inner_pr_drag, pr_drag_factor, ring_factor)
     )
     n = n * radial
 
@@ -242,7 +235,14 @@ class ExovistaParametricDisk(AbstractParametricDisk):
             raise ValueError("n_slices_los must be positive.")
 
     def _scattered_integral(
-        self, wavelength_nm, east_AU, north_AU, inclination_deg, position_angle_deg
+        self,
+        wavelength_nm,
+        east_AU,
+        north_AU,
+        inclination_deg,
+        position_angle_deg,
+        *,
+        sky_offsets_arcsec=None,
     ):
         """Unit-density LOS integral times the spectral scattering coefficient."""
         Ag = interpax.interp1d(
@@ -281,8 +281,9 @@ class ExovistaParametricDisk(AbstractParametricDisk):
                 self.w2,
             )
 
-        def scale_height_fn(r_AU: Array) -> Array:
-            return jnp.sqrt(2.0) * self.hor * r_AU
+        def scale_height_fn(r_AU, hor):
+            slope = 2.0**0.5 * hor
+            return slope * r_AU, slope
 
         integral = los_integrate_scattered(
             density_fn,
@@ -295,6 +296,8 @@ class ExovistaParametricDisk(AbstractParametricDisk):
             north_AU=north_AU,
             n_slices_los=self.n_slices_los,
             scale_height_fn=scale_height_fn,
+            height_args=(self.hor,),
+            sky_offsets_arcsec=sky_offsets_arcsec,
             vertical_exponent=2.0,
         )
         return Ag * integral

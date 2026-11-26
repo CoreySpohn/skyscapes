@@ -33,15 +33,18 @@ $T(P) = \sum_i a_i (\log_{10} P[\mathrm{bar}])^i$ of
 {class}`~skyscapes.physical_model.exojax.PolynomialTPProfile`; the
 coefficients below describe a cloud-free Earth twin (Alei et al. 2024).
 
-Requires locally configured HITRAN line lists for the opacity engines.
+Building HITRAN line-opacity engines requires float64 and locally configured
+line lists. Continuum-only models (`molecules=()`) support either precision.
+`from_engines` accepts prebuilt opacity implementations and uses their
+`xsmatrix` methods directly. External engines retain their own precision
+requirements.
 
 ```python notest
-import jax
 import jax.numpy as jnp
-
+from hwoutils.precision import enable_x64
 from skyscapes.physical_model import ExoJaxEmissionModel
 
-jax.config.update("jax_enable_x64", True)  # ExoJAX requires 64-bit floats
+enable_x64()  # HITRAN line opacity requires float64
 
 model = ExoJaxEmissionModel.from_default_setup(
     log_mmrs={
@@ -89,9 +92,11 @@ mass-mixing-ratio profile, converted as `VMR = MMR * mean_molecular_weight /
 molmass`; a `cia_vmr` entry cannot override that profile. Missing partners
 raise an error. The mean molecular weight [u] is constant across layers and
 planets and defaults to dry air; set it for a different bulk composition.
-CIA uses `k_CIA * n_a * n_b * dz`, with coefficients in cm^5 molecule^-2,
-number densities in cm^-3, and hydrostatic layer thickness in cm. There is
-no extra symmetry factor for identical partners.
+HITRAN supplies coefficients in cm^5 molecule^-2. The loader converts them
+on the host to nm^5 molecule^-2 before building the table. In either precision,
+`coefficient_matrix_nm5` returns these nanometer-based coefficients. CIA uses
+`k_CIA * n_a * n_b * dz`, with densities in molecules per nm^3 and
+hydrostatic layer thickness in nm. Identical partners contribute once.
 
 Place the desired [HITRAN CIA](https://hitran.org/cia/) files in
 `~/.cache/skyscapes/cia/`, or supply `cia_dir`:

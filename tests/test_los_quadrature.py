@@ -11,10 +11,13 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from hwoutils.numerics import eps
+from hwoutils.testing import ulps
 from zodi import DensityDust
 
 from skyscapes.disk import ExovistaParametricDisk, GraterDisk
 from skyscapes.disk.grater import two_power_law_density
+from skyscapes.scene import FlatStar
 from tests.conftest import radiance, sky_grid
 
 _GRID = sky_grid(16, 16, 0.015)
@@ -163,7 +166,10 @@ def test_fixed_vertical_profile_matches_the_general_density():
     ``fixed_vertical_profile`` promises the same numbers to rounding for
     ``gamma = 2`` and ``beta = 1``: checked on the density over three decades
     in radius and on an image. A disk that sets the
-    flag with another exponent must be rejected at construction.
+    flag with another exponent must be rejected at construction. Allow 32
+    relative epsilons for the log/power paths (log-radius error amplified
+    by the radial exponent, at most 9). The 24-node image adds five sum
+    stages and window/weight arithmetic, for 48 epsilons of peak density.
     """
     rng = np.random.default_rng(0)
     r = jnp.asarray(10.0 ** rng.uniform(-1.0, 2.0, 200))
@@ -172,13 +178,13 @@ def test_fixed_vertical_profile_matches_the_general_density():
     np.testing.assert_allclose(
         two_power_law_density(*args, fixed_vertical_profile=True),
         two_power_law_density(*args),
-        rtol=1e-12,
+        rtol=32 * eps(r),
         atol=0.0,
     )
     general = _render(_ring(24), 45.0)
     fixed = _ring(24, fixed_vertical_profile=True)
     np.testing.assert_allclose(
-        _render(fixed, 45.0), general, rtol=1e-10, atol=1e-13 * general.max()
+        _render(fixed, 45.0), general, rtol=0, atol=float(ulps(48, general.max()))
     )
     with pytest.raises(ValueError, match="gamma = 2 and beta = 1"):
         _ring(24, gamma=jnp.array(1.5), fixed_vertical_profile=True)
@@ -237,3 +243,86 @@ def test_exovista_rules_converge_to_the_reference():
         error = _peak_error(image, reference[incl])
         print(f"exovista {n_slices_los} at {incl}: {error:.2e}")
         assert error < tolerance
+
+
+def test_face_on_annulus_includes_its_rounded_edges():
+    """The hard annulus includes sub-float32 offsets at either edge in both lanes.
+
+    At the same projected radius every face-on node has the same support.
+    A quarter spacing rounds onto the edge in float32. The ray four float32
+    spacings beyond one AU has a resolved exterior radius in both lanes, even
+    though squaring it in float32 drops its second-order displacement.
+    """
+    disk = _ring(8, cutoff_width_AU=jnp.array(0.0), rmin_AU=0.5, rmax_AU=1.0)
+    spacing = np.spacing(np.float32(1)).item()
+    host_radius = np.array(
+        [0.49, 0.5 - spacing / 16, 0.75, 1.0 + spacing / 4, 1.0 + 2**-21, 1.01]
+    )
+
+    def render(r, disk=disk, distance=1.0):
+        return disk.photon_radiance_at(
+            500.0,
+            0.0,
+            r,
+            0.0,
+            star=FlatStar(1.0),
+            dist_pc=distance,
+            inclination_deg=0.0,
+            position_angle_deg=90.0,
+        )
+
+    radius = jnp.asarray(host_radius)
+    # A device-owned edge or distance puts even host offsets on the common grid.
+    device_edge = eqx.tree_at(lambda d: d.rmax_AU, disk, jnp.asarray(1.0))
+    for image in (
+        render(radius),
+        jax.jit(render)(radius),
+        render(host_radius, disk=device_edge),
+        render(host_radius, distance=jnp.asarray(1.0)),
+    ):
+        np.testing.assert_array_equal(
+            image > 0, [False, True, True, True, False, False]
+        )
+    # Host coordinates use the same float32 rule, not a finer one.
+    np.testing.assert_array_equal(
+        render(host_radius) > 0, [False, True, True, True, False, False]
+    )
+
+
+def test_annulus_edge_band_is_the_same_on_host_and_jit_reads():
+    """Host, device and compiled reads of one edge point agree in both lanes.
+
+    Squared radii compare on a float32 grid with a band of four float32
+    epsilons at each edge. A radius j epsilons off an edge is 2j epsilons off
+    in its square, so j = 0 and 1 are inside the band and j = 3 and 4 outside;
+    j = 2 sits on the band and is not probed. Every radius is exactly
+    representable in float32.
+    """
+    eps = 2.0**-23
+    disk = _ring(8, cutoff_width_AU=jnp.array(0.0), rmin_AU=0.5, rmax_AU=1.0)
+    host_radius = np.array(
+        [
+            *(0.5 * (1 - j * eps) for j in (4, 3, 1, 0)),
+            *(1 + j * eps for j in (0, 1, 3, 4)),
+        ]
+    )
+
+    def render(r):
+        return disk.photon_radiance_at(
+            500.0,
+            0.0,
+            r,
+            0.0,
+            star=FlatStar(1.0),
+            dist_pc=1.0,
+            inclination_deg=0.0,
+            position_angle_deg=90.0,
+        )
+
+    expected = [False, False, True, True, True, True, False, False]
+    for image in (
+        render(host_radius),
+        render(jnp.asarray(host_radius)),
+        jax.jit(render)(jnp.asarray(host_radius)),
+    ):
+        np.testing.assert_array_equal(image > 0, expected)

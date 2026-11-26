@@ -28,6 +28,7 @@ from exojax.database.hitran.api import MdbHitran
 from exojax.database.multimol import database_path_hitran12
 from exojax.opacity import OpaPremodit
 from exojax.opacity.opacont import OpaRayleigh
+from hwoutils.precision import require_float64
 from jaxtyping import Array
 
 from ..psg_xs import PsgCrossSectionOpacity
@@ -222,6 +223,9 @@ def build_species_prebuilt(
         Tuple ``(molmass, opa, rayleigh_xs)``: molar mass [g/mol], the
         opacity engine (``None`` when HITRAN has no lines in the range), and
         the Rayleigh cross-section [cm^2/molecule] on ``nu_grid``.
+
+    Raises:
+        PrecisionError: HITRAN line opacity needs float64 on its wavenumber grid.
     """
     if name not in MOLECULE_RECIPES:
         raise KeyError(
@@ -252,6 +256,7 @@ def build_species_prebuilt(
         )
         molmass = recipe.psg_xs_molmass
     else:
+        require_float64("ExoJAX PreMODIT line opacity", jnp.asarray(nu_grid))
         try:
             mdb = MdbHitran(
                 str(Path(databases_dir) / database_path_hitran12(name)),

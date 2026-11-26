@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import numpy as np
 import priorities
 import pytest
+from hwoutils.numerics import roundoff
 
 from skyscapes.population import (
     PopulationConfig,
@@ -143,6 +144,9 @@ def test_sky_elements_match_orbit_geometry(world):
     A massless 1 AU planet around a solar-mass star has a one-year period; a coplanar
     planet's sky inclination has the cosine of the midplane inclination; an input
     eccentricity is returned. Fails if a unit or rotation in the chain is wrong.
+
+    Thirty-two unit-scale roundings cover the perifocal rotation, angular
+    momentum and eccentricity vectors, their norms and direction cosine.
     """
     present = world.present
     base = eqx.tree_at(
@@ -158,11 +162,20 @@ def test_sky_elements_match_orbit_geometry(world):
     sky = sky_elements(base, jnp.ones(N_STARS))
     p = np.asarray(present)
     np.testing.assert_allclose(np.asarray(sky.period_d)[p], 365.2564, rtol=2e-5)
-    np.testing.assert_allclose(np.asarray(sky.e)[p], 0.25, atol=1e-9)
+    atol = float(roundoff(1.0, n_ops=32, dtype=sky.e.dtype))
+    np.testing.assert_allclose(
+        np.asarray(sky.e)[p],
+        0.25,
+        rtol=0,
+        atol=atol,
+    )
     cos_i = np.abs(np.cos(np.asarray(sky.i_rad)))
     cos_mid = np.abs(np.cos(np.radians(np.asarray(world.midplane_inc_deg))))
     np.testing.assert_allclose(
-        cos_i[p], np.broadcast_to(cos_mid[:, None], p.shape)[p], atol=1e-9
+        cos_i[p],
+        np.broadcast_to(cos_mid[:, None], p.shape)[p],
+        rtol=0,
+        atol=atol,
     )
 
 
@@ -186,19 +199,33 @@ def test_occurrence_grid_total_and_mass_radius_inverse(tables):
     """The grid holds 11.0 planets per star in 25 bins; the radius law inverts.
 
     Fails if the table build changes the integrated rate or the radius edges drift.
+
+    Twelve relative roundings cover the two power-law evaluations, their
+    scale factors and the inverse exponent (at most 1/0.279).
     """
     occurrence, _ = tables
     assert occurrence.total_rate == pytest.approx(11.0002, abs=1e-3)
     assert occurrence.n_bins == 25
     radius = np.linspace(0.5, 9.0, 30)
-    np.testing.assert_allclose(
-        mass_to_radius(radius_to_mass(radius)), radius, rtol=1e-9
-    )
     radius_jax = jnp.asarray(radius)
+    tol = float(roundoff(1.0, n_ops=12, dtype=radius_jax.dtype))
+    np.testing.assert_allclose(
+        mass_to_radius(radius_to_mass(radius)),
+        radius,
+        rtol=tol,
+    )
     mass_jax = jax.jit(jax.vmap(radius_to_mass))(radius_jax)
     assert isinstance(radius_to_mass(radius_jax), jax.Array)
-    np.testing.assert_allclose(mass_jax, radius_to_mass(radius), rtol=1e-12)
-    np.testing.assert_allclose(jax.jit(mass_to_radius)(mass_jax), radius, rtol=1e-9)
+    np.testing.assert_allclose(
+        mass_jax,
+        radius_to_mass(radius),
+        rtol=tol,
+    )
+    np.testing.assert_allclose(
+        jax.jit(mass_to_radius)(mass_jax),
+        radius,
+        rtol=tol,
+    )
 
 
 @pytest.mark.float64_only(reason="finite-difference mass-radius derivatives")

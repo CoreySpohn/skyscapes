@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from hwoutils.constants import Mearth2kg, Msun2kg, Rearth2m, Rsun2m
+from hwoutils.testing import ulps
 
 from skyscapes.physical_model import BlackbodyPhysicalModel, LambertianPhysicalModel
 from skyscapes.scene import BlackbodyStar, FlatStar, Planet, Scene
@@ -157,17 +158,18 @@ def test_contrast_without_star_raises():
         )
 
 
-@pytest.mark.float64_only(reason="SI Planck reference values at float64 rounding")
 def test_system_contrast_cube_stacks_wavelengths():
     """Check disk dilution and Planck contrast from SI primitives.
 
-    The 1e-14 relative tolerance permits float64 algebraic rounding.
+    Each Planck spectrum and solid angle has at most 16 effective roundings
+    at these wavelengths (Wien exponent below 3). The contrast divides two
+    such spectra. The magnitude and norm use a logarithm or sum of squares.
     """
     system = _system(BlackbodyPhysicalModel(teff_K=jnp.array([1560.0])))
     wavelength_m = 4400.0e-9
     x = H * C / (wavelength_m * KB)
-    area = (15.7 * Rearth2m / STAR.radius_m) ** 2
-    expected_contrast = area * np.expm1(x / STAR.teff_K) / np.expm1(x / 1560.0)
+    area = (15.7 * Rearth2m / (1.77 * Rsun2m)) ** 2
+    expected_contrast = area * np.expm1(x / 8840.0) / np.expm1(x / 1560.0)
     expected_flux = (
         2
         * np.pi
@@ -180,13 +182,13 @@ def test_system_contrast_cube_stacks_wavelengths():
     np.testing.assert_allclose(
         system.contrasts(jnp.asarray(4400.0), jnp.array([0.0, 100.0])),
         [[expected_contrast, expected_contrast]],
-        rtol=1e-14,
+        rtol=float(ulps(32, 1.0)),
         atol=0,
     )
     np.testing.assert_allclose(
         system.planet_flux_densities(jnp.asarray(4400.0), jnp.array([0.0, 100.0])),
         [[expected_flux, expected_flux]],
-        rtol=1e-14,
+        rtol=float(ulps(16, 1.0)),
         atol=0,
     )
     wl = jnp.array([3900.0, 4400.0, 4900.0])
@@ -195,9 +197,13 @@ def test_system_contrast_cube_stacks_wavelengths():
     for k in range(3):
         assert jnp.allclose(cube[k], system.contrasts(wl[k], T_D), rtol=1e-6, atol=0.0)
         alpha, dmag = system.alpha_dMag(T_D, wavelength_nm=wl[k])
-        np.testing.assert_allclose(dmag, -2.5 * jnp.log10(cube[k]), rtol=1e-12)
         np.testing.assert_allclose(
-            alpha, jnp.linalg.norm(system.positions(T_D), axis=0), rtol=1e-12
+            dmag, -2.5 * jnp.log10(cube[k]), rtol=float(ulps(4, 1.0))
+        )
+        np.testing.assert_allclose(
+            alpha,
+            jnp.linalg.norm(system.positions(T_D), axis=0),
+            rtol=float(ulps(4, 1.0)),
         )
     for default, explicit in zip(
         system.alpha_dMag(T_D),

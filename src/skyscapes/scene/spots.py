@@ -7,8 +7,10 @@ from jaxtyping import Array
 class StarSpots(eqx.Module):
     """Recorded spot geometry and component temperatures.
 
-    ``times_d`` stores days from the scene epoch; the owning scene holds
-    the epoch metadata. Geometry arrays have shape ``(n_times, n_spots)``.
+    ``times_d`` stores days from the first stellar sample. When the
+    imported star has a ``sample_origin``, its ``days`` give the first sample
+    relative to the owning scene's epoch. Geometry arrays have shape
+    ``(n_times, n_spots)``.
     ``area_m2`` is the total spot area, including the umbra; ``area_ratio`` is total
     spot area divided by umbra area, as used by ExoVista. Longitudes
     and latitudes retain the source's stellar coordinate convention.
@@ -19,7 +21,7 @@ class StarSpots(eqx.Module):
     unknown in files that omit the corresponding header cards.
 
     Attributes:
-        times_d: Sample times, days from the scene epoch, shape ``(n_times,)``.
+        times_d: Sample times, days from the first stellar sample, shape ``(n_times,)``.
         latitude_deg: Spot latitudes [deg], shape ``(n_times, n_spots)``.
         longitude_deg: Spot longitudes [deg], shape ``(n_times, n_spots)``.
         area_m2: Total spot area including the umbra [m^2], shape

@@ -77,7 +77,14 @@ class AbstractParametricDisk(AbstractDisk):
 
     @abstractmethod
     def _scattered_integral(
-        self, wavelength_nm, east_AU, north_AU, inclination_deg, position_angle_deg
+        self,
+        wavelength_nm,
+        east_AU,
+        north_AU,
+        inclination_deg,
+        position_angle_deg,
+        *,
+        sky_offsets_arcsec=None,
     ):
         """Unit-profile scattering integral at broadcastable sky coordinates."""
 
@@ -105,7 +112,12 @@ class AbstractParametricDisk(AbstractDisk):
         level = density_level(self.amplitude, self, star=star, dist_pc=dist_pc)
         integral = jax.vmap(
             lambda w: self._scattered_integral(
-                w, east_AU, north_AU, inclination_deg, position_angle_deg
+                w,
+                east_AU,
+                north_AU,
+                inclination_deg,
+                position_angle_deg,
+                sky_offsets_arcsec=(east_arcsec, north_arcsec, dist_pc),
             )
         )(wave.reshape(-1)).reshape(wave.shape + east.shape)
         flux = star.photon_flux_density(wave, time_d, dist_pc=dist_pc)

@@ -18,6 +18,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from hwoutils.constants import G, Mearth2kg, Msun2kg
+from hwoutils.numerics import eps
+from hwoutils.testing import ulps
 from optixstuff.grids import PixelGrid, SkyOrientation
 from zodi import DensityDust
 
@@ -672,7 +674,11 @@ def _kernel_centroid(system, incl, pa):
 
 @pytest.mark.parametrize(("incl", "pa"), [(60.0, 30.0), (40.0, 150.0)])
 def test_image_sightline_marker_sits_on_the_projected_minor_axis(incl, pa):
-    """The marker is r |cos i| / d arcsec out, on the bright side for +r."""
+    """The marker is r |cos i| / d arcsec out, on the bright side for +r.
+
+    The two angle conversions, projection, distance scaling and dot
+    product take up to eight rounded operations on the radius/d scale.
+    """
     system = make_system(incl, pa, disk=make_disk(g=0.6))
     centroid = _kernel_centroid(system, incl, pa)
     for radius in (3.0, -3.0):
@@ -683,10 +689,11 @@ def test_image_sightline_marker_sits_on_the_projected_minor_axis(incl, pa):
         )
         marker = gids["sightline"].get_offsets()[0]
         expected = abs(radius) * abs(np.cos(np.radians(incl))) / DIST_PC
-        assert np.hypot(*marker) == pytest.approx(expected, rel=1e-9)
+        allowance = float(ulps(8, abs(radius) / system.dist_pc))
+        assert np.hypot(*marker) == pytest.approx(expected, abs=allowance, rel=0)
         # Perpendicular to the line of nodes, which lies at pa from +x.
         nodes = np.array([np.cos(np.radians(pa)), np.sin(np.radians(pa))])
-        assert marker @ nodes == pytest.approx(0.0, abs=1e-12)
+        assert marker @ nodes == pytest.approx(0.0, abs=allowance, rel=0)
         # Near-side grains mark the forward-scattering (bright) half.
         assert np.sign(marker @ centroid) == np.sign(radius)
 
@@ -771,10 +778,11 @@ def test_zodi_side_inset_leaves_the_sun_visible(beta, dlon):
     assert not inset.get_window_extent().contains(*sun_px)
 
 
-def test_zodi_pole_look_empties_the_longitude_arc():
+def test_zodi_pole_look_empties_the_longitude_arc(precision):
     """At beta = 90 there is no longitude difference to draw in the top view."""
     result = viz.plot_local_zodi_geometry(30.0, 100.0)
-    result.update(90.0, 100.0)
+    # A sub-spacing departure from the pole resolves to the same view.
+    result.update(precision.type(90.0 - float(np.spacing(np.float32(90.0))) / 4), 100.0)
     gids = by_gid(result)
     assert len(gids["look_angle"].get_xydata()) == 0
     assert gids["look_angle/label"].get_text() == ""
@@ -796,7 +804,11 @@ def test_face_on_disk_has_no_near_side_label():
 
 
 def test_disk_image_draws_the_same_midplane_above_90_degrees():
-    """``(120, 30)`` and ``(60, 210)`` are one midplane and draw one image."""
+    """Two descriptions of one midplane draw the same pixels.
+
+    A scene stores distance as a leaf; the bare disk takes a host scalar.
+    Allow four operations for the distance and flux scaling at each pixel.
+    """
     system = make_system(120.0, 30.0, disk=make_disk(g=0.6))
     above = viz.plot_disk_radiance(system, wavelength_nm=550.0, grid=_DISK_GRID)
     below = viz.plot_disk_radiance(
@@ -811,7 +823,8 @@ def test_disk_image_draws_the_same_midplane_above_90_degrees():
     a = np.asarray(above.artists["image"].get_array())
     b = np.asarray(below.artists["image"].get_array())
     assert np.all(a >= 0.0)
-    np.testing.assert_allclose(a, b, rtol=1e-9, atol=1e-12 * b.max())
+    np.testing.assert_array_equal(a > 0, b > 0)
+    np.testing.assert_allclose(a, b, rtol=4 * eps(b), atol=0)
 
 
 def test_disk_image_refuses_blank_and_negative_arrays():
@@ -1398,7 +1411,11 @@ def test_zodi_top_look_label_clears_the_rays(font):
 
 
 def test_side_view_superior_conjunction_is_away_from_observer():
-    """A full-phase planet at z > 0 is opposite the observer's negative-z arrow."""
+    """A full-phase planet is opposite the observer's negative-z arrow.
+
+    On a unit-AU orbit allow eight operations for the orbital rotation
+    and projection, including the vanishing projected coordinate.
+    """
     planet = Planet(
         Rp_Rearth=jnp.array([1.0]),
         physical_model=LambertianPhysicalModel(Ag=jnp.array([0.3])),
@@ -1419,7 +1436,10 @@ def test_side_view_superior_conjunction_is_away_from_observer():
     result = viz.plot_system(system, 0.0, view="side")
     artists = by_gid(result)
     np.testing.assert_allclose(
-        artists["planet/b"].get_offsets()[0], [1.0, 0.0], atol=1e-8
+        artists["planet/b"].get_offsets()[0],
+        [1.0, 0.0],
+        rtol=0,
+        atol=float(ulps(8, system.dynamics.orbits.a_AU[0])),
     )
     assert "away from the observer" in result.ax.get_xlabel()
     assert arrow_vector(artists["observer"])[0] < 0

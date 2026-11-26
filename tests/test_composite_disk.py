@@ -64,8 +64,8 @@ def test_composite_retrograde_render_is_nonnegative_and_mirrored():
 
     Each component at ``180 - incl`` is its ``incl`` map reflected across the
     line of nodes (row reversal at ``pa = 0``), so the sum is too; a component
-    returning a negated map would make the sum negative. Tolerance basis:
-    floating-point.
+    returning a negated map would make the sum negative. Both degree-reduced
+    renders evaluate the same sums, so the reflection is exact.
     """
     composite = CompositeDisk(components=(_make_grater(20.0), _make_grater(40.0)))
     low = np.asarray(
@@ -79,7 +79,7 @@ def test_composite_retrograde_render_is_nonnegative_and_mirrored():
         )
     )
     assert np.all(high >= 0.0), f"negative radiance, min {high.min():.3g}"
-    np.testing.assert_allclose(high, low[::-1], rtol=1e-9, atol=1e-12 * low.max())
+    np.testing.assert_array_equal(high, low[::-1])
 
 
 def test_composite_jit_round_trip():

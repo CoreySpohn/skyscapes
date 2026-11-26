@@ -15,6 +15,7 @@ from hwoutils.constants import c, h, k_B, pc2m, sigma_SB
 from hwoutils.conversions import (
     jy_to_photons_per_nm_per_m2,
 )
+from hwoutils.numerics import roundoff
 from optixstuff.spectral import Band, Knots, Quadrature
 
 from skyscapes.scene import AbstractStar, BlackbodyStar, FlatStar, Star
@@ -214,11 +215,11 @@ def test_spectrum_star_wavelength_coverage(n_epochs):
     "kind,n_epochs",
     [(kind, n) for kind in STARS for n in ((1, 2) if kind is Star else (1,))],
 )
-@pytest.mark.float64_only(reason="float64 photometry reference")
 def test_photon_contract(kind, n_epochs):
     """Fails on a unit error, Jy interpolation, or lost wavelength/time axes.
 
-    Tolerance 3e-14 is the float64 floor for the shared algebra. The rounded
+    Twenty-four relative roundings cover the Planck exponential and photon
+    conversions, interpolation and solid-angle scaling. The rounded
     9.9634e5 anchor allows 5e-6 relative for its five significant digits.
     FlatStar is flat in photons; Star supplies the flat-F_nu AB=5 anchor
     at a table node and interpolates in photons between nodes.
@@ -230,7 +231,7 @@ def test_photon_contract(kind, n_epochs):
         expected = np.full(wave.shape, 9.9634e5)
     elif kind is BlackbodyStar:
         star = kind(5772.0, 6.957e8)
-        lam = np.asarray(wave) * 1e-9
+        lam = np.asarray(wave, dtype=np.float64) * 1e-9
         expected = (
             2
             * np.pi
@@ -253,19 +254,19 @@ def test_photon_contract(kind, n_epochs):
         np.testing.assert_allclose(expected[0, 1], 9.9634e5, rtol=5e-6)
     time = jnp.array([[0.0], [0.5]]) if n_epochs > 1 else 0.0
     actual = star.photon_flux_density(wave, time, dist_pc=10.0)
-    np.testing.assert_allclose(actual, expected, rtol=3e-14, atol=0)
+    tol = float(roundoff(1.0, n_ops=24, dtype=wave.dtype))
+    np.testing.assert_allclose(actual, expected, rtol=tol, atol=0)
     assert not hasattr(star, "spec_flux_density")
     assert actual.shape == wave.shape
     np.testing.assert_allclose(
         eqx.filter_jit(star.photon_flux_density)(wave, time, dist_pc=10.0),
         expected,
-        rtol=3e-14,
+        rtol=tol,
         atol=0,
     )
 
 
 @pytest.mark.parametrize("method", ["linear", "cubic"])
-@pytest.mark.float64_only(reason="float64 photometry reference")
 def test_flat_fnu_quadrature_anchor(method):
     """Fails on a per-nm error, missing knots, or photon integration bias.
 
@@ -273,7 +274,9 @@ def test_flat_fnu_quadrature_anchor(method):
     Linear interpolation's integral error is bounded by width*step**2/12
     times max(abs((1/lambda)'')); relative error is below 4.6e-10 here.
     Cubic interpolation is more accurate. Order 4 integrates each polynomial
-    segment exactly; 1e-9 relative covers interpolation and roundoff.
+    segment exactly; 1e-9 relative covers interpolation. Twenty-four relative roundings
+    cover conversion to photons, interpolation, quadrature weights and a
+    pairwise reduction over 4000 intervals of four Gauss nodes.
     The rounded 550-nm anchor uses 5e-6 relative; constant parity is exact.
     """
     assert h == 6.62607015e-34
@@ -285,15 +288,23 @@ def test_flat_fnu_quadrature_anchor(method):
         interpolation_method=method,
     )
     anchor = fnu * 1e-26 / (6.62607015e-34 * 550e-9) * 1e-9
+    tol = float(roundoff(1.0, n_ops=24, dtype=star.flux_density_jy.dtype))
     np.testing.assert_allclose(
-        star.photon_flux_density(550.0, 0.0, dist_pc=10.0), anchor, rtol=3e-14
+        star.photon_flux_density(550.0, 0.0, dist_pc=10.0),
+        anchor,
+        rtol=tol,
     )
     np.testing.assert_allclose(anchor, 9.9634e5, rtol=5e-6)
     np.testing.assert_array_equal(star.spectral_breaks_nm(), star.wavelengths_nm)
     rule = Quadrature.build([Band(500.0, 600.0)], star, order=4)
     actual = rule.integrate(star.photon_flux_density(rule.nodes_nm, 0.0, dist_pc=10.0))
     expected = fnu * 1e-26 / 6.62607015e-34 * np.log(600 / 500)
-    np.testing.assert_allclose(actual, expected, rtol=1e-9, atol=0)
+    np.testing.assert_allclose(
+        actual,
+        expected,
+        rtol=1e-9 + float(roundoff(1.0, n_ops=24, dtype=actual.dtype)),
+        atol=0,
+    )
     if method == "linear":
         midpoint = Quadrature.build([Band(500.0, 600.0)], star, order=1)
         np.testing.assert_allclose(
@@ -301,7 +312,7 @@ def test_flat_fnu_quadrature_anchor(method):
                 star.photon_flux_density(midpoint.nodes_nm, 0.0, dist_pc=10.0)
             ),
             actual,
-            rtol=3e-14,
+            rtol=tol,
             atol=0,
         )
 

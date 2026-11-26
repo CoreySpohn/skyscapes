@@ -125,7 +125,11 @@ holds the same tables and configuration as a point process over
 batch shape `(n_worlds, n_stars)`, and `mark_log_density` returns the log
 density of every planet against the reference measure of orbix's classical
 orbit chart. The density needs an eccentricity distribution, because circular
-orbits have no density over all six orbital elements.
+orbits have no density over all six orbital elements. Sampling and reading
+marks work in either precision. For `mark_log_density` and `log_intensity`,
+enable x64 before building the population, hosts, and scenes. Both methods
+raise `hwoutils.PrecisionError` when x64 is disabled or those inputs have
+float32 working precision.
 
 ```{code-cell} ipython3
 import equinox as eqx

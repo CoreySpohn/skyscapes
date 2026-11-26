@@ -13,6 +13,7 @@ for a real target and epoch is the observatory model's job
 from __future__ import annotations
 
 import numpy as np
+from hwoutils.numerics import COARSEST, eps, same
 
 from skyscapes.viz import _geometry
 from skyscapes.viz._draw import (
@@ -268,6 +269,7 @@ class _ZodiPanel:
                 the Sun's direction [deg], in ``[-180, 180]``.
         """
         R = self.R
+        at_pole = same(abs(ecliptic_latitude_deg), 90.0)
         helioecliptic_longitude_deg = abs(helioecliptic_longitude_deg)
         look = _geometry.zodi_sightline(
             ecliptic_latitude_deg, helioecliptic_longitude_deg
@@ -302,7 +304,7 @@ class _ZodiPanel:
             grain = grain3[:2]
             k_in = grain / np.linalg.norm(grain)
             back = obs - grain
-            if np.linalg.norm(proj) > 1e-9:
+            if not at_pole:
                 self._set_angle(
                     obs,
                     sun_dir[:2],
@@ -349,7 +351,7 @@ class _ZodiPanel:
             in_2d = np.array([k_in3 @ along, k_in3[2]])
         if self.ray_label is not None:
             self.ray_label.set_position((end[0], end[1]))
-            flat = self.view == "top" and np.linalg.norm(look[:2]) <= 1e-9
+            flat = self.view == "top" and at_pole
             self.ray_label.set_text("sightline, to the pole" if flat else "sightline")
         self.readout.set_text(
             rf"$\beta$ = {float(ecliptic_latitude_deg):.0f}{DEGREE}, "
@@ -458,7 +460,9 @@ def _top_label_placement(observer, proj, grain, radius, helioecliptic_longitude_
     # observer + t * direction = u * grain for some u.
     system = np.column_stack([direction, -grain])
     distance = 0.0
-    if abs(np.linalg.det(system)) > 1e-12:
+    # The columns have lengths one and |grain|. Resolve the two products
+    # and subtraction in the determinant at the coarsest coordinate precision.
+    if abs(np.linalg.det(system)) > 3 * eps(COARSEST) * np.linalg.norm(grain):
         distance, _ = np.linalg.solve(system, -observer)
     return direction, max(1.25 * radius, distance + 0.3 * radius), "right", "bottom"
 

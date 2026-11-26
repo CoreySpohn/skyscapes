@@ -163,11 +163,8 @@ excluding blank, `COMMENT`, and `HISTORY` cards:
 Needs an ExoVista file on disk, so the block is not executed.
 
 ```python notest
-import jax
-
 from skyscapes.io import exovista_header, from_exovista
 
-jax.config.update("jax_enable_x64", True)
 path = "path/to/exovista_system.fits"
 scene = from_exovista(path, load_disk=False, local_zodi=None)
 teff_K = exovista_header(path)["TEFF"]
@@ -188,9 +185,9 @@ across the stellar disk.
 
 ### ExoVista layouts and time conventions
 
-Enable `jax_enable_x64` before calling `from_exovista`; the importer
-requires it to preserve orbital-state precision and raises
-`ValueError` when x64 is disabled. ExoVista stores elapsed simulation
+The importer supports float32 and float64. It subtracts the stellar position
+and velocity in NumPy float64 before converting the relative states to the
+scene precision. ExoVista stores elapsed simulation
 years. The importer assigns simulation time zero to J2000.0 and
 converts Julian years using
 `absolute_dates = 2451545.0 + 365.25 * elapsed_years`. This assigned origin is
@@ -198,8 +195,14 @@ not a measured observation date, and the year values are not calendar
 decimal years. The first stellar timestamp sets `system.epoch`, split
 into whole and fractional days on the host. The file states no time scale;
 the default `tdb` label applies without conversion. Stored stellar, spot,
-planet-table, and orbit reference times are days from this scene epoch,
-converted in NumPy float64 before transfer to JAX.
+planet-table, and orbit reference times are always days from the first
+stellar timestamp. To observe several files on a common clock, pass
+`epoch=shared_epoch` to the importer. Scene reads, including stellar flux,
+time-series planet contrast and `system.dynamics.solve`, take offsets from
+the shared epoch. Pass `system.epoch.days(jd=absolute_dates)` as host float64
+so each scene can subtract its own first-sample offset before narrowing.
+For varying float32 time arguments inside JIT, use the default first-sample
+epoch and difference the dates on the host first.
 
 The importer locates the star and planets using their FITS headers.
 It supports the legacy stellar extension and the newer layout with a
