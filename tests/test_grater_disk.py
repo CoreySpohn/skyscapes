@@ -74,6 +74,25 @@ def test_grater_disk_is_abstract():
     assert isinstance(make_disk(), AbstractDisk)
 
 
+def test_grater_disk_rejects_positional_gamma():
+    """Only the first four geometric fields accept positional arguments."""
+    disk = make_disk()
+    geometry = (disk.sma_AU, disk.alpha_in, disk.alpha_out, disk.ksi0_AU)
+    tail = dict(
+        beta=disk.beta,
+        rmin_AU=disk.rmin_AU,
+        rmax_AU=disk.rmax_AU,
+        wavelengths_nm=disk.wavelengths_nm,
+        g_HG_grid=disk.g_HG_grid,
+        Ag_grid=disk.Ag_grid,
+        amplitude=disk.amplitude,
+        n_slices_los=disk.n_slices_los,
+    )
+    GraterDisk(*geometry, gamma=disk.gamma, **tail)
+    with pytest.raises(TypeError):
+        GraterDisk(*geometry, disk.gamma, **tail)
+
+
 def test_shape_and_finiteness():
     """photon_radiance returns the expected shape with finite, non-neg values."""
     sb = _render(make_disk())
