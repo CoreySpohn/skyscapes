@@ -118,6 +118,9 @@ class GraterDisk(AbstractParametricDisk):
     Density, scattering, and spectral parameters are fittable PyTree leaves.
     LOS integration settings are static; the caller supplies the sky grid.
 
+    The constructor accepts ``sma_AU``, ``alpha_in``, ``alpha_out``, and
+    ``ksi0_AU`` positionally. All other fields are keyword-only.
+
     **Choosing the line-of-sight rule.** All rules converge to the same
     integral; the choice sets the truncation error and the cost, which is
     proportional to the node count. Errors below are the largest pixel
@@ -170,21 +173,23 @@ class GraterDisk(AbstractParametricDisk):
     alpha_in: Array
     alpha_out: Array
     ksi0_AU: Array
-    gamma: Array
-    beta: Array
-    rmin_AU: Array
-    rmax_AU: Array
-    wavelengths_nm: Knots = eqx.field(static=True, converter=as_knots)
-    g_HG_grid: Array
-    Ag_grid: Array
+    gamma: Array = eqx.field(kw_only=True)
+    beta: Array = eqx.field(kw_only=True)
+    rmin_AU: Array = eqx.field(kw_only=True)
+    rmax_AU: Array = eqx.field(kw_only=True)
+    wavelengths_nm: Knots = eqx.field(static=True, converter=as_knots, kw_only=True)
+    g_HG_grid: Array = eqx.field(kw_only=True)
+    Ag_grid: Array = eqx.field(kw_only=True)
 
     profile_id: ClassVar[str] = "grater-1999"
-    amplitude: AbstractDustAmplitude
-    n_slices_los: int = eqx.field(static=True)
+    amplitude: AbstractDustAmplitude = eqx.field(kw_only=True)
+    n_slices_los: int = eqx.field(static=True, kw_only=True)
     flux_scale: Array = eqx.field(default=1.0, converter=jnp.asarray, kw_only=True)
 
-    cutoff_width_AU: Array = eqx.field(default_factory=lambda: jnp.asarray(0.0))
-    fixed_vertical_profile: bool = eqx.field(static=True, default=False)
+    cutoff_width_AU: Array = eqx.field(
+        default_factory=lambda: jnp.asarray(0.0), kw_only=True
+    )
+    fixed_vertical_profile: bool = eqx.field(static=True, default=False, kw_only=True)
 
     def __check_init__(self):
         """Validate the static LOS settings and the fixed-profile promise.
