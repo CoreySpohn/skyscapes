@@ -14,9 +14,9 @@ import numpy as np
 from hwoutils.constants import G, Msun2kg
 from hwoutils.conversions import contrast_to_delta_mag
 from hwoutils.epoch import Epoch
-from hwoutils.leaves import as_float_leaf
+from hwoutils.leaves import as_float_leaf, is_traced
 from hwoutils.precision import like
-from jaxtyping import Array
+from jaxtyping import Array, ArrayLike
 from optixstuff.spectral import Quadrature, Resolution, spectral_breaks
 from orbix.kepler import Markley
 from orbix.system import Body, Ephemeris, SkyFrame
@@ -1014,7 +1014,7 @@ class Scene(eqx.Module):
         self,
         quadrature: Quadrature,
         resolution: Resolution,
-        time_d: Array,
+        time_d: ArrayLike,
         *,
         ephemeris=None,
     ) -> Sources:
@@ -1032,12 +1032,14 @@ class Scene(eqx.Module):
         Args:
             quadrature: Band rule from ``optixstuff.spectral.Quadrature.build``.
             resolution: Operators for the scene's tables on ``quadrature``.
-            time_d: Observation times, days from the scene epoch, shape ``(T,)``.
+            time_d: Observation times in days from the scene epoch. An unbatched
+                scene accepts a scalar or shape ``(T,)``.
             ephemeris: Optional ephemeris from :meth:`ephemeris` solved at these
                 dates; None solves it here.
 
         Returns:
-            The node-effective values of every source.
+            The node-effective values of every source, with a length-one time
+            axis for a scalar observation.
         """
         dist_pc = self.dynamics.frame.dist_pc
         unscaled, scale, planets = self._node_star_and_planets(
@@ -1070,6 +1072,14 @@ class Scene(eqx.Module):
 
     def _node_star_and_planets(self, quadrature, resolution, time_d, ephemeris):
         """Unscaled node star (W, Q, T), its scale and node planet flux (W, Q, K, T)."""
+        if jnp.ndim(time_d) == 0:
+            # Sampled scenes subtract their first sample before narrowing host dates.
+            if isinstance(self.dynamics, SampledSystem) and not (
+                isinstance(time_d, jax.Array) or is_traced(time_d)
+            ):
+                time_d = np.atleast_1d(time_d)
+            else:
+                time_d = jnp.atleast_1d(time_d)
         unscaled = self.star._node_flux_density(
             quadrature, resolution, time_d, dist_pc=self.dynamics.frame.dist_pc
         )
@@ -1180,17 +1190,16 @@ class Scene(eqx.Module):
             Band-integrated planet-to-star photon ratio, dimensionless, shape
             ``(W, K_total, T)``.
         """
-        eph = self.ephemeris(time_d) if ephemeris is None else ephemeris
         wave = quadrature.nodes_nm
         if len(quadrature.bands) == 1 and quadrature.bands[0].width_nm == 0:
-            contrast = self.contrast_cube(wave[:, 0], time_d, ephemeris=eph)
+            contrast = self.contrast_cube(wave[:, 0], time_d, ephemeris=ephemeris)
             if transmission is None:
                 return contrast
             response = jnp.broadcast_to(transmission(wave), wave.shape)[0, 0]
             return jnp.where(response > 0, contrast, jnp.nan)
 
         unscaled, scale, planet = self._node_star_and_planets(
-            quadrature, resolution, time_d, eph
+            quadrature, resolution, time_d, ephemeris
         )
         star = scale * unscaled
         if transmission is not None:
