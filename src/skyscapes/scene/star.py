@@ -34,9 +34,11 @@ from hwoutils.conversions import (
 )
 from hwoutils.leaves import as_float_leaf
 from hwoutils.planck import planck_photon_radiance
+from hwoutils.precision import like
 from jaxtyping import Array
 from optixstuff.spectral import Knots, digest_knots
 
+from .._dtype import _working_dtype
 from .._flux_scale import check_flux_scale
 from .._sample_time import SampleOrigin
 from .spots import StarSpots
@@ -169,9 +171,9 @@ class AbstractStar(eqx.Module):
             The band-mean photon flux density, a scalar.
         """
         x, w = np.polynomial.legendre.leggauss(_CALIBRATION_POINTS)
-        nodes = band.center_nm + 0.5 * band.width_nm * jnp.asarray(x)
+        nodes = band.center_nm + 0.5 * band.width_nm * like(x, self.flux_scale)
         values = self._photon_flux_density(nodes, jnp.asarray(time_d), dist_pc=dist_pc)
-        return jnp.sum(jnp.asarray(w / 2) * values)
+        return jnp.sum(like(w / 2, values) * values)
 
     @abstractmethod
     def angular_diameter_arcsec(self, dist_pc: Array) -> Array:
@@ -216,7 +218,7 @@ class FlatStar(AbstractStar):
         Returns:
             The stored apparent diameter [arcsec].
         """
-        return jnp.asarray(self.fixed_diameter_arcsec)
+        return like(self.fixed_diameter_arcsec, self.flux_scale)
 
     def _photon_flux_density(
         self,
@@ -233,7 +235,8 @@ class FlatStar(AbstractStar):
         but ignored: this is an apparent flux model.
         """
         wl = jnp.asarray(wavelength_nm)
-        return jnp.full_like(wl, self.flux_phot_per_nm_m2, dtype=wl.dtype)
+        dtype = jnp.result_type(wl, self.flux_scale, self.flux_phot_per_nm_m2)
+        return jnp.full_like(wl, self.flux_phot_per_nm_m2, dtype=dtype)
 
     def __repr__(self) -> str:
         """Summarize flux and nonzero angular diameter.
@@ -295,10 +298,15 @@ class BlackbodyStar(AbstractStar):
         The result has wavelength_nm's shape. ``time_d`` is part of
         the AbstractStar interface but ignored here.
         """
+        dtype = _working_dtype(
+            wavelength_nm, dist_pc, self.teff_K, self.radius_m, self.flux_scale
+        )
+        wave = jnp.asarray(wavelength_nm, dtype=dtype)
+        distance = jnp.asarray(dist_pc, dtype=dtype)
         return (
-            planck_photon_radiance(wavelength_nm, self.teff_K)
+            planck_photon_radiance(wave, self.teff_K)
             * jnp.pi
-            * (self.radius_m / (dist_pc * pc2m)) ** 2
+            * (self.radius_m / (distance * pc2m)) ** 2
         )
 
     def __repr__(self) -> str:
@@ -411,9 +419,14 @@ class Star(AbstractStar):
 
     @property
     def flux_density_jy(self) -> Array:
-        """Tabulated F_nu [Jy], recovered from the stored photon table."""
+        """Recover the tabulated spectral flux density.
+
+        Returns:
+            F_nu [Jy], shape ``(n_wavelengths, n_times)``.
+        """
+        photons = self._flux_density_phot
         return jax.vmap(photons_per_nm_per_m2_to_jy, in_axes=(1, None), out_axes=1)(
-            self._flux_density_phot, self.knots.array()
+            photons, self.knots.array(photons.dtype)
         )
 
     @property
@@ -435,7 +448,7 @@ class Star(AbstractStar):
         Returns:
             The stored apparent diameter [arcsec].
         """
-        return jnp.asarray(self.fixed_diameter_arcsec)
+        return self.fixed_diameter_arcsec
 
     def _photon_flux_density(
         self,
@@ -456,19 +469,32 @@ class Star(AbstractStar):
     def _interpolate(self, wavelength_nm, time_d):
         """Read the photon table at times relative to its first-sample origin."""
         method = self._interpolation_method
+        dtype = _working_dtype(
+            wavelength_nm,
+            time_d,
+            self._flux_density_phot,
+            self._times_d,
+            self.flux_scale,
+        )
+        wavelength_nm = jnp.asarray(wavelength_nm, dtype=dtype)
+        time_d = jnp.asarray(time_d, dtype=dtype)
+        values = jnp.asarray(self._flux_density_phot, dtype=dtype)
+        knots = self.knots.array(dtype)
+        outside = jnp.asarray(jnp.nan, dtype=dtype)
         if self._times_d.size == 1:
             # A single-epoch source is a static spectrum, not a degenerate spline.
             wavelength_nm, _ = jnp.broadcast_arrays(wavelength_nm, time_d)
             interp = interpax.Interpolator1D(
-                self.knots.array(), self._flux_density_phot[:, 0], method=method
+                knots, values[:, 0], method=method, extrap=outside
             )
             return interp(wavelength_nm.reshape(-1)).reshape(wavelength_nm.shape)
         wave, time = jnp.broadcast_arrays(wavelength_nm, time_d)
         interp = interpax.Interpolator2D(
-            self.knots.array(),
-            self._times_d,
-            self._flux_density_phot,
+            knots,
+            jnp.asarray(self._times_d, dtype=dtype),
+            values,
             method=method,
+            extrap=outside,
         )
         return interp(wave.reshape(-1), time.reshape(-1)).reshape(wave.shape)
 
@@ -492,8 +518,14 @@ class Star(AbstractStar):
         method = self._interpolation_method
 
         def interpolant(values, wavelength_nm):
-            wave = jnp.asarray(wavelength_nm)
-            interp = interpax.Interpolator1D(knots, values, method=method)
+            dtype = _working_dtype(wavelength_nm, values)
+            wave = jnp.asarray(wavelength_nm, dtype=dtype)
+            interp = interpax.Interpolator1D(
+                jnp.asarray(knots, dtype=dtype),
+                jnp.asarray(values, dtype=dtype),
+                method=method,
+                extrap=jnp.asarray(jnp.nan, dtype=dtype),
+            )
             return interp(wave.reshape(-1)).reshape(wave.shape)
 
         return interpolant
@@ -508,9 +540,10 @@ class Star(AbstractStar):
             column = self._flux_density_phot[:, :1]
             return jnp.broadcast_to(column, (column.shape[0], time_d.size))
         interp = interpax.Interpolator1D(
-            self._times_d,
-            self._flux_density_phot.T,
+            jnp.asarray(self._times_d, dtype=time_d.dtype),
+            jnp.asarray(self._flux_density_phot.T, dtype=time_d.dtype),
             method=self._interpolation_method,
+            extrap=jnp.asarray(jnp.nan, dtype=time_d.dtype),
         )
         return interp(time_d).T
 
@@ -543,7 +576,14 @@ class Star(AbstractStar):
         rule = resolution.rule(quadrature, self)
         if self.sample_origin is not None:
             time_d = self.sample_origin.relative(time_d)
-        time = jnp.atleast_1d(jnp.asarray(time_d))
+        dtype = _working_dtype(
+            time_d,
+            quadrature.nodes_nm,
+            self._times_d,
+            self._flux_density_phot,
+            self.flux_scale,
+        )
+        time = jnp.atleast_1d(jnp.asarray(time_d, dtype=dtype))
         if rule.kind == "table":
             return rule.apply(self._table_at(time))
         points = quadrature.nodes_nm if rule.kind == "identity" else rule.fine_nm

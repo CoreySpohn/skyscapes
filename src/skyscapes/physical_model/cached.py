@@ -169,10 +169,12 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
         Returns:
             Contrast (planet-to-star flux ratio), shape ``(K, T)``.
         """
+        if np.size(wavelength_nm) != 1:
+            raise TypeError("contrast expects a single wavelength")
         return self.contrast_cube(
             phase_angle_rad,
             star_planet_distance_AU,
-            jnp.reshape(wavelength_nm, (1,)),
+            wavelength_nm,
             Rp_Rearth,
         )[0]
 
@@ -201,7 +203,7 @@ class PrecomputedPhysicalModel(AbstractPhysicalModel):
         """
         return project_reflected(
             self.reflectivity,
-            self.nu_grid.array(),
+            self.nu_grid.values,
             phase_angle_rad=phase_angle_rad,
             star_planet_distance_AU=star_planet_distance_AU,
             wavelength_nm=wavelengths_nm,

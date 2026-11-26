@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import jax.numpy as jnp
+import numpy as np
 from jaxtyping import Array
 
+from ...._dtype import _working_dtype
 from .base import AbstractTPProfile
 
 
@@ -66,8 +68,11 @@ class PolynomialTPProfile(AbstractTPProfile):
         Returns:
             Temperature [K], same shape as ``pressure_bar``.
         """
-        logp = jnp.log10(pressure_bar)
-        powers = logp[..., None] ** jnp.arange(self.coefficients.shape[-1])
+        dtype = _working_dtype(pressure_bar, self.coefficients)
+        logp = jnp.log10(jnp.asarray(pressure_bar, dtype=dtype))
+        powers = logp[..., None] ** jnp.arange(
+            self.coefficients.shape[-1], dtype=jnp.int32
+        )
         return powers @ self.coefficients[k]
 
     def compute_Tarr(
@@ -88,6 +93,11 @@ class PolynomialTPProfile(AbstractTPProfile):
         Returns:
             Layer temperatures [K], shape ``(n_layers,)``.
         """
-        logp = jnp.log10(rt_engine.pressure)
-        powers = logp[:, None] ** jnp.arange(coefficients_scalar.shape[-1])
+        pressure = jnp.asarray(
+            np.asarray(rt_engine.pressure), dtype=coefficients_scalar.dtype
+        )
+        logp = jnp.log10(pressure)
+        powers = logp[:, None] ** jnp.arange(
+            coefficients_scalar.shape[-1], dtype=jnp.int32
+        )
         return powers @ coefficients_scalar

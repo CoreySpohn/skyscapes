@@ -38,9 +38,10 @@ def _sincos_deg(degrees, xp):
     sine, cosine = xp.sin(angle), xp.cos(angle)
     quarter = (quadrant % 4).astype(np.int32)
     odd = (quarter % 2) == 1
+    one = xp.asarray(1.0, dtype=sine.dtype)
     return (
-        xp.where(quarter < 2, 1.0, -1.0) * xp.where(odd, cosine, sine),
-        xp.where((quarter == 0) | (quarter == 3), 1.0, -1.0)
+        xp.where(quarter < 2, one, -one) * xp.where(odd, cosine, sine),
+        xp.where((quarter == 0) | (quarter == 3), one, -one)
         * xp.where(odd, sine, cosine),
     )
 
@@ -54,7 +55,7 @@ def _midplane_crossing(
     xp,
 ) -> tuple[Array, Array]:
     """Depth of the midplane crossing and its radius capped at rmax."""
-    safe_cos = xp.where(cos_i == 0, 1.0, cos_i)
+    safe_cos = xp.where(cos_i == 0, xp.ones_like(cos_i), cos_i)
     l_cross = y_rot * sin_i / safe_cos
     r_cross = xp.sqrt(x_rot**2 + (y_rot / safe_cos) ** 2 + 1e-12)
     return l_cross, xp.minimum(r_cross, rmax_AU)
@@ -84,12 +85,13 @@ def _legendre_nodes(
     # the window becomes the whole chord of the outer cylinder.
     closing = xp.abs(cos_i) - n_h * slope * xp.abs(sin_i)
     bounded_layer = (closing > 0) & (cos_i != 0)
-    half = n_h * h_cross / xp.where(bounded_layer, closing, 1.0)
+    half = n_h * h_cross / xp.where(bounded_layer, closing, xp.ones_like(closing))
 
     chord_sq = rmax_AU**2 - x_rot**2
     inside = chord_sq > 0.0
-    half_chord = xp.where(inside, xp.sqrt(xp.where(inside, chord_sq, 1.0)), 0.0)
-    safe_sin = xp.where(sin_i == 0, 1.0, sin_i)
+    chord = xp.sqrt(xp.where(inside, chord_sq, xp.ones_like(chord_sq)))
+    half_chord = xp.where(inside, chord, xp.zeros_like(chord))
+    safe_sin = xp.where(sin_i == 0, xp.ones_like(sin_i), sin_i)
     chord_a = (-half_chord - y_rot * cos_i) / safe_sin
     chord_b = (half_chord - y_rot * cos_i) / safe_sin
 
@@ -208,8 +210,15 @@ def los_integrate_scattered(
         d_sq = xy_sq + z_d * z_d
         return depth, weights, z_d, xy_sq, d_sq
 
+    east, north = jnp.asarray(east_AU), jnp.asarray(north_AU)
+    working_dtype = jnp.result_type(east, north, *geometry)
+    working_geometry = (
+        jnp.asarray(incl_deg, dtype=working_dtype),
+        jnp.asarray(position_angle_deg, dtype=working_dtype),
+        *geometry[2:],
+    )
     l_grid, weights, z_d, xy_sq, d_star_sq = samples(
-        geometry, jnp.asarray(east_AU), jnp.asarray(north_AU), height_args, jnp
+        working_geometry, east, north, height_args, jnp
     )
     # Radial membership is decided on one float32 grid for every query, host or
     # runtime, in either working precision. A host query skips the device only
@@ -256,15 +265,16 @@ def los_integrate_scattered(
 
     # Sqrt only inside the valid annulus; the caller's density_fn handles
     # any further safe substitution before evaluating its formula.
-    xy_sq_safe = jnp.where(valid, xy_sq, 1.0)
+    xy_sq_safe = jnp.where(valid, xy_sq, jnp.ones_like(xy_sq))
     r_AU = jnp.sqrt(xy_sq_safe)
     rho = density_fn(r_AU, z_d, valid)
 
     # Scattering cosine: private toward-depth / distance = -public sky z / r.
-    safe_d_sq = jnp.where(d_star_sq > 0.0, d_star_sq, 1.0)
+    safe_d_sq = jnp.where(d_star_sq > 0.0, d_star_sq, jnp.ones_like(d_star_sq))
     safe_d = jnp.sqrt(safe_d_sq)
     cos_phi = l_grid / safe_d
     phase = phase_fn(cos_phi)
 
-    integrand = jnp.where(valid, rho * phase / safe_d_sq, 0.0)
+    integrand = rho * phase / safe_d_sq
+    integrand = jnp.where(valid, integrand, jnp.zeros_like(integrand))
     return (weights * integrand).sum(axis=0)

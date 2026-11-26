@@ -1,15 +1,17 @@
 """Gray Lambertian physical model -- analytic phase, no wavelength dependence."""
 
-import interpax
 import jax
 import jax.numpy as jnp
+import numpy as np
 from hwoutils.constants import Rearth2AU
 from hwoutils.conversions import (
     nm_to_wavenumber_cm,
     spherical_to_geometric_albedo,
+    wavenumber_cm_to_nm,
 )
 from jaxtyping import Array
 
+from .._dtype import _working_dtype
 from .._repr import fmt_scalar_or_array
 from .base import AbstractPhysicalModel
 
@@ -53,7 +55,9 @@ def lambert_phase(phase_angle_rad: Array) -> Array:
     near_new = (phase_angle_rad >= jnp.pi - 0.25) & (phase_angle_rad <= jnp.pi)
     numerator = jnp.where(near_new, series, direct)
     return jnp.where(
-        phase_angle_rad == jnp.pi, 0.0, jnp.maximum(numerator / jnp.pi, 0.0)
+        phase_angle_rad == jnp.pi,
+        jnp.zeros_like(numerator),
+        jnp.maximum(numerator / jnp.pi, 0.0),
     )
 
 
@@ -79,6 +83,51 @@ def reflected_contrast(phase_angle_rad, star_planet_distance_AU, Ag, Rp_Rearth):
     )
 
 
+def _wavenumber_cell(nu_grid, wavelength_nm, dtype):
+    """Return right cell indices, widths and offsets at the working precision."""
+    n = len(nu_grid)
+    host_knots = not isinstance(nu_grid, jax.Array)
+    host_query = not isinstance(wavelength_nm, jax.Array)
+    if host_knots and host_query:
+        knots = np.asarray(nu_grid, dtype=np.float64)
+        wave = np.asarray(wavelength_nm, dtype=np.float64).reshape(-1)
+        with np.errstate(divide="ignore"):
+            target = nm_to_wavenumber_cm(wave)
+        right = np.clip(np.searchsorted(knots, target, side="right"), 1, n - 1)
+        return (
+            jnp.asarray(right, dtype=jnp.int32),
+            jnp.asarray(knots[right] - knots[right - 1], dtype=dtype),
+            jnp.asarray(target - knots[right - 1], dtype=dtype),
+        )
+
+    wave = jnp.asarray(wavelength_nm, dtype=dtype).reshape(-1)
+    target = nm_to_wavenumber_cm(wave)
+    if host_knots and np.dtype(dtype).itemsize < np.dtype(np.float64).itemsize:
+        knots = np.asarray(nu_grid, dtype=np.float64)
+        wave_knots = wavenumber_cm_to_nm(knots)
+        high = wave_knots.astype(dtype)
+        low = wave_knots - high
+        # Floor each threshold so a working-width wavelength compares to the
+        # exact host knot even when multiple knots round to the same value.
+        floor = np.where(
+            low < 0, np.nextafter(high, np.asarray(-np.inf, dtype=dtype)), high
+        )
+        right = n - jnp.searchsorted(jnp.asarray(floor[::-1]), wave, side="left")
+        right = jnp.clip(jnp.where(wave < 0, 1, right), 1, n - 1)
+        left = right - 1
+        # nu(w) - nu(w0) = nu(w0) * (w0 - w) / w. Split the host
+        # wavelength knot so the small difference survives the transfer.
+        delta_nm = (jnp.asarray(high)[left] - wave) + jnp.asarray(low, dtype=dtype)[
+            left
+        ]
+        offset = jnp.asarray(knots, dtype=dtype)[left] * (delta_nm / wave)
+        return right, jnp.asarray(np.diff(knots), dtype=dtype)[left], offset
+
+    knots = jnp.asarray(nu_grid, dtype=dtype)
+    right = jnp.clip(jnp.searchsorted(knots, target, side="right"), 1, n - 1)
+    return right, knots[right] - knots[right - 1], target - knots[right - 1]
+
+
 def project_reflected(
     reflectivity: Array,
     nu_grid: Array,
@@ -91,7 +140,8 @@ def project_reflected(
     """Reflected-light contrast cube from a plane-parallel reflectivity.
 
     Interpolates ``reflectivity`` onto the wavelengths (linear, with linear
-    extrapolation, so values outside the grid can be negative), converts the
+    extrapolation, so values outside the grid can be negative). A zero-width
+    cell returns the right sample. The projection converts the
     spherical albedo to geometric albedo with the Lambertian-sphere factor
     2/3 (Seager 2010, eq 3.36), and applies Lambert phase and ``(Rp/d)^2``.
 
@@ -106,16 +156,25 @@ def project_reflected(
     Returns:
         Contrast, shape ``(W, K, T)``.
     """
-    target_nu = nm_to_wavenumber_cm(wavelength_nm)
-
-    def interp_one_planet(spectrum):
-        return interpax.interp1d(
-            target_nu, nu_grid, spectrum, method="linear", extrap=True
-        )
-
-    albedo = spherical_to_geometric_albedo(
-        jax.vmap(interp_one_planet)(reflectivity)
-    )  # (K, W)
+    dtype = _working_dtype(
+        reflectivity,
+        wavelength_nm,
+        phase_angle_rad,
+        star_planet_distance_AU,
+        radius_Rearth,
+        nu_grid if isinstance(nu_grid, jax.Array) else None,
+    )
+    spectrum = jnp.asarray(reflectivity, dtype=dtype)
+    if len(nu_grid) == 1:
+        nw = np.size(wavelength_nm)
+        sampled = jnp.broadcast_to(spectrum, (spectrum.shape[0], nw))
+    else:
+        right, width, offset = _wavenumber_cell(nu_grid, wavelength_nm, dtype)
+        y0, y1 = spectrum[:, right - 1], spectrum[:, right]
+        degenerate = width == 0
+        fraction = offset / jnp.where(degenerate, jnp.ones_like(width), width)
+        sampled = jnp.where(degenerate, y1, y0 + fraction * (y1 - y0))
+    albedo = spherical_to_geometric_albedo(sampled)
     return reflected_contrast(
         phase_angle_rad[None, :, :],
         star_planet_distance_AU[None, :, :],

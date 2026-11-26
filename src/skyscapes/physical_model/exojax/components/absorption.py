@@ -58,7 +58,9 @@ class Absorption(AbstractAbsorption):
             if s.opa is not None
         ]
         if not dtau_per_mol:
-            zeros = jnp.zeros((pressure.shape[0], rt_engine.nu_grid.shape[0]))
+            zeros = jnp.zeros(
+                (pressure.shape[0], rt_engine.nu_grid.shape[0]), dtype=Tarr.dtype
+            )
             return Contribution(
                 dtau_total=zeros, dtau_scatter=zeros, g_weighted_num=zeros
             )
@@ -122,7 +124,9 @@ class PrecomputedAbsorption(AbstractAbsorption):
             for xs, s in zip(self.xsmatrix_per_species, absorbing, strict=True)
         ]
         if not dtau_per_mol:
-            zeros = jnp.zeros((pressure.shape[0], rt_engine.nu_grid.shape[0]))
+            zeros = jnp.zeros(
+                (pressure.shape[0], rt_engine.nu_grid.shape[0]), dtype=Tarr.dtype
+            )
             return Contribution(
                 dtau_total=zeros, dtau_scatter=zeros, g_weighted_num=zeros
             )

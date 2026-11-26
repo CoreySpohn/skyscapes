@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import priorities
 from hwoutils.constants import GM_SUN_AU3_PER_D2, Mearth2kg, Msun2kg
 from hwoutils.epoch import Epoch
-from hwoutils.precision import require_float64
+from hwoutils.precision import like, require_float64
 from orbix.system import Body, SkyFrame, enclosed_mu, jacobi_to_barycentric
 from orbix.system import System as DynamicsSystem
 from orbix.system.frame_orbit import FrameOrbit
@@ -18,15 +18,16 @@ from ..scene import Planet, Scene
 from ..scene.scene import _mask_dynamics
 from ..scene.star import AbstractStar
 from ._draw import (
-    _ANGLE,
     _EARTH_MASSES_PER_SUN,
-    _ISOTROPIC_INCLINATION,
     PopulationConfig,
+    _draw_angle,
+    _draw_inclination,
     _draw_tilt,
     _remove_unstable,
     _sample_types,
     _sky_elements_one,
     _type_weights,
+    _unit_uniform,
     earth_like,
 )
 from ._tables import OccurrenceTable, PlanetTypes, _type_albedo, mass_to_radius
@@ -138,7 +139,7 @@ class _TypeReflector(AbstractPhysicalModel):
 def _relative_orbits(system):
     """Recover star-relative epoch states from one masked Jacobi system."""
     dynamics = _mask_dynamics(system.dynamics, system._chain_valid())
-    r, v = dynamics.orbits.at_each(jnp.asarray(0.0))
+    r, v = dynamics.orbits.at_each(like(0.0, dynamics.orbits.a_AU))
 
     def relative(x):
         bary = jacobi_to_barycentric(
@@ -184,7 +185,8 @@ class OccurrencePopulation(eqx.Module):
     epoch: Epoch = eqx.field(static=True)
 
     def _rates(self):
-        return jnp.where(self.occurrence.bin_id >= 0, self.occurrence.rate, 0.0)
+        rate = self.occurrence.rate
+        return jnp.where(self.occurrence.bin_id >= 0, rate, jnp.zeros_like(rate))
 
     def rate(self, stars):
         """Expected pre-pruning planets per host, shape (S,).
@@ -220,7 +222,7 @@ class OccurrencePopulation(eqx.Module):
         cell = jnp.minimum(
             jnp.searchsorted(
                 cumulative,
-                jax.random.uniform(keys[0], (n,)) * cumulative[-1],
+                _unit_uniform(keys[0], (n,), cumulative) * cumulative[-1],
                 side="right",
             ),
             cumulative.size - 1,
@@ -233,11 +235,15 @@ class OccurrencePopulation(eqx.Module):
         a_scaled = priorities.LogUniform(a_edges[ia], a_edges[ia + 1]).sample(keys[1])
         mass = priorities.LogUniform(m_edges[im], m_edges[im + 1]).sample(keys[2])
         node, peri, anomaly = (
-            _ANGLE.sample(k, (n,)) for k in jax.random.split(keys[3], 3)
+            _draw_angle(k, (n,), cumulative) for k in jax.random.split(keys[3], 3)
         )
         ecc = self.config.eccentricity
-        e = jnp.zeros(n) if ecc is None else ecc.sample(keys[4], (n,))
-        inc = _ISOTROPIC_INCLINATION.sample(keys[5], (n,))
+        e = (
+            jnp.zeros(n, dtype=cumulative.dtype)
+            if ecc is None
+            else ecc.sample(keys[4], (n,))
+        )
+        inc = _draw_inclination(keys[5], (n,), cumulative)
         types = _sample_types(
             keys[6],
             self.types,
@@ -259,26 +265,37 @@ class OccurrencePopulation(eqx.Module):
 
     def _system(self, marks, valid, star, mass_msun, dist_pc, mid_inc=0.0, mid_pa=0.0):
         """Put star-relative mark states into the scene's Jacobi hierarchy."""
-        mass = jnp.where(valid, marks["mass"] * _MASS_RATIO, 0.0)
+        mass = jnp.where(valid, marks["mass"] * _MASS_RATIO, like(0.0, marks["mass"]))
         elements = {
             name: marks[name]
             for name in ("a_AU", "e", "i_rad", "W_rad", "w_rad", "M0_rad")
         }
+        epoch = like(0.0, mass)
         relative = FrameOrbit.from_classical(
-            **elements, mu_AU3_per_d2=GM_SUN_AU3_PER_D2 * (mass_msun + mass)
+            **elements,
+            mu_AU3_per_d2=GM_SUN_AU3_PER_D2 * (mass_msun + mass),
+            epoch_d=epoch,
         )
         r, v = relative.to_cartesian()
-        inner_mass = mass_msun + jnp.concatenate([jnp.zeros(1), jnp.cumsum(mass)[:-1]])
+        inner_mass = mass_msun + jnp.concatenate(
+            [jnp.zeros(1, dtype=mass.dtype), jnp.cumsum(mass)[:-1]]
+        )
 
         def jacobi(x):
             weighted = mass[:, None] * x
             inner = jnp.concatenate(
-                [jnp.zeros((1, 3)), jnp.cumsum(weighted, axis=0)[:-1]]
+                [
+                    jnp.zeros((1, 3), dtype=weighted.dtype),
+                    jnp.cumsum(weighted, axis=0)[:-1],
+                ]
             )
             return x - inner / inner_mass[:, None]
 
         orbit = FrameOrbit.from_cartesian(
-            jacobi(r), jacobi(v), mu_AU3_per_d2=enclosed_mu(mass_msun, mass)
+            jacobi(r),
+            jacobi(v),
+            mu_AU3_per_d2=enclosed_mu(mass_msun, mass),
+            epoch_d=epoch,
         )
         dynamics = _mask_dynamics(
             DynamicsSystem(
@@ -291,13 +308,18 @@ class OccurrencePopulation(eqx.Module):
             self.types.wavelength_nm,
             self.types.albedo,
         )
+        radius = mass_to_radius(marks["mass"])
         return Scene(
             star,
-            Planet(jnp.where(valid, mass_to_radius(marks["mass"]), 0.0), model),
+            Planet(
+                jnp.where(valid, radius, jnp.zeros_like(radius)),
+                model,
+                flux_scale=like(1.0, radius),
+            ),
             dynamics,
             valid=valid,
-            midplane_inc_deg=mid_inc,
-            midplane_position_angle_deg=(90.0 + mid_pa) % 360.0,
+            midplane_inc_deg=like(mid_inc, mass),
+            midplane_position_angle_deg=(90.0 + like(mid_pa, mass)) % like(360.0, mass),
         )
 
     def _sample_star(self, key, star):
@@ -326,7 +348,12 @@ class OccurrencePopulation(eqx.Module):
         marker = eqx.tree_at(lambda p: p.occurrence, self, mark_table)
         marks = marker._marks(mark_key, capacity, star.luminosity_Lsun)
         order = jnp.argsort(
-            jnp.where(jnp.arange(capacity) < count, marks["a_AU"], jnp.inf), stable=True
+            jnp.where(
+                jnp.arange(capacity) < count,
+                marks["a_AU"],
+                like(jnp.inf, marks["a_AU"]),
+            ),
+            stable=True,
         )
         marks = jax.tree.map(lambda x: x[order], marks)
         present = jnp.arange(capacity) < count
@@ -343,10 +370,13 @@ class OccurrencePopulation(eqx.Module):
         valid = jnp.arange(k) < jnp.sum(alive)
         marks = jax.tree.map(lambda x: x[take], marks)
         k_inc, k_pa = jax.random.split(plane_key)
-        mid_inc, mid_pa = _ISOTROPIC_INCLINATION.sample(k_inc), _ANGLE.sample(k_pa)
+        mid_inc = _draw_inclination(k_inc, (), star.mass_Msun)
+        mid_pa = _draw_angle(k_pa, (), star.mass_Msun)
         # Orient surviving marks about a common isotropic system midplane.
         # Tilt is drawn per candidate so selecting K cannot change it.
-        tilt = _draw_tilt(self.config, tilt_key, (capacity,))[order][take]
+        tilt = _draw_tilt(self.config, tilt_key, (capacity,), star.mass_Msun)[order][
+            take
+        ]
         e, inc, node, peri, anomaly, _ = jax.vmap(
             _sky_elements_one, in_axes=(0, 0, 0, 0, 0, 0, 0, None, None, None)
         )(
@@ -458,6 +488,7 @@ class OccurrencePopulation(eqx.Module):
                 r[0],
                 v[0],
                 mu_AU3_per_d2=GM_SUN_AU3_PER_D2 * (scene.star_mass_Msun + mass[0]),
+                epoch_d=like(0.0, r),
             )
             label = scene.planets[0].physical_model.type_index[0]
             return (
@@ -693,8 +724,10 @@ class OccurrencePopulation(eqx.Module):
             mu = GM_SUN_AU3_PER_D2 * (scene.star_mass_Msun + mass_sun)
             energy = 2 / jnp.linalg.norm(r, axis=-1) - jnp.sum(v * v, axis=-1) / mu
             bound = scene.valid & (energy > 0) & (mass_sun > 0)
-            a = 1 / jnp.where(bound, energy, 1.0)
-            radius = mass_to_radius(jnp.where(bound, mass_sun / _MASS_RATIO, 1.0))
+            a = 1 / jnp.where(bound, energy, jnp.ones_like(energy))
+            radius = mass_to_radius(
+                jnp.where(bound, mass_sun / _MASS_RATIO, jnp.ones_like(mass_sun))
+            )
             return bound & earth_like(a, radius, lum)
 
         read = one
@@ -716,6 +749,5 @@ class OccurrencePopulation(eqx.Module):
             Geometric albedo, dimensionless, shape ``B + (K,)``.
         """
         index = system.planets[0].physical_model.type_index
-        return jnp.where(
-            system.valid, self.types.geometric_albedo(index, wavelength_nm), 0.0
-        )
+        albedo = self.types.geometric_albedo(index, wavelength_nm)
+        return jnp.where(system.valid, albedo, jnp.zeros_like(albedo))

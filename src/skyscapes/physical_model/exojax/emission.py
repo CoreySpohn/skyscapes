@@ -64,6 +64,7 @@ from hwoutils.precision import require_float64
 from jaxtyping import Array
 from optixstuff.spectral import Knots
 
+from ..._dtype import _working_dtype
 from ..._tables import as_host_grid, wavenumber_knots
 from ..base import AbstractPhysicalModel
 from .cia import TabulatedCIA, cia_path, load_cia
@@ -502,8 +503,10 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         Identical partners use n_a squared, without an extra factor of two.
         Reference: Karman et al. (2019), Icarus 328, 160.
         """
-        pressure = jnp.asarray(self.rt_engine.pressure)
         temperature = self.layer_temperature(k)
+        dtype = _working_dtype(temperature, self.log_gravity_cgs)
+        pressure = jnp.asarray(np.asarray(self.rt_engine.pressure), dtype=dtype)
+        pressure_widths = jnp.asarray(np.asarray(self.rt_engine.dParr), dtype=dtype)
         gravity = 10.0 ** self.log_gravity_cgs[k]
         k_cgs = const.k_B * const.J2erg
         density_per_nm3 = pressure * (1.0e6 * const.nm2cm**3 / k_cgs) / temperature
@@ -511,7 +514,7 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
             (k_cgs * const.cm2nm / m_u)
             * temperature
             / (self.mean_molecular_weight * gravity)
-            * self.rt_engine.dParr
+            * pressure_widths
             / pressure
         )
         vmrs = dict(self.cia_vmr)
@@ -521,7 +524,7 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
                 * self.mean_molecular_weight
                 / species.molmass
             )
-        dtau = jnp.zeros((pressure.shape[0], self.n_nu))
+        dtau = jnp.zeros((pressure.shape[0], self.n_nu), dtype=dtype)
         for continuum in self.cia:
             a, b = continuum.partners
             column = vmrs[a] * vmrs[b] * density_per_nm3**2 * dz_nm
@@ -545,9 +548,16 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
 
     def _emergent_flux_one_planet(self, k: int) -> Array:
         """Emergent flux of planet ``k`` [erg/s/cm^2/cm^-1], shape ``(n_nu,)``."""
-        pressure = self.rt_engine.pressure
         gravity = 10.0 ** self.log_gravity_cgs[k]
         temperature = self.layer_temperature(k)
+        dtype = _working_dtype(
+            temperature,
+            gravity,
+            self.surface.temperature_K,
+            self.surface.emissivity,
+            self.surface.spectrum,
+        )
+        pressure = jnp.asarray(np.asarray(self.rt_engine.pressure), dtype=dtype)
         dtau = self.absorption.compute(
             _species_at_planet(self.species, k),
             temperature,
@@ -559,7 +569,7 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         if self.cia:
             dtau = dtau + self._cia_optical_depth(k)
 
-        wavelength_nm = wavenumber_cm_to_nm(self.nu_grid.array())
+        wavelength_nm = wavenumber_cm_to_nm(self.nu_grid.array(dtype))
         # The ground is an extra optically thick emitting bottom layer.
         temperatures = jnp.concatenate(
             [temperature, jnp.atleast_1d(self.surface.temperature_K[k])]
@@ -570,10 +580,11 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
             wavelength_nm,
         )
         source = source.at[-1].multiply(self.surface.compute_emissivity(k))
-        dtau = jnp.concatenate([dtau, jnp.full((1, self.n_nu), _GROUND_OPTICAL_DEPTH)])
-        return _top_of_atmosphere_flux(
-            dtau, source, self.rt_engine.mus, self.rt_engine.weights
-        )
+        ground = jnp.full((1, self.n_nu), _GROUND_OPTICAL_DEPTH, dtype=dtau.dtype)
+        dtau = jnp.concatenate([dtau, ground])
+        mus = jnp.asarray(np.asarray(self.rt_engine.mus), dtype=source.dtype)
+        weights = jnp.asarray(np.asarray(self.rt_engine.weights), dtype=source.dtype)
+        return _top_of_atmosphere_flux(dtau, source, mus, weights)
 
     def emergent_flux(self) -> Array:
         """Flux leaving the top of the atmosphere, shape ``(K, n_nu)``.
@@ -594,10 +605,9 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
             Brightness temperature [K] of the emergent flux, shape
             ``(K, n_nu)``.
         """
-        wavelength_nm = wavenumber_cm_to_nm(self.nu_grid.array())
-        radiance_w = cgs_per_wavenumber_to_w_per_nm_per_m2(
-            self.emergent_flux() / jnp.pi, wavelength_nm
-        )
+        flux = self.emergent_flux()
+        wavelength_nm = wavenumber_cm_to_nm(self.nu_grid.array(flux.dtype))
+        radiance_w = cgs_per_wavenumber_to_w_per_nm_per_m2(flux / jnp.pi, wavelength_nm)
         return brightness_temperature(
             wavelength_nm,
             w_per_nm_per_m2_to_photons_per_nm_per_m2(radiance_w, wavelength_nm),
@@ -626,21 +636,31 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
             the spectral grid.
         """
         flux = self.emergent_flux()
-        target_nu = nm_to_wavenumber_cm(jnp.atleast_1d(wavelength_nm))
+        dtype = _working_dtype(flux, wavelength_nm, Rp_Rearth, distance_pc)
+        waves = jnp.atleast_1d(jnp.asarray(wavelength_nm, dtype=dtype))
+        target_nu = nm_to_wavenumber_cm(waves)
+        knots = self.nu_grid.array(dtype)
+        outside = jnp.asarray(jnp.nan, dtype=dtype)
         at_wl = jnp.stack(
             [
                 interpax.interp1d(
-                    target_nu, self.nu_grid.array(), f, method="linear", extrap=False
+                    target_nu,
+                    knots,
+                    jnp.asarray(f, dtype=dtype),
+                    method="linear",
+                    extrap=outside,
                 )
                 for f in flux
             ],
             axis=1,
         )  # (W, K)
-        wavelength = jnp.atleast_1d(wavelength_nm)[:, None]
+        wavelength = waves[:, None]
         photons = w_per_nm_per_m2_to_photons_per_nm_per_m2(
             cgs_per_wavenumber_to_w_per_nm_per_m2(at_wl, wavelength), wavelength
         )
-        rp_over_d = (Rp_Rearth * Rearth2AU) / (distance_pc * const.pc2AU)
+        radius = jnp.asarray(Rp_Rearth, dtype=dtype)
+        distance = jnp.asarray(distance_pc, dtype=dtype)
+        rp_over_d = (radius * Rearth2AU) / (distance * const.pc2AU)
         return photons_per_nm_per_m2_to_jy(photons, wavelength) * rp_over_d**2
 
     def _photon_flux_density(
@@ -663,7 +683,8 @@ class ExoJaxEmissionModel(AbstractPhysicalModel):
         Radius comes from the planet and observer distance from the system.
         """
         flux_jy = self.flux_density_jy(wavelength_nm, Rp_Rearth, dist_pc)[0]
-        flux = jy_to_photons_per_nm_per_m2(flux_jy, wavelength_nm)
+        wavelength = jnp.asarray(wavelength_nm, dtype=flux_jy.dtype)
+        flux = jy_to_photons_per_nm_per_m2(flux_jy, wavelength)
         return flux[:, None] * jnp.ones_like(phase_angle_rad)
 
     def contrast(

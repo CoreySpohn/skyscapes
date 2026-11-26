@@ -6,10 +6,12 @@ import equinox as eqx
 import jax.numpy as jnp
 import numpy as np
 from hwoutils.conversions import arcsec_to_au
+from hwoutils.precision import like
 from jaxtyping import Array
 from zodi.exozodi import MAG_1ZODI_V_ARCSEC2, MV_SUN, exozodi_flux_ratio_v
 from zodi.units import intensity_from_ab_mag_arcsec2, power_to_photon_intensity
 
+from .._dtype import _working_dtype
 from .base import AbstractDisk
 
 
@@ -73,14 +75,30 @@ class AYOExozodi(AbstractDisk):
         The analytic model is azimuthally symmetric: ``inclination_deg`` and
         ``position_angle_deg`` are accepted and ignored.
         """
-        wave = jnp.asarray(wavelength_nm)
-        separation = jnp.hypot(east_arcsec, north_arcsec)
-        wave = wave.reshape(wave.shape + (1,) * jnp.ndim(separation))
-        ratio = exozodi_flux_ratio_v(
+        dtype = _working_dtype(
+            wavelength_nm,
+            east_arcsec,
+            north_arcsec,
+            dist_pc,
+            self.flux_scale,
             self.level_zodis,
-            MV_SUN,
-            jnp.asarray(arcsec_to_au(separation, dist_pc)),
-            mag_1zodi=self.surface_brightness_mag_arcsec2,
+            self.surface_brightness_mag_arcsec2,
         )
-        intensity = intensity_from_ab_mag_arcsec2(0.0, wave) * ratio
+        wave = jnp.asarray(wavelength_nm, dtype=dtype)
+        east = jnp.asarray(east_arcsec, dtype=dtype)
+        north = jnp.asarray(north_arcsec, dtype=dtype)
+        separation = jnp.hypot(east, north)
+        wave = wave.reshape(wave.shape + (1,) * separation.ndim)
+        magnitude = self.surface_brightness_mag_arcsec2
+        if hasattr(magnitude, "dtype"):
+            magnitude = like(magnitude, wave)
+        # The zodi law evaluates a plain host magnitude's attenuation before
+        # multiplying by device arrays. Preserve that host calculation.
+        ratio = exozodi_flux_ratio_v(
+            like(self.level_zodis, wave),
+            like(MV_SUN, wave),
+            arcsec_to_au(separation, like(dist_pc, wave)),
+            mag_1zodi=magnitude,
+        )
+        intensity = intensity_from_ab_mag_arcsec2(like(0.0, wave), wave) * ratio
         return power_to_photon_intensity(intensity, wave) / 1000.0

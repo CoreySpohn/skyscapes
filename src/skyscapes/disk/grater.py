@@ -218,19 +218,22 @@ class GraterDisk(AbstractParametricDisk):
     ):
         """Unit-density LOS integral times the spectral scattering coefficient."""
         # Wavelength-dependent scattering coefficients.
+        knots = self.wavelengths_nm.array(
+            jnp.result_type(wavelength_nm, self.Ag_grid, self.g_HG_grid)
+        )
         g_HG = interpax.interp1d(
             wavelength_nm,
-            self.wavelengths_nm.array(),
+            knots,
             self.g_HG_grid,
             method="cubic",
-            extrap=False,
+            extrap=jnp.asarray(jnp.nan, dtype=knots.dtype),
         )
         Ag = interpax.interp1d(
             wavelength_nm,
-            self.wavelengths_nm.array(),
+            knots,
             self.Ag_grid,
             method="cubic",
-            extrap=False,
+            extrap=jnp.asarray(jnp.nan, dtype=knots.dtype),
         )
 
         fixed = self.fixed_vertical_profile
@@ -257,12 +260,15 @@ class GraterDisk(AbstractParametricDisk):
                 self.beta,
                 fixed_vertical_profile=fixed,
             )
-            width = jnp.where(cutoff_width > 0, cutoff_width, 1.0)
-            inner = jnp.clip((r_safe - self.rmin_AU) / width, 0.0, 1.0)
-            outer = jnp.clip((self.rmax_AU - r_safe) / width, 0.0, 1.0)
+            width = jnp.where(
+                cutoff_width > 0, cutoff_width, jnp.ones_like(cutoff_width)
+            )
+            zero, one = jnp.zeros_like(width), jnp.ones_like(width)
+            inner = jnp.clip((r_safe - self.rmin_AU) / width, zero, one)
+            outer = jnp.clip((self.rmax_AU - r_safe) / width, zero, one)
             inner = inner**3 * (10.0 + inner * (-15.0 + 6.0 * inner))
             outer = outer**3 * (10.0 + outer * (-15.0 + 6.0 * outer))
-            taper = jnp.where(cutoff_width > 0, inner * outer, 1.0)
+            taper = jnp.where(cutoff_width > 0, inner * outer, jnp.ones_like(inner))
             return density * taper
 
         def phase_fn(cos_phi: Array) -> Array:
