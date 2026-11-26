@@ -153,15 +153,8 @@ def _closure_cases(cases, promotions):
     return parameters
 
 
-_MARKLEY = ("/orbix/kepler/_markley.py", 61, "_denominator")
-_POSITION_ANGLE = ("/orbix/system/observables.py", 54, "position_angle_deg")
 _GRID_EXTRAP = ("/interpax/_spline.py", 1548, "_extrap.<locals>.loclip")
-_AYO_TABLE = ("/zodi/_interp.py", 39, "interp1d_clamped")
-_ECLIPTIC = ("/orbix/observatory/solar_system.py", 76, "equat2eclip")
-_PRIORITIES = ("/priorities/_distribution.py", 126, "bounded.<locals>.<genexpr>")
 _POISSON = ("/jax/_src/random/core.py", 1933, "_poisson_knuth.<locals>.body_fn")
-_FROM_BASIS = ("/orbix/system/rotation.py", 93, "from_basis")
-_TO_CLASSICAL = ("/orbix/system/rotation.py", 9, "_cross")
 _REFLECTION_PROFILE = ("/exojax/atm/atmprof.py", 187, "atmprof_powerlow")
 _REFLECTION_BACKEND = ("/exojax/rt/reflect.py", 172, "ArtReflectPure.run")
 
@@ -169,9 +162,9 @@ _REFLECTION_BACKEND = ("/exojax/rt/reflect.py", 172, "ArtReflectPure.run")
 def test_dependency_matcher_rejects_local_widening():
     """A local wide constant still fails and a closed function returns normally."""
     args = (jnp.float32(1),)
-    _assert_closed(lambda x: x, args, _MARKLEY)
+    _assert_closed(lambda x: x, args, _POISSON)
     with pytest.raises(AssertionError, match="precision widened to float64") as exc:
-        _assert_closed(lambda x: jnp.asarray(np.float64(1)), args, _MARKLEY)
+        _assert_closed(lambda x: jnp.asarray(np.float64(1)), args, _POISSON)
     assert type(exc.value) is AssertionError
 
 
@@ -218,14 +211,7 @@ def _scene(star, planet=None, **kwargs):
             "host_sampled_positions",
             "batched_positions",
         ],
-        {
-            "ephemeris": _MARKLEY,
-            "automatic_positions": _MARKLEY,
-            "sampled_positions": _MARKLEY,
-            "host_sampled_positions": _MARKLEY,
-            "batched_positions": _MARKLEY,
-            "position_angles": _POSITION_ANGLE,
-        },
+        {},
     ),
 )
 def test_scene_forward_closure(promotion, method):
@@ -676,12 +662,7 @@ def test_star_forward_closure(kind, reader):
             ("table", "node_radiance"),
             ("table", "spectral_interpolant"),
         ],
-        {
-            ("ayo", "photon_radiance"): _AYO_TABLE,
-            ("ayo", "node_radiance"): _AYO_TABLE,
-            ("leinert", "photon_radiance"): _ECLIPTIC,
-            ("leinert", "node_radiance"): _ECLIPTIC,
-        },
+        {},
     ),
 )
 def test_local_zodi_forward_closure(promotion, kind, reader):
@@ -896,10 +877,7 @@ def test_disk_calibration_forward_closure(reader):
     _closure_cases(
         ["draw_population", "draw_populations", "sample", "mark_sample"],
         {
-            "draw_population": _PRIORITIES,
-            "draw_populations": _PRIORITIES,
             "sample": _POISSON,
-            "mark_sample": _PRIORITIES,
         },
     ),
 )
@@ -957,12 +935,7 @@ def test_population_draw_closure(reader, promotion, process):
             "radius_to_mass",
             "earth_like_box",
         ],
-        {
-            "sky_elements": _FROM_BASIS,
-            "mark_read": _MARKLEY,
-            "mark_build": _TO_CLASSICAL,
-            "earth_like": _MARKLEY,
-        },
+        {},
     ),
 )
 def test_population_evaluation_closure(promotion, reader, process):
