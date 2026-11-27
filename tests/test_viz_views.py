@@ -426,6 +426,10 @@ def test_system_views_use_east_north_away(view):
         M0_rad=jnp.array([jnp.pi / 2]),
         midplane_position_angle_deg=0.0,
     )
+    marker_atol = 1e-8
+    if view == "side":
+        # Allow eight roundings for the rotation and projection at the orbit's AU scale.
+        marker_atol = max(marker_atol, float(ulps(8, system.dynamics.orbits.a_AU[0])))
     track_days = 30.0
     result = viz.plot_system(
         system, 0.0, view=view, track_time_d=jnp.array([0.0, track_days])
@@ -444,7 +448,7 @@ def test_system_views_use_east_north_away(view):
 
     u_late = np.pi / 2 + np.sqrt(G * Msun2kg) * track_days
     np.testing.assert_allclose(
-        artists["planet/b"].get_offsets()[0], chart(np.pi / 2), atol=1e-8
+        artists["planet/b"].get_offsets()[0], chart(np.pi / 2), atol=marker_atol
     )
     np.testing.assert_allclose(
         artists["track/b"].get_xydata(), [chart(np.pi / 2), chart(u_late)], atol=1e-6

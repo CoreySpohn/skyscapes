@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 import zodi
 from hwoutils.conversions import um_to_nm
+from hwoutils.interpolation import interp_linear
 from hwoutils.leaves import as_float_leaf
 from hwoutils.precision import like
 from jax import Array
@@ -266,7 +267,7 @@ class PrecomputedZodi(AbstractLocalZodi):
         dtype = _working_dtype(wavelength_nm, radiance, self.flux_scale)
         wave = jnp.asarray(wavelength_nm, dtype=dtype)
         outside = jnp.asarray(jnp.nan, dtype=dtype)
-        return jnp.interp(
+        return interp_linear(
             wave, self.knots.array(dtype), radiance, left=outside, right=outside
         )
 
@@ -281,7 +282,7 @@ class PrecomputedZodi(AbstractLocalZodi):
 
         def interpolant(values, wavelength_nm):
             dtype = _working_dtype(wavelength_nm, values)
-            return jnp.interp(
+            return interp_linear(
                 jnp.asarray(wavelength_nm, dtype=dtype),
                 jnp.asarray(knots, dtype=dtype),
                 jnp.asarray(values, dtype=dtype),

@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from hwoutils.testing import ulps
 from optixstuff.grids import PixelGrid, SkyOrientation
 from zodi import DensityDust
 
@@ -109,7 +110,8 @@ def test_composite_rejects_empty():
 def test_composite_resamples_mismatched_native_grids():
     """Fails if native pixel contrasts are summed before density conversion.
 
-    Constant densities on overlapping grids must sum exactly (roundoff).
+    Constant densities on overlapping grids add within eight roundings at
+    unit relative scale for area division, density summation and conversion.
     """
     from hwoutils.constants import arcsec2rad
 
@@ -132,7 +134,8 @@ def test_composite_resamples_mismatched_native_grids():
         position_angle_deg=0.0,
         grid=grid,
     )
-    np.testing.assert_allclose(image.data * arcsec2rad**2, 2.0, rtol=2e-15)
+    rtol = max(2e-15, float(ulps(8, np.array(1.0, dtype=image.data.dtype))))
+    np.testing.assert_allclose(image.data * arcsec2rad**2, 2.0, rtol=rtol)
 
 
 def test_composite_heterogeneous_components():

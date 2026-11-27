@@ -15,6 +15,7 @@ from hwoutils.testing import assert_precision_closed, precision_pair, ulps
 from hwoutils.testing._numerical import _first_wide, _subjaxprs, _wide_dtype
 from jax.extend.source_info_util import summarize
 from optixstuff.spectral import Band, Quadrature, Resolution
+from packaging.version import Version
 from zodi import DensityDust
 
 from skyscapes._sample_time import SampleOrigin, with_sample_origin
@@ -876,9 +877,7 @@ def test_disk_calibration_forward_closure(reader):
     "reader,promotion",
     _closure_cases(
         ["draw_population", "draw_populations", "sample", "mark_sample"],
-        {
-            "sample": _POISSON,
-        },
+        {"sample": _POISSON} if Version(jax.__version__) < Version("0.12.1") else {},
     ),
 )
 def test_population_draw_closure(reader, promotion, process):
