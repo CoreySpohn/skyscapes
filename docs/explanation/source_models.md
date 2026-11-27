@@ -117,7 +117,7 @@ the observer flux in photons/s/m^2/nm. Following Rybicki and Lightman
 `pi * B_photon`, diluted by `(radius_m / (dist_pc * pc2m))**2` at the
 observer. All stars expose `angular_diameter_arcsec(dist_pc)`, and
 `photon_flux_density` multiplies the private `_photon_flux_density` hook by
-`flux_scale` (see [Source brightness](#source-brightness-flux-scale)). Apparent-flux
+`flux_scale` (see [Source brightness](#source-brightness-flux_scale)). Apparent-flux
 `Star` and `FlatStar` ignore the supplied distance and return their
 `fixed_diameter_arcsec` value. Wavelengths are in nanometers,
 and the result retains their shape. The spectrum is static, so `time_d` is ignored. Both `jax.jit`
@@ -433,7 +433,7 @@ A standalone read tilts the same disk by passing other angles; a scene holds
 the same two angles as `midplane_inc_deg` and `midplane_position_angle_deg`
 and reads the same image:
 
-```python
+```python continuation
 tilted = disk.photon_radiance(
     550.0,
     0.0,

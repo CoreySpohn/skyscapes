@@ -119,12 +119,16 @@ class PsgCrossSectionOpacity:
     For files with a single temperature column the cross-section is
     returned independent of layer temperature.
 
-    Instance attributes:
+    Attributes:
         name: Molecule name (e.g. ``"O3"``, ``"SO2"``).
         molmass: Molar mass [g/mol]. Caller supplies; used by
             ``opacity_profile_xs`` to convert mmr to column density.
         nu_grid: Wavenumber grid [cm^-1] this adapter was built for.
     """
+
+    name: str
+    molmass: float
+    nu_grid: Array
 
     def __init__(
         self,
