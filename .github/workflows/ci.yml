@@ -88,7 +88,10 @@ jobs:
 
       - name: Quick tier
         run: |
-          pytest tests/ -m "not slow" --precision=${{ matrix.precision }} -ra --tb=short \
+          # Initialize the RADIS config and example data cache before workers start.
+          python -c "import skyscapes.physical_model.exojax"
+          python -c "from skyscapes.datasets import fetch_scene; fetch_scene()"
+          pytest tests/ -m "not slow" -n 2 --dist loadfile --precision=${{ matrix.precision }} -ra --tb=short \
             --timeout=300 --fail-slow=30s \
             --durations=15 --durations-min=1.0 \
             --junitxml=junit-quick.xml
