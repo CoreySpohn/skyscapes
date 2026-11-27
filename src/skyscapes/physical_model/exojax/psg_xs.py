@@ -29,6 +29,7 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import numpy as np
+from hwoutils.interpolation import interp_linear
 from jaxtyping import Array
 
 
@@ -210,6 +211,6 @@ class PsgCrossSectionOpacity:
         Tarr_safe = jnp.clip(Tarr, self._T_grid[0], self._T_grid[-1])
 
         def _interp_one_nu(sigma_T_col):
-            return jnp.interp(Tarr_safe, self._T_grid, sigma_T_col)
+            return interp_linear(Tarr_safe, self._T_grid, sigma_T_col)
 
         return jax.vmap(_interp_one_nu, in_axes=1, out_axes=1)(self._sigma_at_nu)

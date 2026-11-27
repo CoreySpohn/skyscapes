@@ -15,6 +15,7 @@ import jax.numpy as jnp
 import numpy as np
 from exojax.database.cia.io import read_cia
 from hwoutils.constants import cm2nm
+from hwoutils.interpolation import interp_linear
 from hwoutils.leaves import as_float_leaf
 from jaxtyping import Array
 
@@ -65,11 +66,9 @@ class TabulatedCIA(eqx.Module):
         for temperatures, coefficients in zip(
             self.temperatures, self.coefficients_nm5, strict=True
         ):
-            result = result + jax.vmap(
-                lambda column, ts=temperatures: jnp.interp(temperature_K, ts, column),
-                in_axes=1,
-                out_axes=1,
-            )(coefficients)
+            result = result + jax.vmap(interp_linear, (None, None, 1), out_axes=1)(
+                temperature_K, temperatures, coefficients
+            )
         return result
 
 

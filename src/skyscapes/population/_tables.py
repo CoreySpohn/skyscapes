@@ -21,6 +21,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+from hwoutils.interpolation import interp_linear
 from scipy.interpolate import RectBivariateSpline
 from scipy.stats import norm
 
@@ -438,7 +439,9 @@ class PlanetTypes(eqx.Module):
 
 def _type_albedo(type_index, wavelength_nm, wavelengths_nm, spectrum):
     """Shared indexed spectrum interpolation for tables and scene reflectors."""
-    spectra = jax.vmap(lambda y: jnp.interp(wavelength_nm, wavelengths_nm, y))(spectrum)
+    spectra = jax.vmap(lambda y: interp_linear(wavelength_nm, wavelengths_nm, y))(
+        spectrum
+    )
     return spectra[jnp.asarray(type_index, jnp.int32)]
 
 
