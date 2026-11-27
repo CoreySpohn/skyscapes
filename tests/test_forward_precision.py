@@ -2,6 +2,8 @@
 
 import re
 from dataclasses import replace
+from importlib.metadata import version
+from traceback import walk_tb
 
 import equinox as eqx
 import jax
@@ -156,8 +158,48 @@ def _closure_cases(cases, promotions):
 
 _GRID_EXTRAP = ("/interpax/_spline.py", 1548, "_extrap.<locals>.loclip")
 _POISSON = ("/jax/_src/random/core.py", 1933, "_poisson_knuth.<locals>.body_fn")
+_EXOJAX_VERSION = version("exojax")
 _REFLECTION_PROFILE = ("/exojax/atm/atmprof.py", 187, "atmprof_powerlow")
-_REFLECTION_BACKEND = ("/exojax/rt/reflect.py", 172, "ArtReflectPure.run")
+_REFLECTION_BACKEND = {
+    "2.5.0": ("/exojax/rt/reflect.py", 172, "ArtReflectPure.run"),
+    "2.6.0": ("/exojax/rt/reflect.py", 169, "ArtReflectPure.run"),
+}.get(_EXOJAX_VERSION)
+_REFLECTION_SCAN = ("/exojax/rt/twostream.py", 126, "compute_fluxadding_coeffs")
+
+
+def _check_reflection_profile(fn, *args, promotion):
+    """Recognize the exact ExoJAX scan failure on the atmospheric reflection path."""
+    try:
+        _check(fn, *args, promotion=promotion)
+    except TypeError as error:
+        if _EXOJAX_VERSION != "2.6.0":
+            raise
+        message = str(error)
+        if not message.startswith(
+            "scan body function carry input and carry output must have equal types"
+        ) or (
+            "The input carry component carry_ip1[0] has type float32[20] but the "
+            "corresponding output carry component has type float64[20], "
+            "so the dtypes do not match." not in message
+        ):
+            raise
+        frames = [
+            (frame.f_code.co_filename, line, frame.f_code.co_qualname)
+            for frame, line in walk_tb(error.__traceback__)
+        ]
+        for site in (
+            ("/exojax/rt/reflect.py", 170, "ArtReflectPure.run"),
+            _REFLECTION_SCAN,
+        ):
+            path, line, function = site
+            if not any(
+                filename.endswith(path) and (lineno, name) == (line, function)
+                for filename, lineno, name in frames
+            ):
+                raise
+        raise _KnownPromotion(
+            "ExoJAX atmospheric reflection widens the scan carry to float64"
+        ) from error
 
 
 def test_dependency_matcher_rejects_local_widening():
@@ -1200,7 +1242,9 @@ def test_phase_only_sum_requires_context(geometry):
             "contrast": _REFLECTION_PROFILE,
             "contrast_cube": _REFLECTION_PROFILE,
             "two_stream": _REFLECTION_BACKEND,
-        },
+        }
+        if _REFLECTION_BACKEND is not None
+        else {},
     ),
 )
 def test_live_reflection_dependency(reader, promotion, tmp_path):
@@ -1246,12 +1290,14 @@ def test_live_reflection_dependency(reader, promotion, tmp_path):
             promotion=promotion,
         )
     elif reader == "reflectivity":
-        _check(ExoJaxPhysicalModel.reflectivity, model, promotion=promotion)
+        _check_reflection_profile(
+            ExoJaxPhysicalModel.reflectivity, model, promotion=promotion
+        )
     else:
         wave = jnp.asarray(560.0)
         if reader == "contrast_cube":
             wave = wave[None]
-        _check(
+        _check_reflection_profile(
             getattr(ExoJaxPhysicalModel, reader),
             model,
             jnp.array([[0.7]]),
