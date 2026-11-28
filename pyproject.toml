@@ -27,7 +27,7 @@ dependencies = [
     "jaxtyping>=0.3.3",
     "numpy>=2.1.2",
     "optixstuff>=7.0.0",
-    "orbix>=6.0.0",  # unreleased: next release
+    "orbix>=6.0.0",
     "pooch>=1.8",
     "priorities",
     "scipy>=1.13",
@@ -64,7 +64,7 @@ test = [
     "pytest-timeout>=1.3.1",
     "pytest-fail-slow>=0.1.0",
     "packaging>=24.2",
-    "orbix>=6.0.0",  # unreleased: next release
+    "orbix>=6.0.0",
     "eyepiece>=0.16.0",
     "hwostyle>=1.4.0",
     "matplotlib>=3.11",
