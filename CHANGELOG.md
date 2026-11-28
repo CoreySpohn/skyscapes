@@ -1,5 +1,72 @@
 # Changelog
 
+## [6.0.0](https://github.com/CoreySpohn/skyscapes/compare/v5.1.0...v6.0.0) (2026-11-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **disk:** make GraterDisk fields after the geometric core keyword-only
+* **skyscapes:** close scene, disk, spectral and population forwards at their working precision
+* **skyscapes:** keep ExoVista cadences relative before narrowing, decide annulus support on one float32 rule, refuse float32 inference densities
+* **io:** from_exovista no longer reads header A and E; each selected planet reproduces its file position and velocity relative to the star at the first epoch, and multi-planet scenes move accordingly. Adds Scene.from_cartesian.
+* **disk:** parametric disks (GraterDisk, ExovistaParametricDisk) no longer have the inclination_deg and position_angle_deg leaves; photon_radiance and photon_radiance_at on every disk require inclination_deg and position_angle_deg keyword arguments (stored cubes and AYOExozodi accept and ignore them); orient_disk is removed; Scene.midplane_inc_deg and Scene.midplane_position_angle_deg are float array leaves and are passed to every disk read; plot_disk_radiance requires incl_deg and position_angle_deg for a bare disk. Move the angles from the disk to the scene, or pass them to the read.
+* **scene:** Star.metadata and the metadata keyword are removed and the loaders no longer write it; read the ExoVista star header with skyscapes.io.exovista_header(path), which returns a plain dictionary.
+* **scene:** a scene built with an inactive slot of nonzero mass now gives the valid planets the orbit rates of the star and valid planets alone; earlier versions added the inactive mass to the enclosed mass.
+* **scene:** Scene.from_scenes, to_scenes and from_table default to device=None (uncommitted arrays on the JAX default device); pass device="cpu" to commit a batch to the CPU.
+* **scene:** Scene.from_scenes, to_scenes and from_table return leaves that are jax.Array in the active dtype (not NumPy float64) and take device= (default "cpu"); the source layout is an int32 array with -1 as the sentinel; to_table writes active-dtype values.
+* **tables:** ProductTable holds its cell edges as a HostGrid without a tolerance merge, so product knot digests change.
+* **tables:** Star, PrecomputedZodi, GridPhysicalModel (field renamed wavelengths_nm to knots), TimeSeriesPhysicalModel, ExovistaDisk and the parametric disks hold their wavelength grid as static host float64 data, and the ExoJAX and cached models hold nu_grid as a static HostGrid; knots are no longer leaves, so eqx.tree_at cannot reach them (build a new source). knot_digest is a property, Scene.knot_leaves and table_digest are removed, a source built from traced knots raises TypeError, ExoVista loaders widen stored microns to float64 before scaling (knot digests change), and Scene.from_scenes refuses two star grids that differ, naming twins that differ only by rounding.
+* **scene:** Scene.band_contrasts takes a required keyword resolution (Resolution.build(quadrature, *scene.spectral_tables()), or Resolution() for a scene with no table) and no longer samples sources at the nodes; a band that leaves a source table is refused at Resolution.build instead of returning NaN in an open wing.
+* **disk:** density_level under luminosity_rule="bolometric" now averages the host star over the calibration band (a 506 to 594 nm top hat for Johnson V) through star.calibration_flux_density instead of reading it at the passband center, so a bolometric level moves by the line error and a tabulated Star refuses: compute the calibration through Scene.sources with one Quadrature.build((band,)) per band of Scene.calibration_bands() in the Resolution, and render with Sources.node_star. A non-V passband under the bolometric rule needs an explicit calibration_band. The band rule no longer reads the star.
+* **disk:** keep the cube and the star table as the live leaves, derive the spline on use
+* **scene:** flux_scale leaf on every emitter, public flux methods call private hooks
+* **io:** rename bandpass_from_table to transmission_from_table
+* **scene:** rename the band_contrasts bandpass argument to transmission
+* **scene:** host the local-zodi models, take the sky frame and time in photon_radiance and merge AYOExozodi into the disk
+
+### Features
+
+* **disk:** a surface-brightness disk calibrates over a band, averaging the host star under the bolometric rule and not reading it under the band rule ([a567fff](https://github.com/CoreySpohn/skyscapes/commit/a567fff9740400529eed894f38047cc4374c8b11))
+* **disk:** keep the cube and the star table as the live leaves, derive the spline on use ([cfa8f65](https://github.com/CoreySpohn/skyscapes/commit/cfa8f653f251b1ebca85e091b8942d07f14acff6))
+* **disk:** make GraterDisk fields after the geometric core keyword-only ([ec32d8f](https://github.com/CoreySpohn/skyscapes/commit/ec32d8fb6e1fc297c962abd42ee85c013c4960db))
+* **disk:** the scene owns the disk orientation and disk reads take it as arguments ([fbce272](https://github.com/CoreySpohn/skyscapes/commit/fbce2728fa5862506babd382594048e5d607d6e5))
+* **io:** rename bandpass_from_table to transmission_from_table ([bdf8d00](https://github.com/CoreySpohn/skyscapes/commit/bdf8d00e6a164a06b4383aa71249ae443a90eb47))
+* **scene:** batch results hold jax arrays and take device=; remove the host float64 packing ([87068ce](https://github.com/CoreySpohn/skyscapes/commit/87068cea885562091f7d1bd93000b8d9b98c5833))
+* **scene:** default the batch device to the JAX default device ([a293743](https://github.com/CoreySpohn/skyscapes/commit/a2937438426ff0ca188102df763086781998c052))
+* **scene:** flux_scale leaf on every emitter, public flux methods call private hooks ([bc8a184](https://github.com/CoreySpohn/skyscapes/commit/bc8a18496d6b6ef19426addbcdad540cce908dad))
+* **scene:** host the local-zodi models, take the sky frame and time in photon_radiance and merge AYOExozodi into the disk ([88c2a6f](https://github.com/CoreySpohn/skyscapes/commit/88c2a6f1f7e6220da1667e71b184b6bd6b86c9f5))
+* **scene:** name the knot leaves of a scene's tables with Scene.knot_leaves ([185c172](https://github.com/CoreySpohn/skyscapes/commit/185c172822e6c5721b1a15b76ca7a4d743cb49ca))
+* **scene:** remove Star.metadata and add io.exovista_header ([cdb69c5](https://github.com/CoreySpohn/skyscapes/commit/cdb69c5d9d40a1388d67d6032fe6fde7b92001a7))
+* **scene:** require a resolution in Scene.band_contrasts ([e119f9d](https://github.com/CoreySpohn/skyscapes/commit/e119f9d226ff71cd4bc59573e1a17bb67cfeceb6))
+* **scene:** Scene.sources reads every source once on a band rule, with spectral_tables listing the tables a Resolution needs ([a9c8d26](https://github.com/CoreySpohn/skyscapes/commit/a9c8d26be825cbe49ca3a5dd507b8698f23ffec6))
+* **scene:** stars, tabulated planet models and PrecomputedZodi carry knot digests and read node-effective values on a band rule ([d848c3b](https://github.com/CoreySpohn/skyscapes/commit/d848c3b5c123d0a8703dd530ab4df28892127c99))
+* **tables:** hold every table's knots as a static Knots and derive its digest ([16c42f1](https://github.com/CoreySpohn/skyscapes/commit/16c42f158c9c3f1fc17ca5cade1e53af56f3a565))
+* **tables:** integrate a planet times its star on the raw union of knots, bound the grid caches, and name twin planet grids and one-wavelength tables ([b5c2d65](https://github.com/CoreySpohn/skyscapes/commit/b5c2d65c1aaa98f568339847ecdb9725feae52aa))
+
+
+### Bug Fixes
+
+* import the solar gravitational parameter from hwoutils and rotate helpers from orbix.system ([14b22f7](https://github.com/CoreySpohn/skyscapes/commit/14b22f77b91cec05a4416fe0196308c94c914e81))
+* **io:** build ExoVista planets from first-epoch states in a Jacobi chain ([d89a43a](https://github.com/CoreySpohn/skyscapes/commit/d89a43a8c92830e467c6cbd56e5bb1a3272da6df))
+* **io:** keep ExoVista phase-mode spectra for face-on and near-face-on planets ([2744673](https://github.com/CoreySpohn/skyscapes/commit/27446739059154f5e60551251fedd7618123857b))
+* **physical_model:** divide a blackbody-star thermal contrast by the star's flux scale ([28dc3e9](https://github.com/CoreySpohn/skyscapes/commit/28dc3e9ea7657936502ce80785b415f9ddffbdef))
+* **population:** broadcast scalar star leaves of HostStars to the hosts axis ([ddbd257](https://github.com/CoreySpohn/skyscapes/commit/ddbd2576ba29ce7b39a26d6036a415a5350ea0f9))
+* **scene:** check a concrete flux_scale with NumPy so node_star builds under jit ([50112a0](https://github.com/CoreySpohn/skyscapes/commit/50112a0d5331774780b3c27c1f7699b7c8e5968f))
+* **scene:** name NumPy knot grids in Scene.knot_leaves ([d3fcfc7](https://github.com/CoreySpohn/skyscapes/commit/d3fcfc7b56014adcadf8adad9e645f589485f2e6))
+* **scene:** raise a table's own knot error in batches, build product edges as ProductEdges, and bound the knot caches at 32 ([9785cbf](https://github.com/CoreySpohn/skyscapes/commit/9785cbfc2b2800d93f0bc1bc053e0cc8ea89802f))
+* **scene:** rebuild scenes through one helper and mask inactive masses first ([e7285e6](https://github.com/CoreySpohn/skyscapes/commit/e7285e6c25b666eca20418aa7fa699d0bc4f45c0))
+* **scene:** refuse non-finite and out-of-range table layouts; byte-level bitwise test helper ([90c4056](https://github.com/CoreySpohn/skyscapes/commit/90c4056e1c8d17bcd4aae65776e25abc8982b291))
+* **skyscapes:** accept a scalar observation time in Scene.sources again ([87fddb3](https://github.com/CoreySpohn/skyscapes/commit/87fddb3e3cd509a80eaac08dcdb66fce76b142a7))
+* **skyscapes:** close scene, disk, spectral and population forwards at their working precision ([aa4f792](https://github.com/CoreySpohn/skyscapes/commit/aa4f7924e07cb324cc2c7877bc794e527d0f6c16))
+* **skyscapes:** keep ExoVista cadences relative before narrowing, decide annulus support on one float32 rule, refuse float32 inference densities ([c41c18e](https://github.com/CoreySpohn/skyscapes/commit/c41c18e9a76ae138a20808425aad90e13f3a9f1a))
+* **skyscapes:** keep the Lambert crescent near new phase with a series in the distance from pi ([a27b508](https://github.com/CoreySpohn/skyscapes/commit/a27b508ccdbac925de6a4327c2528ab3b9964501))
+* **skyscapes:** read zodi, albedo and opacity tables with interp_linear for jax 0.12.1 ([2eedd3b](https://github.com/CoreySpohn/skyscapes/commit/2eedd3b4c810b21a769c94584e28f411948cb5e3))
+
+
+### Code Refactoring
+
+* **scene:** rename the band_contrasts bandpass argument to transmission ([36e2876](https://github.com/CoreySpohn/skyscapes/commit/36e2876eb22435a909e486783680602fb1fa8d1d))
+
 ## [5.1.0](https://github.com/CoreySpohn/skyscapes/compare/v5.0.0...v5.1.0) (2026-11-20)
 
 
